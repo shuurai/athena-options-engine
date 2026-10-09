@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Risk control</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .seg { display:flex; gap:6px; flex-wrap:wrap; }
+  .seg button { padding:8px 12px; border:1px solid var(--site-border-strong); background:transparent; font-size:11.5px; font-weight:600; color:var(--site-text-3); cursor:pointer; font-family:var(--font-mono); transition:.12s; }
+  .seg button:hover { border-color:var(--site-primary); color:var(--site-primary); }
+  .seg button.on { background:#101c33; border-color:var(--site-primary); color:#93c5fd; }
+  .input {
+    width:100%; padding:9px 11px; border:1px solid var(--site-border-strong);
+    font:12.5px var(--font-mono); background:#0a0c10; color:var(--site-text);
+    border-radius:2px; transition:border-color .12s;
+  }
+  .input:focus { outline:none; border-color:var(--site-primary); }
+  .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+  .form-grid label { display:block; font-size:10px; color:var(--site-text-4); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; font-family:var(--font-mono); }
+  .profiles { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
+  .profile {
+    text-align:left; cursor:pointer; color:inherit; font:inherit;
+    background: var(--site-canvas); border:1px solid var(--site-border);
+    padding:12px 12px 14px;
+  }
+  .profile:hover { border-color: var(--site-border-strong); }
+  .profile.on { border-color: var(--site-primary); background:#101c33; box-shadow: inset 2px 0 0 var(--site-primary); }
+  .profile .name { font-weight:700; font-size:13px; }
+  .profile .desc { margin-top:6px; font-size:12px; color:var(--site-text-3); line-height:1.45; }
+  @media (max-width: 1100px) { .profiles { grid-template-columns:1fr 1fr; } }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a class="active" href="./index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">PROFILE STANDARD<br>V42 ACTIVE</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Risk control</h1>
+        <p>Pick a profile, then adjust the limits. Profiles do not turn off Approve. Every order still waits unless you change privilege below.</p>
+      </div>
+      <div class="chips" id="profileChip">
+        <span class="chip info"><span class="dot"></span>STANDARD</span>
+        <span class="chip"><span class="dot"></span>V42</span>
+      </div>
+    </div>
+
+    <div class="profiles" id="profileList" style="margin-bottom:14px"></div>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>Limits</h2>
+        <div class="form-grid" id="limitForm">
+          <div><label>Max symbol % NAV</label><input class="input" id="maxSymbol" data-k="maxSymbol"></div>
+          <div><label>Cash reserve %</label><input class="input" id="cash" data-k="cash"></div>
+          <div><label>Daily loss halt %</label><input class="input" id="halt" data-k="halt"></div>
+          <div><label>Max contracts / symbol</label><input class="input" id="contracts" data-k="contracts"></div>
+          <div><label>Min IVR new short</label><input class="input" id="minIvr" data-k="minIvr"></div>
+          <div><label>Min DTE new</label><input class="input" id="minDte" data-k="minDte"></div>
+          <div><label>Seller margin budget %</label><input class="input" id="margin" data-k="margin"></div>
+          <div><label>Earnings blackout days</label><input class="input" id="blackout" data-k="blackout"></div>
+        </div>
+      </div>
+      <div class="card" style="display:flex;flex-direction:column">
+        <h2>Approval privilege <span class="more" id="verHistory">version history →</span></h2>
+        <div class="seg" id="privSeg">
+          <button class="on" data-p="all_orders">all_orders</button>
+          <button data-p="opens_only">opens_only</button>
+          <button data-p="auto_within_risk">auto_within_risk</button>
+          <button data-p="paper_only">paper_only</button>
+        </div>
+        <p style="margin:12px 0 0;font-size:12.5px;color:var(--site-text-3);line-height:1.5">Default is all_orders. Moving to opens_only or auto_within_risk needs a protected confirm. A profile never changes this.</p>
+        <div class="row-actions" style="margin-top:auto;padding-top:14px">
+          <button class="btn primary" type="button" id="saveRisk">Save as v43</button>
+          <button class="btn ghost" type="button" id="diffBtn">Diff vs v41</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+  const profiles = [
+    { id: "defensive", name: "Defensive", desc: "Small size, high IVR floor, wide cash buffer.", maxSymbol: 10, cash: 40, halt: 3, contracts: 1, minIvr: 60, minDte: 21, margin: 30, blackout: 10 },
+    { id: "standard", name: "Standard", desc: "Current book. Moderate caps, IVR floor 50.", maxSymbol: 20, cash: 30, halt: 5, contracts: 3, minIvr: 50, minDte: 7, margin: 50, blackout: 7 },
+    { id: "income", name: "Income", desc: "More room for covered calls and CSPs.", maxSymbol: 25, cash: 25, halt: 5, contracts: 2, minIvr: 45, minDte: 14, margin: 45, blackout: 7 },
+    { id: "aggressive", name: "Aggressive", desc: "Wider caps and a lower IVR floor. Approve still required.", maxSymbol: 35, cash: 15, halt: 8, contracts: 4, minIvr: 30, minDte: 7, margin: 60, blackout: 3 },
+  ];
+  const keys = ["maxSymbol", "cash", "halt", "contracts", "minIvr", "minDte", "margin", "blackout"];
+  let active = "standard";
+  let applying = false;
+
+  const list = document.getElementById("profileList");
+  profiles.forEach((p) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "profile" + (p.id === active ? " on" : "");
+    b.setAttribute("data-id", p.id);
+    b.innerHTML = '<div class="name">' + p.name + '</div><div class="desc">' + p.desc + "</div>";
+    b.addEventListener("click", () => choose(p.id));
+    list.appendChild(b);
+  });
+
+  function fill(p) {
+    applying = true;
+    keys.forEach((k) => { document.getElementById(k).value = p[k]; });
+    applying = false;
+  }
+  function mark(id) {
+    active = id;
+    list.querySelectorAll(".profile").forEach((el) => {
+      el.classList.toggle("on", el.getAttribute("data-id") === id);
+    });
+    const label = id === "custom" ? "CUSTOM" : id.toUpperCase();
+    document.getElementById("profileChip").innerHTML =
+      '<span class="chip' + (id === "custom" ? " warn" : " info") + '"><span class="dot"></span>' + label + '</span>' +
+      '<span class="chip"><span class="dot"></span>V42</span>';
+    document.querySelector(".nav .foot").innerHTML =
+      "PROFILE " + label + "<br>V42 ACTIVE";
+  }
+  function choose(id) {
+    const p = profiles.find((x) => x.id === id);
+    const apply = () => {
+      fill(p);
+      mark(id);
+      A.toast(p.name + " applied", "Limits updated in the form. Save to keep them.", "info");
+    };
+    if (id === "aggressive") {
+      A.confirmAction(
+        "Apply Aggressive?",
+        "Symbol cap rises to 35% and the IVR floor drops to 30. Approve is still required on every order.",
+        apply,
+        "Apply profile"
+      );
+      return;
+    }
+    apply();
+  }
+
+  fill(profiles.find((p) => p.id === "standard"));
+
+  document.getElementById("limitForm").addEventListener("input", () => {
+    if (applying || active === "custom") return;
+    mark("custom");
+  });
+
+  document.getElementById("privSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b || b.classList.contains("on")) return;
+    const target = b.getAttribute("data-p");
+    const commit = () => {
+      document.querySelectorAll("#privSeg button").forEach((x) => x.classList.remove("on"));
+      b.classList.add("on");
+      A.toast("Privilege changed", target, target === "all_orders" || target === "paper_only" ? "info" : "warn");
+    };
+    if (target === "auto_within_risk" || target === "opens_only") {
+      A.confirmAction(
+        "Raise automation privilege?",
+        "Moving to " + target + " lets Athena act without a per-order Approve in some cases. This needs a protected confirm.",
+        commit,
+        "Confirm change"
+      );
+      return;
+    }
+    commit();
+  });
+
+  document.getElementById("saveRisk").addEventListener("click", () => {
+    const name = active === "custom" ? "Custom" : profiles.find((p) => p.id === active).name;
+    A.toast("Risk saved", name + " staged as v43", "ok");
+  });
+
+  document.getElementById("diffBtn").addEventListener("click", () => {
+    A.modal({
+      title: "Diff v41 to v42",
+      body:
+        '<div class="field"><div class="k">Profile</div><div class="v">Standard</div></div>' +
+        '<div class="field"><div class="k">Min IVR new short</div><div class="v"><code>40</code> → <code>50</code></div></div>' +
+        '<div class="field"><div class="k">Note</div><div class="v">Raise IVR floor before FOMC</div></div>',
+    });
+  });
+
+  document.getElementById("verHistory").addEventListener("click", () => {
+    const body = document.createElement("div");
+    body.innerHTML =
+      '<div class="scroll-y" style="max-height:340px"><table class="data"><thead><tr><th>Ver</th><th>When</th><th>Note</th></tr></thead><tbody>' +
+      [
+        ["v42", "10-06 22:14", "Raise IVR floor before FOMC"],
+        ["v41", "09-28 21:02", "Standard profile restored"],
+        ["v37", "08-14 21:26", "Cash reserve 25 to 30"],
+        ["v35", "06-30 21:44", "Initial risk caps"],
+      ].map((r) => "<tr><td class='mono'>" + r[0] + "</td><td class='mono'>" + r[1] + "</td><td>" + r[2] + "</td></tr>").join("") +
+      "</tbody></table></div>";
+    A.panel({ title: "Risk versions", body });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · History</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .filters button {
+    padding:6px 12px; font-size:11px; font-weight:600; font-family:var(--font-mono);
+    background:transparent; border:1px solid var(--site-border-strong); color:var(--site-text-3);
+    cursor:pointer; transition:.12s;
+  }
+  .filters button:hover { border-color:var(--site-primary); color:var(--site-primary); }
+  .filters button.on { background:#101c33; border-color:var(--site-primary); color:#93c5fd; }
+  .pnl-pos { color: var(--ath-up); font-family: var(--font-mono); }
+  .pnl-neg { color: var(--ath-down); font-family: var(--font-mono); }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a class="active" href="./index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">54 FILLS · 6MO<br>81% WIN RATE</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>History</h1>
+        <p>Six months of fills, rolls, rejects, and phase context. Every row was Approve-gated at the time.</p>
+      </div>
+      <div class="chips">
+        <span class="chip ok"><span class="dot"></span>54 FILLED</span>
+        <span class="chip"><span class="dot"></span>7 REJECTED</span>
+        <span class="chip info"><span class="dot"></span>MAY → OCT 2026</span>
+      </div>
+    </div>
+
+    <div class="grid cols-3" style="margin-bottom:14px">
+      <div class="card stat">
+        <div class="label">Total premium</div>
+        <div class="value up">$9,552</div>
+        <div class="meta">vs sleeve NLV 4.2% / 6mo</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Best month</div>
+        <div class="value">Sep · $2,310</div>
+        <div class="meta">13 trades · FOMC strangle cycle</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Worst month</div>
+        <div class="value down">Jul · −$380</div>
+        <div class="meta">TSLA ad-hoc strangle loss</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Fills &amp; decisions <span class="more" id="exportCsv">export csv →</span></h2>
+      <div class="filters" id="filters">
+        <button class="on" data-f="all">All</button>
+        <button data-f="OPEN_CSP">CSP</button>
+        <button data-f="OPEN_CC">CC</button>
+        <button data-f="OPEN_STRANGLE">Strangle</button>
+        <button data-f="ROLL">Roll</button>
+        <button data-f="rejected">Rejected</button>
+      </div>
+      <div class="scroll-y" style="max-height:520px" id="histWrap">
+        <table class="data">
+          <thead><tr><th>Date</th><th>Symbol</th><th>Tactic</th><th>Phase</th><th>P&amp;L</th><th>Status</th></tr></thead>
+          <tbody id="histBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+  const rows = A.historyRows(54);
+  const body = document.getElementById("histBody");
+
+  function render(filter) {
+    body.innerHTML = "";
+    rows
+      .filter((r) => filter === "all" ? true : filter === "rejected" ? r.status === "rejected" : r.tactic === filter)
+      .forEach((r) => {
+        const tr = document.createElement("tr");
+        const pnlCls = r.pnl >= 0 ? "pnl-pos" : "pnl-neg";
+        const pnlTxt = (r.pnl >= 0 ? "+$" : "−$") + Math.abs(r.pnl);
+        tr.innerHTML =
+          '<td class="mono">' + r.date + "</td>" +
+          "<td><b>" + r.sym + "</b></td>" +
+          '<td><span class="tag ' + (r.tactic === "OPEN_STRANGLE" ? "violet" : r.tactic === "OPEN_CSP" ? "green" : r.tactic === "OPEN_CC" ? "blue" : "") + '">' + r.tactic + "</span></td>" +
+          '<td><span class="tag">' + r.phase + "</span></td>" +
+          '<td class="' + pnlCls + '">' + (r.status === "rejected" ? "—" : pnlTxt) + "</td>" +
+          "<td>" + (r.status === "filled" ? '<span class="tag green">FILLED</span>' : '<span class="tag red">REJECTED</span>') + "</td>";
+        tr.style.cursor = "pointer";
+        tr.addEventListener("click", () => {
+          A.modal({
+            title: r.sym + " · " + r.tactic + " · " + r.date,
+            body:
+              '<div class="field"><div class="k">Phase</div><div class="v">' + r.phase + ' · NFR cycle</div></div>' +
+              '<div class="field"><div class="k">Status</div><div class="v">' + r.status + "</div></div>" +
+              '<div class="field"><div class="k">P&amp;L</div><div class="v mono">' + (r.status === "rejected" ? "—" : pnlTxt) + "</div></div>" +
+              '<div class="field"><div class="k">Approved by</div><div class="v">telegram:you · ' + r.date + ' 21:4' + (Math.floor(Math.random()*9)) + ' HKT</div></div>' +
+              '<div class="field"><div class="k">Reason</div><div class="v">Rule engine match · IVR + phase + news density within settings_v' + (30 + Math.floor(Math.random()*12)) + ".</div></div>",
+          });
+        });
+        body.appendChild(tr);
+      });
+  }
+  render("all");
+
+  document.getElementById("filters").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    document.querySelectorAll("#filters button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    render(b.getAttribute("data-f"));
+  });
+
+  document.getElementById("exportCsv").addEventListener("click", () => {
+    A.toast("Export queued", "history_2026-05_2026-10.csv → MinIO", "info");
+  });
+})();
+</script>
+</body>
+</html>

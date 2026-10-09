@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · NFR board</title>
+<link rel="stylesheet" href="../shared/console.css">
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a class="active" href="./index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">STRATEGY NFR<br>1 STRATEGY · 5 PHASES</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>News Front-Running board</h1>
+        <p>One strategy. CSP / CC / Strangle are tactics. Event anchor: <b>FOMC 2026-10-09</b> · today T−1.</p>
+      </div>
+      <div class="chips">
+        <span class="chip info"><span class="dot"></span>FED_EVENT</span>
+        <span class="chip warn"><span class="dot"></span>CLUSTER ACTIVE</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <h2>Cycle phases <span class="more" id="phaseGuide">phase guide →</span></h2>
+      <div class="phase-rail">
+        <div class="phase"><div class="n">P1</div><div class="t">Warning</div><div class="d">T−7…T−3<br>Watchlist + IV</div></div>
+        <div class="phase active"><div class="n">P2</div><div class="t">Panic</div><div class="d">T−3…T−1<br>Strangle bias</div></div>
+        <div class="phase"><div class="n">P3</div><div class="t">Event</div><div class="d">T day<br>Hold</div></div>
+        <div class="phase"><div class="n">P4</div><div class="t">Repair</div><div class="d">T+1…T+3<br>Close / rotate</div></div>
+        <div class="phase"><div class="n">P5</div><div class="t">Euphoria</div><div class="d">T+5…T+10<br>CC bias</div></div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-bottom:14px">
+      <div class="card">
+        <h2>NVDA IVR · 26 weeks <span class="more" data-panel="ivr">full view →</span></h2>
+        <div class="chart-box" style="height:140px" id="chartIvr"></div>
+        <div class="chart-legend" style="display:flex;gap:14px;font-size:10px;color:var(--site-text-4);font-family:var(--font-mono);margin-top:8px">
+          <span><i style="width:10px;height:2px;background:#22d3ee;display:inline-block"></i>IVR</span>
+          <span><i style="width:10px;height:2px;background:#f7931a;display:inline-block"></i>threshold 75</span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Phase distribution · 6 months</h2>
+        <div class="chart-box" style="height:140px" id="chartPhase"></div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--site-text-4);font-family:var(--font-mono);margin-top:8px">
+          <span>P1</span><span>P2</span><span>P3</span><span>P4</span><span>P5</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Universe under NFR <a class="more" href="../07-news-wash/index.html">news stream →</a></h2>
+      <div class="scroll-y" style="max-height:300px">
+        <table class="data">
+          <thead>
+            <tr><th>Symbol</th><th>Phase</th><th>IVR</th><th>News dens.</th><th>Suggested tactic</th><th>Draft</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>NVDA</b><div style="font-size:10.5px;color:var(--site-text-4)">AI narrative · high beta</div></td>
+              <td><span class="tag blue">P2 PANIC</span></td>
+              <td class="mono">82</td>
+              <td>6 neg / 72h</td>
+              <td><span class="tag violet">OPEN_STRANGLE</span></td>
+              <td><a href="../02-draft-approve/index.html" style="color:var(--site-primary);font-weight:600">draft_7f3a</a></td>
+            </tr>
+            <tr>
+              <td><b>QCOM</b><div style="font-size:10.5px;color:var(--site-text-4)">earnings in 9d</div></td>
+              <td><span class="tag">P1 WARNING</span></td>
+              <td class="mono">54</td>
+              <td>2 neg / 72h</td>
+              <td><span class="tag">HOLD</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><b>T</b><div style="font-size:10.5px;color:var(--site-text-4)">must-hold income</div></td>
+              <td><span class="tag">IDLE</span></td>
+              <td class="mono">41</td>
+              <td>0</td>
+              <td><span class="tag green">HOLD / CC ON</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><b>F</b><div style="font-size:10.5px;color:var(--site-text-4)">small collateral sleeve</div></td>
+              <td><span class="tag">IDLE</span></td>
+              <td class="mono">38</td>
+              <td>1</td>
+              <td><span class="tag">HOLD</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><b>INTC</b><div style="font-size:10.5px;color:var(--site-text-4)">gov backstop thesis</div></td>
+              <td><span class="tag">P1 WARNING</span></td>
+              <td class="mono">60</td>
+              <td>1</td>
+              <td><span class="tag">HOLD</span></td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td><b>DRAM</b><div style="font-size:10.5px;color:var(--site-text-4)">memory cycle</div></td>
+              <td><span class="tag">P1 WARNING</span></td>
+              <td class="mono">66</td>
+              <td>2</td>
+              <td><span class="tag">WATCH</span></td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+  const ivr = A.DATA.ivrWeekly;
+  const el = document.getElementById("chartIvr");
+  A.sparkline(el, ivr, { w: 520, h: 140, color: "#22d3ee" });
+  // threshold line overlay
+  const svg = el.querySelector("svg");
+  const y = 140 - 6 - ((75 - Math.min.apply(null, ivr)) / (Math.max.apply(null, ivr) - Math.min.apply(null, ivr) || 1)) * (140 - 12);
+  svg.innerHTML += '<line x1="0" y1="' + y.toFixed(1) + '" x2="520" y2="' + y.toFixed(1) + '" stroke="#f7931a" stroke-width="1" stroke-dasharray="4 4"></line>';
+
+  A.bars(document.getElementById("chartPhase"), [34, 12, 6, 18, 22].map((v) => v), { w: 520, h: 140 });
+
+  document.getElementById("phaseGuide").addEventListener("click", () => {
+    A.panel({ title: "NFR phase guide", body:
+      '<div class="field"><div class="k">P1 Warning</div><div class="v">Negative news density rising. Watchlist only, no new short vol.</div></div>' +
+      '<div class="field"><div class="k">P2 Panic</div><div class="v">IVR &gt; threshold + wash active. Strangle drafts for Approve.</div></div>' +
+      '<div class="field"><div class="k">P3 Event</div><div class="v">Hold through print. No new aggression.</div></div>' +
+      '<div class="field"><div class="k">P4 Repair</div><div class="v">IV crush confirmed. Close strangle, rotate to CSP/CC by location.</div></div>' +
+      '<div class="field"><div class="k">P5 Euphoria</div><div class="v">Narrative return. CC bias on held shares.</div></div>' +
+      '<p style="color:var(--site-text-3);font-size:12px;margin-top:12px">Windows and thresholds live in Settings — tune per cycle, audited.</p>' });
+  });
+
+  document.querySelectorAll("[data-panel='ivr']").forEach((el2) => {
+    el2.addEventListener("click", () => {
+      const body = document.createElement("div");
+      body.innerHTML = '<div class="chart-box" style="height:220px" id="pIvr"></div>';
+      A.panel({ title: "NVDA IVR · 26 weeks", body });
+      A.sparkline(body.querySelector("#pIvr"), ivr, { w: 420, h: 220, color: "#22d3ee" });
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Drafts</title>
+<link rel="stylesheet" href="../shared/console.css">
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a class="active" href="./index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">PRIVILEGE ALL_ORDERS<br>UNAPPROVED ≠ IB</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Draft queue</h1>
+        <p>Human gate. Athena proposes; you Approve, Amend, or Reject. Same cards push to Telegram when connected.</p>
+      </div>
+      <div class="chips">
+        <span class="chip info"><span class="dot"></span>2 AWAITING</span>
+        <span class="chip"><span class="dot"></span>TTL 60M</span>
+      </div>
+    </div>
+
+    <div class="banner">FOMC T−1 · NVDA wash density 6/72h. Strangle draft is the NFR P2 playbook — not an impulse ticket.</div>
+
+    <div class="grid" style="gap:14px" id="draftList">
+      <div class="card" style="border-color:#2f4a7a">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
+          <span class="tag violet">OPEN_STRANGLE</span>
+          <span class="tag blue">P2 PANIC</span>
+          <span class="tag teal">HIGH_IV</span>
+          <span class="tag amber">NEWS_WASH</span>
+          <span class="mono" style="margin-left:auto;font-size:10.5px;color:var(--site-text-4)">draft_7f3a · expires 42m</span>
+        </div>
+        <div style="font-size:17px;font-weight:700;margin-bottom:4px">NVDA · sell 210P / 235C · 17 Oct 2026</div>
+        <div style="font-size:12.5px;color:var(--site-text-3);margin-bottom:12px">Spot 218.42 · IVR 82 · DTE 36 · qty 1 · limit <b class="mono">$5.20</b> (mid 5.35) · strength 8 · conf 0.84</div>
+        <div class="field"><div class="k">Reason</div><div class="v">Negative narrative cluster + IV expansion into Fed window. Harvest vol; plan close T+1…T+3 on crush.</div></div>
+        <div class="field"><div class="k">Risk</div><div class="v">
+          <span class="tag green">CASH OK</span>
+          <span class="tag green">IVR &gt; 70</span>
+          <span class="tag green">DTE BAND</span>
+          <span class="tag amber">NAME 18% NAV AFTER</span>
+        </div></div>
+        <div class="row-actions" style="margin-top:14px">
+          <button class="btn ok" data-action="approve">Approve</button>
+          <a class="btn primary" href="../03-ephemeral-control/index.html">Open control link</a>
+          <button class="btn ghost" data-action="amend">Amend</button>
+          <button class="btn danger" data-action="reject">Reject</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
+          <span class="tag">ROLL</span>
+          <span class="tag green">MGMT</span>
+          <span class="mono" style="margin-left:auto;font-size:10.5px;color:var(--site-text-4)">draft_9c12 · expires 51m</span>
+        </div>
+        <div style="font-size:17px;font-weight:700;margin-bottom:4px">QCOM · roll short 165P → 162.5P</div>
+        <div style="font-size:12.5px;color:var(--site-text-3);margin-bottom:12px">Close at 52% max profit · open 162.5P Nov 21 · credit est. <b class="mono">$0.38</b></div>
+        <div class="field"><div class="k">Reason</div><div class="v">Profit-take rule (50%) · free collateral for next cycle.</div></div>
+        <div class="row-actions" style="margin-top:14px">
+          <button class="btn ok" data-action="approve">Approve</button>
+          <button class="btn ghost" data-action="amend">Amend</button>
+          <button class="btn danger" data-action="reject">Reject</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Recent decisions <a class="more" href="../08-history/index.html">full history →</a></h2>
+      <div class="scroll-y" style="max-height:200px">
+        <table class="data">
+          <thead><tr><th>When</th><th>Draft</th><th>Action</th><th>By</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">10-07 21:44</td><td class="mono">draft_6b01 · INTC CSP</td><td><span class="tag green">APPROVED</span></td><td>telegram:you</td></tr>
+            <tr><td class="mono">10-06 21:38</td><td class="mono">draft_5fa2 · TSLA strangle</td><td><span class="tag red">REJECTED</span></td><td>telegram:you</td></tr>
+            <tr><td class="mono">10-05 09:52</td><td class="mono">draft_5e11 · DRAM roll</td><td><span class="tag green">APPROVED</span></td><td>web:one-time</td></tr>
+            <tr><td class="mono">10-03 21:31</td><td class="mono">draft_5c88 · QCOM CSP</td><td><span class="tag green">APPROVED</span></td><td>telegram:you</td></tr>
+            <tr><td class="mono">10-01 21:47</td><td class="mono">draft_5a90 · NVDA CC</td><td><span class="tag red">REJECTED</span></td><td>telegram:you</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../shared/athena.js"></script>
+</body>
+</html>

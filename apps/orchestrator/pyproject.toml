@@ -1,0 +1,28 @@
+[project]
+name = "athena-orchestrator"
+version = "0.0.0"
+description = "Athena 5-minute orchestrator"
+requires-python = ">=3.12"
+dependencies = [
+    "athena-bots",
+    "athena-exec",
+    "athena-marketdata",
+    "athena-settings",
+    "athena-store",
+    "athena-strategy-nfr",
+]
+
+[tool.uv.sources]
+athena-bots = { workspace = true }
+athena-exec = { workspace = true }
+athena-marketdata = { workspace = true }
+athena-settings = { workspace = true }
+athena-store = { workspace = true }
+athena-strategy-nfr = { workspace = true }
+
+[project.scripts]
+athena-orchestrator = "athena_orchestrator:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

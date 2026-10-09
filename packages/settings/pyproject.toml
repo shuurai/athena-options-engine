@@ -1,0 +1,16 @@
+[project]
+name = "athena-settings"
+version = "0.0.0"
+description = "Versioned Athena settings. Schema and seed are P1-03."
+requires-python = ">=3.12"
+dependencies = [
+    "athena-store",
+    "pydantic>=2",
+]
+
+[tool.uv.sources]
+athena-store = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

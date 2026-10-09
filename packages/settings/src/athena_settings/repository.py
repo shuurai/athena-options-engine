@@ -1,0 +1,168 @@
+"""Read and seed the active settings row."""
+
+from __future__ import annotations
+
+import psycopg
+from psycopg.types.json import Jsonb
+
+from athena_settings.model import SettingsPayload, standard_payload
+
+
+class SettingsVersion(SettingsPayload):
+    id: int
+    author: str
+    note: str
+
+
+def _payload_from_db(value: object) -> SettingsPayload:
+    if isinstance(value, str):
+        return SettingsPayload.model_validate_json(value)
+    return SettingsPayload.model_validate(value)
+
+
+def seed_standard_if_empty(conn: psycopg.Connection, account_id: str) -> bool:
+    """Insert a Standard row when this account has none. Returns True if inserted."""
+    existing = conn.execute(
+        "SELECT id FROM settings_versions WHERE active AND account_id = %s",
+        (account_id,),
+    ).fetchone()
+    if existing is not None:
+        return False
+    payload = standard_payload()
+    next_id = conn.execute("SELECT coalesce(max(id), 0) + 1 FROM settings_versions").fetchone()[0]
+    conn.execute(
+        """
+        INSERT INTO settings_versions (id, author, note, payload, active, account_id)
+        VALUES (%s, %s, %s, %s, true, %s)
+        """,
+        (next_id, "seed", "Standard profile", Jsonb(payload.model_dump()), account_id),
+    )
+    conn.commit()
+    return True
+
+
+KNOBS = {
+    "roll_dte": ("strategy", "roll_dte", 1, 60),
+    "profit_take_pct": ("strategy", "profit_take_pct", 1, 100),
+    "max_contracts": ("risk", "max_contracts_per_symbol", 1, 20),
+    "wash_min_negative": ("news", "wash_min_negative", 1, 20),
+    "draft_ttl": ("notify", "draft_ttl_minutes", 15, 240),
+}
+
+
+def save_settings(
+    conn: psycopg.Connection,
+    account_id: str,
+    payload: SettingsPayload,
+    author: str,
+    note: str,
+) -> tuple[int, str]:
+    """Store a new active version and an audit diff. Privilege cannot change here."""
+    current = load_active(conn, account_id)
+    old = _payload_of(current)
+    if payload.privilege != old.privilege:
+        raise ValueError("privilege stays all_orders")
+    changes = _diff(old, payload)
+    if not changes:
+        raise ValueError("no change")
+    conn.execute(
+        "UPDATE settings_versions SET active = false WHERE active AND account_id = %s",
+        (account_id,),
+    )
+    next_id = conn.execute("SELECT coalesce(max(id), 0) + 1 FROM settings_versions").fetchone()[0]
+    conn.execute(
+        """
+        INSERT INTO settings_versions (id, author, note, payload, active, account_id)
+        VALUES (%s, %s, %s, %s, true, %s)
+        """,
+        (next_id, author, note, Jsonb(payload.model_dump()), account_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO settings_audits (account_id, settings_id, author, note, changes)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        (account_id, next_id, author, note, changes),
+    )
+    conn.commit()
+    return next_id, changes
+
+
+def set_knob(conn: psycopg.Connection, account_id: str, key: str, raw: str, author: str) -> str:
+    """Change one allowed knob and return the audit line."""
+    if key == "privilege":
+        raise ValueError("privilege stays all_orders")
+    if key not in KNOBS:
+        known = ", ".join(sorted(KNOBS))
+        raise ValueError(f"unknown setting. Use {known}")
+    section, field, low, high = KNOBS[key]
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("value must be a number") from exc
+    if not low <= value <= high:
+        raise ValueError(f"{key} must be {low} to {high}")
+    current = _payload_of(load_active(conn, account_id))
+    updated = getattr(current, section).model_copy(update={field: value})
+    payload = current.model_copy(update={section: updated})
+    new_id, changes = save_settings(conn, account_id, payload, author, f"set {key}")
+    return f"{account_id} v{new_id} {changes}"
+
+
+def format_settings(version: SettingsVersion) -> str:
+    payload = _payload_of(version)
+    return "\n".join(
+        [
+            f"v{version.id}",
+            f"privilege {payload.privilege}",
+            f"roll_dte {payload.strategy.roll_dte}",
+            f"profit_take_pct {payload.strategy.profit_take_pct}",
+            f"max_contracts {payload.risk.max_contracts_per_symbol}",
+            f"wash_min_negative {payload.news.wash_min_negative}",
+            f"draft_ttl {payload.notify.draft_ttl_minutes}",
+        ]
+    )
+
+
+def _payload_of(version: SettingsVersion) -> SettingsPayload:
+    data = version.model_dump()
+    return SettingsPayload.model_validate({key: data[key] for key in SettingsPayload.model_fields})
+
+
+def _diff(old: SettingsPayload, new: SettingsPayload) -> str:
+    before = _flat(old.model_dump())
+    after = _flat(new.model_dump())
+    lines = []
+    for key in sorted(set(before) | set(after)):
+        if before.get(key) != after.get(key):
+            lines.append(f"{key} {before.get(key)} -> {after.get(key)}")
+    return "\n".join(lines)
+
+
+def _flat(value: object, prefix: str = "") -> dict[str, object]:
+    if isinstance(value, dict):
+        out: dict[str, object] = {}
+        for key, item in value.items():
+            out.update(_flat(item, f"{prefix}{key}."))
+        return out
+    return {prefix[:-1]: value}
+
+
+def load_active(conn: psycopg.Connection, account_id: str) -> SettingsVersion:
+    row = conn.execute(
+        """
+        SELECT id, author, note, payload
+        FROM settings_versions
+        WHERE active AND account_id = %s
+        """,
+        (account_id,),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"no active settings version for {account_id}")
+    payload = _payload_from_db(row[3])
+    return SettingsVersion(
+        id=row[0],
+        author=row[1],
+        note=row[2],
+        **payload.model_dump(),
+    )

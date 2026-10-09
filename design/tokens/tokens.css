@@ -1,0 +1,65 @@
+/* Athena design tokens — v2 angled (Cursor-inspired).
+   Sharp corners, dark console, mono accents. Ideation mockups only. */
+
+:root {
+  --u: 1px;
+
+  /* Dark console (primary surface) */
+  --site-canvas: #0a0c10;
+  --site-surface: #10141a;
+  --site-surface-2: #161c24;
+  --site-border: #232a33;
+  --site-border-strong: #333d49;
+  --site-text: #f2f4f7;
+  --site-text-2: #c3cad4;
+  --site-text-3: #9aa5b1;
+  --site-text-4: #6b7684;
+  --site-primary: #6b96f2;
+  --site-primary-deep: #2f6fed;
+  --site-cyan: #22d3ee;
+  --site-success: #17a34a;
+  --site-warning: #d97706;
+  --site-danger: #dc2626;
+  --site-on-primary: #ffffff;
+  --site-border-hover: #3a4350;
+  --site-text-disabled: #6b7280;
+
+  /* Console workbench (light — kept for reference; dark is default) */
+  --pb-canvas: #f7f8fa;
+  --pb-card: #ffffff;
+  --pb-border: #e2e6eb;
+  --pb-border-soft: #c9cfd8;
+  --pb-text: #1f2329;
+  --pb-text-2: #6b7280;
+  --pb-text-3: #9aa5b1;
+  --pb-info: #1d4fbf;
+  --pb-info-bg: #e8effc;
+
+  --color-surface: #f5f7fa;
+  --color-elevated: #ffffff;
+  --color-border: #d8dfe9;
+  --color-text: #1a2332;
+  --color-text-secondary: #5a6b85;
+  --color-accent: #2167ae;
+  --color-warn: #d9a441;
+  --color-warn-bg: #fdf6e3;
+  --color-danger: #d9534f;
+  --color-danger-bg: #fdecec;
+
+  /* Athena domain accents */
+  --ath-up: #16c784;
+  --ath-down: #ea3943;
+  --ath-phase: #6b96f2;
+  --ath-iv: #22d3ee;
+  --ath-halt: #f7931a;
+  --ath-violet: #a78bfa;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Consolas, monospace;
+
+  /* Angled: sharp geometry */
+  --radius-ctrl: 2px;
+  --radius-card: 4px;
+  --radius-modal: 6px;
+  --radius-pill: 2px;
+}

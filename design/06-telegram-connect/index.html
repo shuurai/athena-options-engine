@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Telegram</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .tg-login {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: #2f6fed; color: #fff; border: 0; cursor: pointer;
+    padding: 11px 16px; font-size: 13.5px; font-weight: 700;
+    font-family: var(--font-sans);
+  }
+  .tg-login:hover { background: #2563eb; }
+  .tg-login svg { width: 18px; height: 18px; }
+  .secret {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: #0a0c10; border: 1px solid var(--site-border-strong);
+    padding: 10px 12px;
+  }
+  .secret .mono { font-size: 16px; font-weight: 600; letter-spacing: .08em; }
+  .note { margin: 0; font-size: 12.5px; color: var(--site-text-3); line-height: 1.5; }
+  .step { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--site-border); }
+  .step:last-child { border-bottom: 0; }
+  .num {
+    width: 22px; height: 22px; flex: none;
+    display: grid; place-items: center;
+    background: #101c33; border: 1px solid #2f4a7a; color: #93c5fd;
+    font-size: 11px; font-weight: 700; font-family: var(--font-mono);
+  }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a class="active" href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">TELEGRAM<br>POLLING<br>NOT LINKED</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Telegram</h1>
+        <p>Link the account allowed to Approve. Reached from Settings. This page cannot place orders.</p>
+      </div>
+      <div class="chips" id="stateChips">
+        <span class="chip warn"><span class="dot"></span>WAITING LINK</span>
+      </div>
+    </div>
+
+    <div id="viewWait">
+      <div class="grid cols-2">
+        <div class="card">
+          <h2>Log in on this site</h2>
+          <p class="note">Telegram Login Widget. BotFather <span class="mono">/setdomain</span> must be this host, or the button does nothing. Athena checks the returned <span class="mono">hash</span> on the box with the bot token. The token never comes to the browser.</p>
+          <div style="margin-top:16px">
+            <button type="button" class="tg-login" id="tgLogin">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.5 4.5 2.8 11.2c-1.3.5-1.2 1.2-.2 1.5l4.8 1.5 1.8 5.6c.2.7.1.9.8.9.4 0 .6-.2.9-.5l2.5-2.4 4.9 3.6c.9.5 1.5.2 1.7-.8l3.1-14.6c.3-1.2-.5-1.8-1.6-1.5zM8.7 14.2l9.6-6c.5-.3.9-.1.5.2l-8 7.2-.3 3.4-2-4.8z"/></svg>
+              Log in with Telegram
+            </button>
+          </div>
+          <div class="field" style="margin-top:16px"><div class="k">Domain</div><div class="v mono">control.athena.local</div></div>
+          <div class="field"><div class="k">Bot</div><div class="v mono">@athena_zeptun_bot</div></div>
+          <div class="field"><div class="k">Widget access</div><div class="v">write, so the bot may message you</div></div>
+        </div>
+
+        <div class="card">
+          <h2>Or open the bot</h2>
+          <p class="note">One-time start link. Telegram sends <span class="mono">/start 8F2K</span> to the bot. Athena matches the code, then stores your numeric user id.</p>
+          <div style="margin-top:14px">
+            <div style="font-size:10px;color:var(--site-text-4);font-family:var(--font-mono);letter-spacing:.06em;margin-bottom:6px">CODE</div>
+            <div class="secret">
+              <span class="mono">8F2K</span>
+              <button class="copy-btn" data-copy="8F2K" data-copy-label="Code" title="Copy" style="width:28px;height:28px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button>
+            </div>
+          </div>
+          <div style="margin-top:12px">
+            <div style="font-size:10px;color:var(--site-text-4);font-family:var(--font-mono);letter-spacing:.06em;margin-bottom:6px">DEEP LINK</div>
+            <div class="secret">
+              <span class="mono" style="font-size:12px;letter-spacing:0;word-break:break-all">https://t.me/athena_zeptun_bot?start=8F2K</span>
+              <button class="copy-btn" data-copy="https://t.me/athena_zeptun_bot?start=8F2K" data-copy-label="Link" title="Copy" style="width:28px;height:28px;flex:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button>
+            </div>
+          </div>
+          <div class="row-actions" style="margin-top:14px">
+            <a class="btn primary" href="https://t.me/athena_zeptun_bot?start=8F2K" target="_blank" rel="noopener">Open in Telegram</a>
+          </div>
+          <p class="note" style="margin-top:12px">Single use. Expires in 10 minutes. Only the linked id can Approve.</p>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h2>Bot on the box <span class="more" id="showSetup">setup steps →</span></h2>
+        <div class="field"><div class="k">Username</div><div class="v mono">@athena_zeptun_bot</div></div>
+        <div class="field"><div class="k">Token</div><div class="v">Present in <span class="mono">TELEGRAM_BOT_TOKEN</span>. Not shown here.</div></div>
+        <div class="field"><div class="k">Transport</div><div class="v">Long polling from the Windows box</div></div>
+        <div class="field"><div class="k">Allowlist</div><div class="v">Empty</div></div>
+      </div>
+    </div>
+
+    <div id="viewLinked" style="display:none">
+      <div class="card" style="max-width:640px">
+        <h2>Linked account</h2>
+        <div class="field"><div class="k">Username</div><div class="v mono">@you</div></div>
+        <div class="field"><div class="k">User id</div><div class="v mono">184920331 <button class="copy-btn" data-copy="184920331" data-copy-label="User id" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button></div></div>
+        <div class="field"><div class="k">Allowlist</div><div class="v">This id only. Trading commands from anyone else are ignored.</div></div>
+        <div class="field"><div class="k">Can message</div><div class="v">Yes. You started the bot, so Athena can send drafts.</div></div>
+        <div class="row-actions" style="margin-top:14px">
+          <button type="button" class="btn danger" id="unlinkBtn">Unlink</button>
+          <a class="btn ghost" href="../04-settings-risk/index.html">Back to Settings</a>
+        </div>
+      </div>
+    </div>
+
+    <div id="viewSetup" style="display:none">
+      <div class="banner">Bot token is missing on the Windows box. This page cannot create the bot.</div>
+      <div class="card" style="max-width:720px">
+        <h2>Create the bot once</h2>
+        <div class="step">
+          <div class="num">1</div>
+          <div>
+            <div style="font-weight:650">BotFather, /newbot</div>
+            <p class="note" style="margin-top:4px">In Telegram, open @BotFather. Send <span class="mono">/newbot</span>. Pick a display name. The username must end in <span class="mono">bot</span>.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="num">2</div>
+          <div>
+            <div style="font-weight:650">Token stays on the box</div>
+            <p class="note" style="margin-top:4px">BotFather returns an HTTP API token. Set <span class="mono">TELEGRAM_BOT_TOKEN</span> and <span class="mono">TELEGRAM_BOT_USERNAME</span> in the Windows env. Do not paste the token into this page.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="num">3</div>
+          <div>
+            <div style="font-weight:650">Register the site</div>
+            <p class="note" style="margin-top:4px">Send <span class="mono">/setdomain</span> to BotFather and enter the control-web host. The login button only works on that domain.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="num">4</div>
+          <div>
+            <div style="font-weight:650">Restart bots</div>
+            <p class="note" style="margin-top:4px">Athena long-polls Telegram. After restart this page leaves setup and waits for you to link.</p>
+          </div>
+        </div>
+        <div class="row-actions" style="margin-top:14px">
+          <button type="button" class="btn ghost" id="backWait">Back</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+  const wait = document.getElementById("viewWait");
+  const linked = document.getElementById("viewLinked");
+  const setup = document.getElementById("viewSetup");
+  const chips = document.getElementById("stateChips");
+  const foot = document.querySelector(".nav .foot");
+
+  function show(which) {
+    wait.style.display = which === "wait" ? "" : "none";
+    linked.style.display = which === "linked" ? "" : "none";
+    setup.style.display = which === "setup" ? "" : "none";
+    if (which === "linked") {
+      chips.innerHTML = '<span class="chip ok"><span class="dot"></span>LINKED</span>';
+      foot.innerHTML = "TELEGRAM<br>POLLING<br>@YOU";
+    } else if (which === "setup") {
+      chips.innerHTML = '<span class="chip danger"><span class="dot"></span>NOT CONFIGURED</span>';
+      foot.innerHTML = "TELEGRAM<br>NO TOKEN";
+    } else {
+      chips.innerHTML = '<span class="chip warn"><span class="dot"></span>WAITING LINK</span>';
+      foot.innerHTML = "TELEGRAM<br>POLLING<br>NOT LINKED";
+    }
+  }
+
+  document.getElementById("tgLogin").addEventListener("click", () => {
+    A.modal({
+      title: "Telegram login",
+      body:
+        '<p style="margin:0 0 10px;color:var(--site-text-3);font-size:12.5px;line-height:1.5">Payload the official widget returns. The box recomputes <span class="mono">hash</span> with SHA-256 of the bot token. A mismatch is rejected.</p>' +
+        '<div class="field"><div class="k">id</div><div class="v mono">184920331</div></div>' +
+        '<div class="field"><div class="k">username</div><div class="v mono">you</div></div>' +
+        '<div class="field"><div class="k">auth_date</div><div class="v mono">1760000000</div></div>' +
+        '<div class="field"><div class="k">hash</div><div class="v mono">a91c…e4</div></div>',
+      footer: (function () {
+        const cancel = document.createElement("button");
+        cancel.className = "btn ghost";
+        cancel.textContent = "Cancel";
+        cancel.addEventListener("click", A.closeAll);
+        const ok = document.createElement("button");
+        ok.className = "btn primary";
+        ok.textContent = "Link this account";
+        ok.addEventListener("click", () => {
+          A.closeAll();
+          show("linked");
+          A.toast("Telegram linked", "Allowlist now holds 184920331", "ok");
+        });
+        return [cancel, ok];
+      })(),
+    });
+  });
+
+  document.getElementById("unlinkBtn").addEventListener("click", () => {
+    A.confirmAction(
+      "Unlink Telegram?",
+      "Removes 184920331 from the allowlist. Drafts stop arriving until you link again.",
+      () => {
+        show("wait");
+        A.toast("Unlinked", "Allowlist cleared", "warn");
+      },
+      "Unlink"
+    );
+  });
+
+  document.getElementById("showSetup").addEventListener("click", () => show("setup"));
+  document.getElementById("backWait").addEventListener("click", () => show("wait"));
+})();
+</script>
+</body>
+</html>

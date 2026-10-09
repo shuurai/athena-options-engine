@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · M0 Design base</title>
+<link rel="stylesheet" href="../shared/console.css">
+</head>
+<body class="console">
+<div class="main" style="max-width:1100px;margin:0 auto">
+  <div class="topbar">
+    <div>
+      <div style="font-size:11px;color:var(--site-text-4);margin-bottom:6px;font-family:var(--font-mono)"><a href="../index.html" style="color:var(--site-primary)">design/</a> / 00-m0-design-base</div>
+      <h1>Athena · Design base</h1>
+      <p>Angled dark console (Cursor-inspired) · sharp corners · mono accents. Register components here before screens.</p>
+    </div>
+  </div>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h2>Color · brand &amp; semantic</h2>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div><div style="height:40px;background:#2f6fed;clip-path:polygon(0 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%)"></div><div style="font-size:10px;margin-top:6px;color:var(--site-text-3);font-family:var(--font-mono)">PRIMARY<br>#2F6FED</div></div>
+        <div><div style="height:40px;background:#22d3ee;clip-path:polygon(0 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%)"></div><div style="font-size:10px;margin-top:6px;color:var(--site-text-3);font-family:var(--font-mono)">IV / CYAN<br>#22D3EE</div></div>
+        <div><div style="height:40px;background:#16c784;clip-path:polygon(0 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%)"></div><div style="font-size:10px;margin-top:6px;color:var(--site-text-3);font-family:var(--font-mono)">UP<br>#16C784</div></div>
+        <div><div style="height:40px;background:#ea3943;clip-path:polygon(0 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%)"></div><div style="font-size:10px;margin-top:6px;color:var(--site-text-3);font-family:var(--font-mono)">DOWN<br>#EA3943</div></div>
+      </div>
+      <div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:6px">
+        <span class="chip ok"><span class="dot"></span>GATEWAY UP</span>
+        <span class="chip warn"><span class="dot"></span>MOBILE SLOT</span>
+        <span class="chip danger"><span class="dot"></span>TRADING HALTED</span>
+        <span class="chip info"><span class="dot"></span>AWAITING APPROVE</span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Components · tags &amp; actions</h2>
+      <div class="row-actions" style="margin-bottom:14px">
+        <span class="tag blue">P2 PANIC</span>
+        <span class="tag teal">HIGH_IV</span>
+        <span class="tag amber">NEWS_WASH</span>
+        <span class="tag violet">OPEN_STRANGLE</span>
+        <span class="tag red">ALL_ORDERS</span>
+      </div>
+      <div class="row-actions">
+        <button class="btn primary" data-action="approve">Approve</button>
+        <button class="btn ghost" data-action="amend">Amend</button>
+        <button class="btn danger" data-action="reject">Reject</button>
+        <button class="btn ok" data-action="resume">Resume</button>
+      </div>
+      <div class="field" style="margin-top:16px">
+        <div class="k">Strike</div>
+        <div class="v"><code>210 / 235</code> · NVDA Oct 17</div>
+      </div>
+      <div class="field">
+        <div class="k">Premium</div>
+        <div class="v"><code>$5.35</code> mid · limit $5.20</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Phase rail · News Front-Running</h2>
+    <div class="phase-rail">
+      <div class="phase"><div class="n">P1</div><div class="t">Warning</div><div class="d">T−7…T−3 · watch IV</div></div>
+      <div class="phase active"><div class="n">P2</div><div class="t">Panic</div><div class="d">IV crush setup · strangle</div></div>
+      <div class="phase"><div class="n">P3</div><div class="t">Event</div><div class="d">Hold through print</div></div>
+      <div class="phase"><div class="n">P4</div><div class="t">Repair</div><div class="d">Close / rotate</div></div>
+      <div class="phase"><div class="n">P5</div><div class="t">Euphoria</div><div class="d">CC bias</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Feedback · toasts &amp; loading</h2>
+    <div class="row-actions">
+      <button class="btn ghost" id="tOk">Toast ok</button>
+      <button class="btn ghost" id="tWarn">Toast warn</button>
+      <button class="btn ghost" id="tErr">Toast err</button>
+      <button class="btn ghost" id="tModal">Modal</button>
+      <button class="btn ghost" id="tPanel">Slide-in panel</button>
+      <button class="btn ghost" id="tLoad">Loading 1.2s</button>
+    </div>
+    <div id="loadZone" style="margin-top:14px;min-height:40px"></div>
+  </div>
+</div>
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+  document.getElementById("tOk").addEventListener("click", () => A.toast("Approved", "draft_7f3a queued for Athena slot", "ok"));
+  document.getElementById("tWarn").addEventListener("click", () => A.toast("Mobile slot soon", "Athena yields API at 19:00 HKT", "warn"));
+  document.getElementById("tErr").addEventListener("click", () => A.toast("Rejected", "draft_9c12 discarded", "err"));
+  document.getElementById("tModal").addEventListener("click", () => A.modal({ title: "Confirm", body: "Sharp-corner modal. Esc or backdrop closes." }));
+  document.getElementById("tPanel").addEventListener("click", () => A.panel({ title: "Detail", body: "Slide-in panel for full views and editors." }));
+  document.getElementById("tLoad").addEventListener("click", () => {
+    A.simulateLoading(document.getElementById("loadZone"), () => {
+      document.getElementById("loadZone").innerHTML = '<span class="tag green">LOADED</span>';
+    }, 1200);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Settings</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .toggle-row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid var(--site-border); }
+  .toggle-row:last-child { border-bottom:0; }
+  .input {
+    width:100%; padding:9px 11px; border:1px solid var(--site-border-strong);
+    font:12.5px var(--font-mono); background:#0a0c10; color:var(--site-text);
+    border-radius:2px; transition:border-color .12s;
+  }
+  .input:focus { outline:none; border-color:var(--site-primary); }
+  .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+  .form-grid label { display:block; font-size:10px; color:var(--site-text-4); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; font-family:var(--font-mono); }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a class="active" href="./index.html">Settings</a>
+    <div class="foot">KEYS ON BOX<br>NOT IN BROWSER</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Settings</h1>
+        <p>Connections only. News, IBKR, market data, and the AI scorer. Risk limits are on Risk control.</p>
+      </div>
+      <div class="chips">
+        <span class="chip warn"><span class="dot"></span>PAPER</span>
+        <span class="chip ok"><span class="dot"></span>KEYS ON BOX</span>
+      </div>
+    </div>
+
+    <div class="grid cols-2">
+      <div class="card">
+        <h2>IBKR</h2>
+        <div class="form-grid" style="grid-template-columns:1fr">
+          <div><label>Gateway host</label><input class="input" value="127.0.0.1"></div>
+          <div class="form-grid">
+            <div><label>Port</label><input class="input" value="4001"></div>
+            <div><label>Client id</label><input class="input" value="7"></div>
+          </div>
+          <div>
+            <label>Account id</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="input" value="U3726383-BOT" style="flex:1">
+              <button class="copy-btn" data-copy="U3726383-BOT" data-copy-label="Account" title="Copy" style="width:30px;height:30px;flex-shrink:0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button>
+            </div>
+          </div>
+          <div><label>Athena slots</label><input class="input" value="HKT 09:30-12:00, 21:30-23:55"></div>
+          <div><label>Mobile reserved slots</label><input class="input" value="HKT 19:00-21:30"></div>
+        </div>
+        <div class="toggle-row" style="margin-top:8px"><div>Trading mode</div><span class="tag amber">PAPER</span></div>
+      </div>
+
+      <div class="card">
+        <h2>Market data</h2>
+        <p style="margin:0 0 12px;font-size:12.5px;color:var(--site-text-3);line-height:1.5">iTick for live quotes. IB is used for history and orders inside Athena slots.</p>
+        <div class="form-grid" style="grid-template-columns:1fr">
+          <div><label>iTick base URL</label><input class="input" value="https://api.itick.org"></div>
+        </div>
+        <div class="toggle-row"><div>API token</div><span class="tag green">SET ON BOX</span></div>
+        <div class="toggle-row"><div>Symbols on the feed</div><span class="tag">12</span></div>
+        <div class="toggle-row"><div>Last quote</div><span class="tag green">186 MS</span></div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:14px">
+      <div class="card">
+        <h2>News API</h2>
+        <div class="toggle-row"><div>Yahoo Finance headlines</div><span class="tag green">ON</span></div>
+        <div class="toggle-row"><div>Finviz headlines</div><span class="tag green">ON</span></div>
+        <div class="toggle-row"><div>Fed calendar</div><span class="tag green">ON</span></div>
+        <div class="toggle-row"><div>MSN</div><span class="tag">OFF</span></div>
+        <div class="toggle-row"><div>Manual forward (WeChat, Rednote)</div><span class="tag green">ON</span></div>
+        <div class="form-grid" style="grid-template-columns:1fr;margin-top:12px">
+          <div><label>Poll seconds</label><input class="input" value="60"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>AI API</h2>
+        <p style="margin:0 0 12px;font-size:12.5px;color:var(--site-text-3);line-height:1.5">Scores news sentiment. Does not place orders. Key stays in the Windows env.</p>
+        <div class="form-grid" style="grid-template-columns:1fr">
+          <div><label>Provider</label><input class="input" value="DSH"></div>
+          <div><label>Model</label><input class="input" value="sentiment-v1"></div>
+          <div><label>Base URL</label><input class="input" value="http://127.0.0.1:8787"></div>
+        </div>
+        <div class="toggle-row"><div>API key</div><span class="tag green">SET ON BOX</span></div>
+        <div class="toggle-row"><div>Scorer</div><span class="tag amber">STUB OK</span></div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:14px">
+      <div class="card">
+        <h2>Notify</h2>
+        <div class="toggle-row">
+          <div>
+            <div>Telegram identity</div>
+            <div style="font-size:11.5px;color:var(--site-text-4);margin-top:3px">@athena_zeptun_bot is up. No user linked.</div>
+          </div>
+          <a class="btn ghost" href="../06-telegram-connect/index.html">Link</a>
+        </div>
+        <div class="toggle-row"><div>Telegram drafts and fills</div><span class="tag green">ON</span></div>
+        <div class="toggle-row"><div>Feishu</div><span class="tag">STUB</span></div>
+        <div class="toggle-row"><div>Daily summary 22:30 HKT</div><span class="tag green">ON</span></div>
+      </div>
+      <div class="card">
+        <h2>Strategy</h2>
+        <p style="margin:0 0 12px;font-size:12.5px;color:var(--site-text-3);line-height:1.5">NFR tactic shape. Size and halt limits are not here.</p>
+        <div class="form-grid">
+          <div><label>IVR high tag</label><input class="input" value="75"></div>
+          <div><label>Strangle OTM %</label><input class="input" value="7"></div>
+          <div><label>DTE open band</label><input class="input" value="30-45"></div>
+          <div><label>Profit take %</label><input class="input" value="50"></div>
+          <div><label>News wash count / days</label><input class="input" value="5 / 3"></div>
+          <div><label>Draft TTL minutes</label><input class="input" value="60"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row-actions" style="margin-top:14px">
+      <button class="btn primary" type="button" id="saveConn">Save connections</button>
+    </div>
+  </main>
+</div>
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+  document.getElementById("saveConn").addEventListener("click", () => {
+    A.toast("Connections saved", "Keys stay on the box. Risk limits were not changed.", "ok");
+  });
+})();
+</script>
+</body>
+</html>

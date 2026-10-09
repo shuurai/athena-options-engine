@@ -1,0 +1,27 @@
+# Design reference from another project (Naviator / Ardot mirror) — local only
+reference/
+
+# Secrets / local env
+.env
+.env.local
+*.pem
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Python / Node (future monorepo)
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+dist/
+.next/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+var/

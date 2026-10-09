@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Accounts</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .acct {
+    border: 1px solid var(--site-border); background: var(--site-surface);
+    padding: 16px; transition: border-color .15s, box-shadow .15s; position: relative;
+  }
+  .acct.active { border-color: var(--site-primary); box-shadow: inset 0 0 0 1px #2f6fed55; }
+  .acct .a-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .acct .a-name { font-size: 15px; font-weight: 700; }
+  .acct .a-id { font-family: var(--font-mono); font-size: 11px; color: var(--site-text-4); margin-top: 2px; }
+  .acct .a-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin-top: 14px; }
+  .acct .a-stat .l { font-size: 10px; color: var(--site-text-4); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
+  .acct .a-stat .v { font-size: 15px; font-weight: 700; font-family: var(--font-mono); margin-top: 2px; }
+  .tgl {
+    width: 34px; height: 18px; position: relative; cursor: pointer;
+    background: var(--site-surface-2); border: 1px solid var(--site-border-strong);
+    transition: .15s; flex-shrink: 0;
+    clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+  }
+  .tgl::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: var(--site-text-4); transition: .15s; }
+  .tgl.on { background: #101c33; border-color: var(--site-primary); }
+  .tgl.on::after { left: 18px; background: var(--site-primary); }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a class="active" href="./index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">3 CONFIGURED<br>ACTIVE · RELAXED</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Accounts</h1>
+        <p>Configured IB accounts. Switch the active sleeve Athena trades. Ids are config — add any account you control.</p>
+      </div>
+      <div class="chips">
+        <span class="chip info"><span class="dot"></span>3 CONFIGURED</span>
+        <span class="chip ok"><span class="dot"></span>ACTIVE · RELAXED</span>
+      </div>
+    </div>
+
+    <div class="grid cols-3" id="acctGrid"></div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Account controls <span class="more" id="addAcct">+ add account</span></h2>
+      <div class="scroll-y" style="max-height:220px">
+        <table class="data">
+          <thead><tr><th>Account</th><th>Mode</th><th>Sync</th><th>Trading</th><th>Last sync</th></tr></thead>
+          <tbody id="ctlBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+
+  const CLIP = '<button class="copy-btn" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button>';
+
+  const accounts = [
+    { key: "relaxed", name: "Relaxed", id: "U3726383-BOT", nlv: "HK$226,480", cash: "32.4%", pos: 3, active: true, mode: "PAPER", sync: true, trading: false, last: "21:35" },
+    { key: "primary", name: "Primary", id: "U3311187-FDI", nlv: "HK$670,545", cash: "−4.9%", pos: 11, active: false, mode: "PAPER", sync: true, trading: false, last: "21:35" },
+    { key: "defensive", name: "Defensive", id: "U9390859-NC", nlv: "HK$777,900", cash: "38.3%", pos: 6, active: false, mode: "PAPER", sync: false, trading: false, last: "—" },
+  ];
+
+  const grid = document.getElementById("acctGrid");
+  const ctl = document.getElementById("ctlBody");
+
+  function render() {
+    grid.innerHTML = "";
+    ctl.innerHTML = "";
+    accounts.forEach((a) => {
+      const card = document.createElement("div");
+      card.className = "acct" + (a.active ? " active" : "");
+      card.innerHTML =
+        '<div class="a-head"><div><div class="a-name">' + a.name + '</div><div class="a-id">' + a.id +
+        '<button class="copy-btn" data-copy="' + a.id + '" data-copy-label="Account" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button></div></div>' +
+        (a.active ? '<span class="tag blue">ACTIVE</span>' : "") + "</div>" +
+        '<div class="a-stats">' +
+        '<div class="a-stat"><div class="l">NLV</div><div class="v">' + a.nlv + "</div></div>" +
+        '<div class="a-stat"><div class="l">Cash</div><div class="v">' + a.cash + "</div></div>" +
+        '<div class="a-stat"><div class="l">Positions</div><div class="v">' + a.pos + "</div></div>" +
+        '<div class="a-stat"><div class="l">Mode</div><div class="v" style="font-size:12px">' + a.mode + "</div></div>" +
+        "</div>" +
+        '<div class="row-actions" style="margin-top:14px">' +
+        (a.active
+          ? '<button class="btn ghost" style="flex:1" disabled>Current</button>'
+          : '<button class="btn primary" style="flex:1" data-switch="' + a.key + '">Switch to this</button>') +
+        '<button class="btn ghost" data-view="' + a.key + '">View</button></div>';
+      grid.appendChild(card);
+
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td><b>" + a.name + '</b> <span class="mono" style="font-size:10.5px;color:var(--site-text-4)">' + a.id + "</span></td>" +
+        '<td><span class="tag">' + a.mode + "</span></td>" +
+        '<td><span class="tgl' + (a.sync ? " on" : "") + '" data-k="sync" data-a="' + a.key + '"></span></td>' +
+        '<td><span class="tgl' + (a.trading ? " on" : "") + '" data-k="trading" data-a="' + a.key + '"></span></td>' +
+        '<td class="mono" style="font-size:11px;color:var(--site-text-3)">' + a.last + "</td>";
+      ctl.appendChild(tr);
+    });
+
+    grid.querySelectorAll("[data-switch]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const key = b.getAttribute("data-switch");
+        const target = accounts.find((x) => x.key === key);
+        A.confirmAction(
+          "Switch active account?",
+          "Athena will trade <b>" + target.name + "</b> (" + target.id + ") on next cycle. Current sleeve drafts stay with the old account.",
+          () => {
+            accounts.forEach((x) => (x.active = false));
+            target.active = true;
+            render();
+            A.toast("Active account → " + target.name, "Settings version bumped · audited", "ok");
+          },
+          "Switch"
+        );
+      });
+    });
+
+    grid.querySelectorAll("[data-view]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const a = accounts.find((x) => x.key === b.getAttribute("data-view"));
+        A.panel({
+          title: a.name + " · sleeve",
+          body:
+            '<div class="field"><div class="k">Account</div><div class="v mono">' + a.id + '<button class="copy-btn" data-copy="' + a.id + '" data-copy-label="Account" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button></div></div>' +
+            '<div class="field"><div class="k">NLV</div><div class="v mono">' + a.nlv + "</div></div>" +
+            '<div class="field"><div class="k">Cash</div><div class="v mono">' + a.cash + "</div></div>" +
+            '<div class="field"><div class="k">Positions</div><div class="v">' + a.pos + " open</div></div>" +
+            '<div class="field"><div class="k">Mode</div><div class="v">' + a.mode + "</div></div>" +
+            '<div class="field"><div class="k">Sync</div><div class="v">' + (a.sync ? "on" : "off") + " · last " + a.last + "</div></div>" +
+            '<div class="row-actions" style="margin-top:14px"><button class="btn ghost" data-action="ops">Force sync</button></div>',
+        });
+      });
+    });
+
+    ctl.querySelectorAll(".tgl").forEach((t) => {
+      t.addEventListener("click", () => {
+        t.classList.toggle("on");
+        const a = accounts.find((x) => x.key === t.getAttribute("data-a"));
+        const k = t.getAttribute("data-k");
+        const on = t.classList.contains("on");
+        a[k] = on;
+        A.toast(a.name + " · " + k + (on ? " on" : " off"), k === "trading" && on ? "Live submit still needs privilege + Approve" : "Updated · audited", on ? "ok" : "warn");
+      });
+    });
+  }
+  render();
+
+  document.getElementById("addAcct").addEventListener("click", () => {
+    const wrap = document.createElement("div");
+    wrap.innerHTML =
+      '<input class="mono" placeholder="U1234567-XXX" style="width:100%;background:#0a0c10;border:1px solid var(--site-border-strong);color:var(--site-text);padding:10px;font-size:13px;margin-bottom:10px">' +
+      '<input placeholder="Label (e.g. Income sleeve)" style="width:100%;background:#0a0c10;border:1px solid var(--site-border-strong);color:var(--site-text);padding:10px;font-size:13px">' +
+      '<p style="color:var(--site-text-3);font-size:12px;margin:10px 0 0">Any IB account id works. Starts in paper mode, sync off until you enable.</p>';
+    const cancel = document.createElement("button");
+    cancel.className = "btn ghost"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", A.closeAll);
+    const ok = document.createElement("button");
+    ok.className = "btn primary"; ok.textContent = "Add account";
+    ok.addEventListener("click", () => {
+      A.closeAll();
+      A.toast("Account added", "Paper mode · sync off · not active", "ok");
+    });
+    A.modal({ title: "Add IB account", body: wrap, footer: [cancel, ok] });
+  });
+})();
+</script>
+</body>
+</html>

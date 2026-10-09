@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · News</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .app { height: 100vh; }
+  .main {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 20px;
+  }
+  .stream-card {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .stream-scroll { flex: 1; min-height: 0; }
+  .stream-scroll thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--site-surface);
+  }
+  .stream-actions { margin-top: 14px; flex-shrink: 0; }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a class="active" href="./index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">TIER A ONLY<br>SOCIAL = MANUAL FWD</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>News intake</h1>
+        <p>Legitimate calendars + headline density. Detects wash clusters without auto-trading (Approve still required).</p>
+      </div>
+      <div class="chips">
+        <span class="chip warn"><span class="dot"></span>NVDA NEWS_WASH</span>
+        <span class="chip info"><span class="dot"></span>FED T−1</span>
+      </div>
+    </div>
+
+    <div class="grid cols-3" style="margin-bottom:14px">
+      <div class="card stat">
+        <div class="label">NVDA neg density</div>
+        <div class="value" style="color:var(--ath-halt)">6 / 72h</div>
+        <div class="meta">threshold 5 · tag ACTIVE</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Avg sentiment</div>
+        <div class="value down">−0.62</div>
+        <div class="meta">DSH enrichment · stub ok</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Wash events · 6mo</div>
+        <div class="value">14</div>
+        <div class="meta">11 resolved profitable</div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-bottom:14px">
+      <div class="card">
+        <h2>Negative density · NVDA · 12 weeks <span class="more" data-panel="density">full view →</span></h2>
+        <div class="chart-box" style="height:130px" id="chartDensity"></div>
+      </div>
+      <div class="card">
+        <h2>Source mix · 6 months</h2>
+        <div class="chart-box" style="height:130px" id="chartSources"></div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--site-text-4);font-family:var(--font-mono);margin-top:8px">
+          <span>YAHOO</span><span>FINVIZ</span><span>FED</span><span>MSN</span><span>MANUAL</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card stream-card">
+      <h2>Event stream · NVDA cluster <span class="more" id="ingestBtn">manual ingest →</span></h2>
+      <div class="scroll-y stream-scroll">
+        <table class="data">
+          <thead>
+            <tr><th>When</th><th>Source</th><th>Type</th><th>Sent.</th><th>Cred</th><th>Title</th></tr>
+          </thead>
+          <tbody id="newsBody"></tbody>
+        </table>
+      </div>
+      <div class="row-actions stream-actions">
+        <a class="btn primary" href="../02-draft-approve/index.html">Open related draft</a>
+        <button type="button" class="btn danger" id="falseAlarm">Mark false alarm</button>
+        <button type="button" class="btn" id="manualIngest">Manual ingest…</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+
+  A.bars(document.getElementById("chartDensity"), [1,0,2,1,0,1,3,2,1,4,5,6], { w: 520, h: 130 });
+  A.bars(document.getElementById("chartSources"), [38, 24, 12, 16, 10], { w: 520, h: 130 });
+
+  const events = [
+    ["10-08 14:12", "yahoo", "GENERIC_NEGATIVE", "red", "−0.71", "0.72", "Chip names slip as traders brace for Fed path"],
+    ["10-08 11:40", "finviz", "NARRATIVE_ATTACK", "red", "−0.88", "0.35", "“AI spend hangover” headline cluster (low cred)"],
+    ["10-08 09:05", "fed", "FED_RATE_DECISION", "blue", "0.00", "0.98", "FOMC decision due 2026-10-09 14:00 ET"],
+    ["10-07 22:18", "msn", "AI_REGULATION", "amber", "−0.44", "0.55", "Lawmakers float fresh AI disclosure rules"],
+    ["10-07 16:02", "manual", "GENERIC_NEGATIVE", "red", "−0.60", "0.40", "User-forwarded WeChat summary (manual ingest)"],
+    ["10-07 08:31", "yahoo", "SUPPLY_CHAIN", "amber", "−0.39", "0.68", "Memory pricing chatter weighs semis"],
+    ["10-06 21:14", "finviz", "GENERIC_NEGATIVE", "red", "−0.52", "0.61", "Semis lag index into macro week"],
+    ["10-06 09:44", "yahoo", "GENERIC_POSITIVE", "green", "+0.31", "0.70", "Datacenter demand steady per channel checks"],
+    ["10-05 15:20", "manual", "GENERIC_NEGATIVE", "red", "−0.48", "0.38", "Forwarded Rednote thread on GPU resale prices"],
+    ["10-04 10:02", "finviz", "ANTITRUST_FINE", "amber", "−0.66", "0.58", "EU comments on accelerator bundling probe"],
+  ];
+  const body = document.getElementById("newsBody");
+  events.forEach((e) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td class="mono">' + e[0] + "</td>" +
+      '<td><span class="tag">' + e[1] + "</span></td>" +
+      '<td><span class="tag ' + e[3] + '">' + e[2] + "</span></td>" +
+      '<td class="mono">' + e[4] + "</td>" +
+      '<td class="mono">' + e[5] + "</td>" +
+      "<td>" + e[6] + "</td>";
+    tr.style.cursor = "pointer";
+    tr.addEventListener("click", () => {
+      A.modal({
+        title: "Event · " + e[1] + " · " + e[0],
+        body:
+          '<div class="field"><div class="k">Type</div><div class="v">' + e[2] + "</div></div>" +
+          '<div class="field"><div class="k">Sentiment</div><div class="v mono">' + e[4] + "</div></div>" +
+          '<div class="field"><div class="k">Credibility</div><div class="v mono">' + e[5] + "</div></div>" +
+          '<div class="field"><div class="k">Symbols</div><div class="v">NVDA</div></div>' +
+          '<div class="field"><div class="k">Title</div><div class="v">' + e[6] + "</div></div>" +
+          '<div class="field"><div class="k">Wash weight</div><div class="v">' + (parseFloat(e[5]) < 0.5 ? "counts toward NEWS_WASH density" : "high cred — separate path") + "</div></div>",
+      });
+    });
+    body.appendChild(tr);
+  });
+
+  function openIngest() {
+    A.modal({
+      title: "Manual ingest",
+      body:
+        '<p style="margin:0 0 10px;color:var(--site-text-3);font-size:12.5px">Paste a link or text from WeChat / Rednote / TikTok. Tier C stays manual until compliance review.</p>' +
+        '<input class="mono" style="width:100%;background:#0a0c10;border:1px solid var(--site-border-strong);color:var(--site-text);padding:10px;font-size:12px" placeholder="https://… or pasted text">',
+      footer: (function () {
+        const cancel = document.createElement("button");
+        cancel.className = "btn ghost"; cancel.textContent = "Cancel";
+        cancel.addEventListener("click", A.closeAll);
+        const ok = document.createElement("button");
+        ok.className = "btn primary"; ok.textContent = "Ingest";
+        ok.addEventListener("click", () => {
+          A.closeAll();
+          A.toast("Ingested", "Event queued for DSH sentiment scoring", "ok");
+        });
+        return [cancel, ok];
+      })(),
+    });
+  }
+  document.getElementById("manualIngest").addEventListener("click", openIngest);
+  document.getElementById("ingestBtn").addEventListener("click", openIngest);
+  document.getElementById("falseAlarm").addEventListener("click", () => {
+    A.confirmAction(
+      "Mark NVDA wash as false alarm?",
+      "Clears the NEWS_WASH tag for this cluster. Density history stays in the log.",
+      () => A.toast("False alarm", "NVDA NEWS_WASH cleared · reason logged", "warn"),
+      "Mark false alarm"
+    );
+  });
+
+  document.querySelector("[data-panel='density']").addEventListener("click", () => {
+    const body2 = document.createElement("div");
+    body2.innerHTML = '<div class="chart-box" style="height:200px" id="pDen"></div><p style="color:var(--site-text-3);font-size:12px;margin-top:10px">Threshold 5/72h from settings_v42. Breach → NEWS_WASH ACTIVE → P2 candidate.</p>';
+    A.panel({ title: "Wash density · 12 weeks", body: body2 });
+    A.bars(body2.querySelector("#pDen"), [1,0,2,1,0,1,3,2,1,4,5,6], { w: 420, h: 200 });
+  });
+})();
+</script>
+</body>
+</html>

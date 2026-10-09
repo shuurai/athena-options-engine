@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Universe</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .tgl {
+    width: 34px; height: 18px; position: relative; cursor: pointer;
+    background: var(--site-surface-2); border: 1px solid var(--site-border-strong);
+    transition: .15s; flex-shrink: 0;
+    clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+  }
+  .tgl::after {
+    content: ""; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; background: var(--site-text-4);
+    transition: .15s;
+  }
+  .tgl.on { background: #101c33; border-color: var(--site-primary); }
+  .tgl.on::after { left: 18px; background: var(--site-primary); }
+  .tgl.green.on { background: #0d1f16; border-color: #16c784; }
+  .tgl.green.on::after { background: #16c784; }
+  .prof { display:flex; gap:6px; }
+  .prof button {
+    padding:7px 12px; font-size:11px; font-weight:600; font-family:var(--font-mono);
+    background:transparent; border:1px solid var(--site-border-strong); color:var(--site-text-3);
+    cursor:pointer; transition:.12s;
+  }
+  .prof button:hover { border-color:var(--site-primary); color:var(--site-primary); }
+  .prof button.on { background:#101c33; border-color:var(--site-primary); color:#93c5fd; }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a class="active" href="./index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">POOL 8 SYMBOLS<br>SCAN DAILY 09:00 HKT</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Universe</h1>
+        <p>The pool Athena screens every day for NFR tactics. Only enabled symbols generate drafts. Toggles apply immediately (audited).</p>
+      </div>
+      <div class="chips">
+        <span class="chip ok"><span class="dot"></span>8 IN POOL</span>
+        <span class="chip info"><span class="dot"></span>LAST SCAN 21:35</span>
+        <span class="chip"><span class="dot"></span>3 CANDIDATES</span>
+      </div>
+    </div>
+
+    <div class="grid cols-3" style="margin-bottom:14px">
+      <div class="card stat">
+        <div class="label">Screening profile</div>
+        <div class="prof" style="margin-top:10px" id="profSeg">
+          <button data-p="conservative">conservative</button>
+          <button class="on" data-p="standard">standard</button>
+          <button data-p="aggressive">aggressive</button>
+        </div>
+        <div class="meta" style="margin-top:10px">standard · IVR≥50 · vol&gt;100/day · spread&lt;5%</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Last scan</div>
+        <div class="value">21:35</div>
+        <div class="meta">12s · 8 symbols · 3 candidates</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Drafts from scan</div>
+        <div class="value" style="color:var(--site-primary)">2</div>
+        <div class="meta"><a href="../02-draft-approve/index.html" style="color:var(--site-primary)">open queue →</a></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Symbol pool <span class="more" id="addSym">+ add symbol</span></h2>
+      <div class="scroll-y" style="max-height:440px">
+        <table class="data">
+          <thead>
+            <tr><th>Symbol</th><th>Price</th><th>1D %</th><th>Mkt cap</th><th>Classifiers</th><th>IVR</th><th>Phase</th><th>Enabled</th><th>CSP</th><th>CC</th><th>Strangle</th><th></th></tr>
+          </thead>
+          <tbody id="poolBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+
+  const pool = [
+    { sym: "NVDA", name: "NVIDIA", mcap: "5.31T", price: 218.42, chg: -2.84, cls: ["AI_NARRATIVE", "HIGH_BETA", "MAG7"], ivr: 82, phase: "P2", pc: "blue", on: true, csp: true, cc: true, str: true },
+    { sym: "QCOM", name: "Qualcomm", mcap: "188.2B", price: 169.05, chg: 0.62, cls: ["EARNINGS_NEAR"], ivr: 54, phase: "P1", pc: "", on: true, csp: true, cc: true, str: false },
+    { sym: "T", name: "AT&T", mcap: "194.7B", price: 27.18, chg: 0.15, cls: ["STRONG_FCF", "MUST_HOLD"], ivr: 41, phase: "IDLE", pc: "", on: true, csp: true, cc: true, str: false },
+    { sym: "F", name: "Ford", mcap: "56.9B", price: 14.31, chg: -0.48, cls: ["LOW_PRICE", "MUST_HOLD"], ivr: 38, phase: "IDLE", pc: "", on: true, csp: true, cc: true, str: false },
+    { sym: "INTC", name: "Intel", mcap: "148.3B", price: 34.92, chg: 1.24, cls: ["GOV_BACKSTOP"], ivr: 60, phase: "P1", pc: "", on: true, csp: true, cc: false, str: false },
+    { sym: "DRAM", name: "DRAM ETF", mcap: "1.2B", price: 52.66, chg: -1.10, cls: ["MEMORY_CYCLE"], ivr: 66, phase: "P1", pc: "", on: true, csp: true, cc: true, str: true },
+    { sym: "MSFT", name: "Microsoft", mcap: "3.92T", price: 527.40, chg: 0.88, cls: ["MAG7", "LOW_PREMIUM"], ivr: 34, phase: "IDLE", pc: "", on: false, csp: false, cc: true, str: false },
+    { sym: "AVGO", name: "Broadcom", mcap: "1.31T", price: 279.15, chg: 2.05, cls: ["MAG7", "EXPENSIVE"], ivr: 47, phase: "IDLE", pc: "", on: false, csp: false, cc: false, str: false },
+  ];
+
+  const body = document.getElementById("poolBody");
+  pool.forEach((s) => {
+    const tr = document.createElement("tr");
+    if (!s.on) tr.style.opacity = ".45";
+    const chgCls = s.chg >= 0 ? "up" : "down";
+    const chgTxt = (s.chg >= 0 ? "+" : "") + s.chg.toFixed(2) + "%";
+    tr.innerHTML =
+      "<td><b>" + s.sym + "</b><div style='font-size:10.5px;color:var(--site-text-4)'>" + s.name + "</div></td>" +
+      '<td class="mono" style="font-weight:600">' + s.price.toFixed(2) + "</td>" +
+      '<td class="mono" style="color:var(--ath-' + chgCls + ')">' + chgTxt + "</td>" +
+      '<td class="mono" style="color:var(--site-text-3)">' + s.mcap + "</td>" +
+      "<td>" + s.cls.map((c) => '<span class="tag">' + c + "</span>").join(" ") + "</td>" +
+      '<td class="mono">' + s.ivr + "</td>" +
+      "<td>" + (s.pc ? '<span class="tag ' + s.pc + '">' + s.phase + "</span>" : '<span class="tag">' + s.phase + "</span>") + "</td>" +
+      '<td><span class="tgl green' + (s.on ? " on" : "") + '" data-k="on"></span></td>' +
+      '<td><span class="tgl' + (s.csp ? " on" : "") + '" data-k="csp"></span></td>' +
+      '<td><span class="tgl' + (s.cc ? " on" : "") + '" data-k="cc"></span></td>' +
+      '<td><span class="tgl' + (s.str ? " on" : "") + '" data-k="str"></span></td>' +
+      '<td><button class="btn ghost" style="padding:4px 10px;font-size:11px" data-edit>Edit</button></td>';
+    body.appendChild(tr);
+
+    tr.querySelectorAll(".tgl").forEach((t) => {
+      t.addEventListener("click", () => {
+        t.classList.toggle("on");
+        const k = t.getAttribute("data-k");
+        const on = t.classList.contains("on");
+        if (k === "on") {
+          tr.style.opacity = on ? "1" : ".45";
+          A.toast(s.sym + (on ? " enabled" : " disabled"), on ? "Included in next daily scan" : "Excluded from scanning", on ? "ok" : "warn");
+        } else {
+          const label = { csp: "CSP", cc: "CC", str: "Strangle" }[k];
+          A.toast(s.sym + " · " + label + (on ? " on" : " off"), "Tactic permission updated", "info");
+        }
+      });
+    });
+
+    tr.querySelector("[data-edit]").addEventListener("click", () => {
+      A.panel({
+        title: "Edit · " + s.sym,
+        body:
+          '<div class="field"><div class="k">Symbol</div><div class="v"><b>' + s.sym + "</b> · " + s.name + "</div></div>" +
+          '<div class="field"><div class="k">Price</div><div class="v mono">' + s.price.toFixed(2) + ' <span style="color:var(--ath-' + (s.chg >= 0 ? "up" : "down") + ')">' + ((s.chg >= 0 ? "+" : "") + s.chg.toFixed(2) + "%") + "</span></div></div>" +
+          '<div class="field"><div class="k">Mkt cap</div><div class="v mono">' + s.mcap + "</div></div>" +
+          '<div class="field"><div class="k">IVR</div><div class="v mono">' + s.ivr + "</div></div>" +
+          '<div class="field"><div class="k">Phase</div><div class="v">' + s.phase + "</div></div>" +
+          '<div class="field"><div class="k">Classifiers</div><div class="v">' + s.cls.join(", ") + "</div></div>" +
+          '<div class="field"><div class="k">Thesis</div><div class="v">Must-hold income name · willing to own at CSP strike.</div></div>' +
+          '<div class="row-actions" style="margin-top:14px">' +
+          '<button class="btn primary" data-action="save">Save</button>' +
+          '<button class="btn danger" data-action="reject">Remove from pool</button></div>',
+      });
+    });
+  });
+
+  document.getElementById("profSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    document.querySelectorAll("#profSeg button").forEach((x) => x.classList.remove("on"));
+    b.classList.add("on");
+    A.toast("Profile → " + b.getAttribute("data-p"), "Scan thresholds updated · audited", "info");
+  });
+
+  document.getElementById("addSym").addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.className = "mono";
+    input.placeholder = "TICKER";
+    input.style.cssText = "width:100%;background:#0a0c10;border:1px solid var(--site-border-strong);color:var(--site-text);padding:10px;font-size:13px;margin-bottom:10px";
+    const thesis = document.createElement("input");
+    thesis.placeholder = "Thesis (why you'd own it)";
+    thesis.style.cssText = input.style.cssText;
+    const wrap = document.createElement("div");
+    wrap.appendChild(input); wrap.appendChild(thesis);
+    const note = document.createElement("p");
+    note.style.cssText = "color:var(--site-text-3);font-size:12px;margin:4px 0 0";
+    note.textContent = "New symbols start disabled until first scan validates liquidity.";
+    wrap.appendChild(note);
+    const cancel = document.createElement("button");
+    cancel.className = "btn ghost"; cancel.textContent = "Cancel";
+    cancel.addEventListener("click", A.closeAll);
+    const ok = document.createElement("button");
+    ok.className = "btn primary"; ok.textContent = "Add to pool";
+    ok.addEventListener("click", () => {
+      A.closeAll();
+      A.toast("Added " + (input.value || "NEW"), "Disabled until liquidity check passes", "ok");
+    });
+    A.modal({ title: "Add symbol", body: wrap, footer: [cancel, ok] });
+    input.focus();
+  });
+})();
+</script>
+</body>
+</html>

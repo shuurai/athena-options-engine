@@ -1,0 +1,41 @@
+[project]
+name = "athena"
+version = "0.0.0"
+description = "Athena Options Engine workspace"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "athena-bots",
+    "athena-exec",
+    "athena-marketdata",
+    "athena-orchestrator",
+    "athena-risk",
+    "athena-settings",
+    "athena-store",
+    "athena-strategy-nfr",
+]
+
+[tool.uv.sources]
+athena-bots = { workspace = true }
+athena-exec = { workspace = true }
+athena-marketdata = { workspace = true }
+athena-orchestrator = { workspace = true }
+athena-risk = { workspace = true }
+athena-settings = { workspace = true }
+athena-store = { workspace = true }
+athena-strategy-nfr = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "apps/bots",
+    "apps/exec-ib",
+    "apps/orchestrator",
+    "packages/marketdata",
+    "packages/risk",
+    "packages/settings",
+    "packages/store",
+    "packages/strategy-nfr",
+]
+
+[tool.uv]
+package = false

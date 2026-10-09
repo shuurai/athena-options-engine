@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Cockpit</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .chart-h { height: 120px; }
+  .chart-h-lg { height: 180px; }
+  .chart-legend { display:flex; gap:14px; font-size:10px; color:var(--site-text-4); font-family:var(--font-mono); margin-top:8px; }
+  .chart-legend span { display:inline-flex; align-items:center; gap:5px; }
+  .chart-legend i { width:10px; height:2px; display:inline-block; }
+  .month-row { display:flex; justify-content:space-between; font-size:10px; color:var(--site-text-4); font-family:var(--font-mono); margin-top:6px; }
+  .badge-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .cell-empty { color: var(--site-text-4); font-family: var(--font-mono); }
+  .health-title { display: inline-flex; align-items: center; gap: 8px; }
+  .health-light {
+    width: 8px; height: 8px; border-radius: 50%; flex: none;
+    background: #16c784; box-shadow: 0 0 0 3px #16c78433, 0 0 10px #16c784;
+    animation: health-glow 2.4s ease-in-out infinite;
+  }
+  .health-light.warn { background: #f7931a; box-shadow: 0 0 0 3px #f7931a33, 0 0 10px #f7931a; }
+  .health-light.down { background: #ea3943; box-shadow: 0 0 0 3px #ea394333, 0 0 10px #ea3943; }
+  .health-light.tick { animation: health-tick .6s ease-out, health-glow 2.4s ease-in-out infinite; }
+  @keyframes health-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .55; }
+  }
+  @keyframes health-tick {
+    0% { transform: scale(1); }
+    35% { transform: scale(1.55); }
+    100% { transform: scale(1); }
+  }
+  .health-meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
+  .health-meter i { width: 3px; background: #1e2933; display: block; }
+  .health-meter i:nth-child(1) { height: 4px; }
+  .health-meter i:nth-child(2) { height: 6px; }
+  .health-meter i:nth-child(3) { height: 8px; }
+  .health-meter i:nth-child(4) { height: 10px; }
+  .health-meter i:nth-child(5) { height: 12px; }
+  .health-meter.ok i.on { background: #16c784; }
+  .health-meter.warn i.on { background: #f7931a; }
+  .health-meter.down i.on { background: #ea3943; }
+  .health-age {
+    font-weight: 500; letter-spacing: 0; text-transform: none;
+    color: var(--site-text-3);
+  }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand">
+      <div class="mark">A</div>
+      <div><b>Athena</b><span>Options Engine</span></div>
+    </div>
+    <a class="active" href="./index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">HOST WIN-5090-BOX<br>LOOP 5M · CYCLE #2841<br>UPTIME 182D 06H</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Cockpit</h1>
+        <p>Six months in. Windows box health, IB slots, sleeve performance. Account id is whatever you configure — masked here.</p>
+      </div>
+      <div class="chips">
+        <span class="chip ok"><span class="dot"></span>GATEWAY UP</span>
+        <span class="chip info"><span class="dot"></span>ATHENA SLOT · 21:30–23:55</span>
+        <span class="chip warn"><span class="dot"></span>MODE · PAPER</span>
+        <span class="chip"><span class="dot"></span>ALL_ORDERS</span>
+      </div>
+    </div>
+
+    <div class="grid cols-4">
+      <div class="card stat">
+        <div class="label">Sleeve NLV</div>
+        <div class="value">HK$226,480</div>
+        <div class="meta">+14.2% / 6mo · <span class="mono">U3726383-BOT</span><button class="copy-btn" data-copy="U3726383-BOT" data-copy-label="Account" title="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg></button></div>
+      </div>
+      <div class="card stat">
+        <div class="label">Premium collected · 6mo</div>
+        <div class="value up">$9,552</div>
+        <div class="meta">54 trades · 81% win</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Cash reserve</div>
+        <div class="value">32.4%</div>
+        <div class="meta">floor 30% · CSP ready</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Pending drafts</div>
+        <div class="value" style="color:var(--site-primary)">2</div>
+        <div class="meta">TTL 42m · <a href="../02-draft-approve/index.html" style="color:var(--site-primary)">open queue →</a></div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:14px">
+      <div class="card">
+        <h2>Sleeve NLV · 26 weeks <span class="more" data-panel="nlv">full view →</span></h2>
+        <div class="chart-box chart-h-lg" id="chartNlv"></div>
+        <div class="month-row"><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div>
+      </div>
+      <div class="card">
+        <h2>Monthly premium vs realized P&amp;L <span class="more" data-panel="pnl">full view →</span></h2>
+        <div class="chart-box chart-h-lg" id="chartPnl"></div>
+        <div class="chart-legend">
+          <span><i style="background:#16c784"></i>win month</span>
+          <span><i style="background:#ea3943"></i>loss month</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid cols-2" style="margin-top:14px">
+      <div class="card">
+        <h2>IB session schedule · today <span class="more" data-panel="slots">edit slots →</span></h2>
+        <table class="data">
+          <thead><tr><th>Window (HKT)</th><th>Owner</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">09:30–12:00</td><td>Athena sync</td><td><span class="tag green">DONE</span></td></tr>
+            <tr><td class="mono">12:00–19:00</td><td>Idle / iTick only</td><td><span class="tag">IDLE</span></td></tr>
+            <tr><td class="mono">19:00–21:30</td><td>Mobile IB App</td><td><span class="tag amber">RESERVED</span></td></tr>
+            <tr><td class="mono">21:30–23:55</td><td>Athena exec</td><td><span class="tag blue">ACTIVE NOW</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" style="display:flex;flex-direction:column">
+        <h2>
+          <span class="health-title">
+            System health
+            <span class="health-light ok" id="healthLight" title="Healthy"></span>
+            <span class="health-meter ok" id="healthMeter" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></span>
+            <span class="health-age" id="healthAge">5/5 · live</span>
+          </span>
+          <span class="more" data-panel="ops">ops panel →</span>
+        </h2>
+        <div id="healthBody" style="flex:1">
+          <div class="field"><div class="k">Orchestrator</div><div class="v">running · cycle #2841 · 38s</div></div>
+          <div class="field"><div class="k">iTick</div><div class="v">ok · 186ms · 12 symbols</div></div>
+          <div class="field"><div class="k">Store</div><div class="v">Postgres · lag 12ms</div></div>
+          <div class="field"><div class="k">MinIO</div><div class="v">last backup 22:10 · sync ok</div></div>
+          <div class="field"><div class="k">Telegram</div><div class="v">stub · guide ready</div></div>
+        </div>
+        <div class="row-actions" style="margin-top:12px">
+          <button class="btn ghost" data-action="ops">/ops health</button>
+          <button class="btn ghost" data-action="backup">Backup now</button>
+          <button class="btn danger" data-action="halt">Halt trading</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Watchlist pulse <a class="more" href="../05-nfr-phase-board/index.html">NFR board →</a></h2>
+      <div class="scroll-y" style="max-height:260px">
+        <table class="data">
+          <thead><tr><th>Symbol</th><th>Last</th><th>IVR</th><th>Phase</th><th>Tags</th><th>Side</th><th>Strike</th><th>DTE</th><th>Status</th></tr></thead>
+          <tbody id="watchBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const A = window.Athena;
+
+  A.sparkline(document.getElementById("chartNlv"), A.DATA.nlvWeekly, { w: 560, h: 180, color: "#6b96f2" });
+  A.bars(document.getElementById("chartPnl"), A.DATA.pnlMonthly, { w: 560, h: 180 });
+
+  function badgeRow(items) {
+    if (!items || !items.length) return '<span class="cell-empty">—</span>';
+    return '<span class="badge-row">' + items.map((item) =>
+      '<span class="tag' + (item.cls ? " " + item.cls : "") + '">' + item.t + "</span>"
+    ).join("") + "</span>";
+  }
+  function numCell(value) {
+    if (value == null || value === "") return '<span class="cell-empty">—</span>';
+    return '<span class="mono">' + value + "</span>";
+  }
+  const watch = [
+    { sym: "NVDA", last: "218.42", ivr: A.DATA.ivrWeekly, phase: "P2 Panic", pc: "blue", tags: [{ t: "NEWS_WASH", cls: "amber" }, { t: "HIGH_IV", cls: "teal" }], side: [{ t: "FLAT" }], strikes: [], dte: null, status: [{ t: "DRAFT", cls: "blue" }] },
+    { sym: "QCOM", last: "169.05", ivr: [44,47,52,49,55,58,54,51,56,54,52,54,57,53,55,54,56,52,54,55,53,54,56,55,54,54], phase: "P1", pc: "", tags: [{ t: "EARNINGS_NEAR" }], side: [{ t: "SHORT PUT", cls: "amber" }], strikes: ["165"], dte: "28", status: [] },
+    { sym: "T", last: "27.18", ivr: [33,35,38,36,40,42,39,41,43,40,38,41,42,40,39,41,43,42,40,41,42,41,40,42,41,41], phase: "Hold", pc: "", tags: [{ t: "STRONG_FCF", cls: "green" }], side: [{ t: "800 SH", cls: "green" }, { t: "CC", cls: "teal" }], strikes: ["28"], dte: null, status: [{ t: "COVERED", cls: "green" }] },
+    { sym: "F", last: "14.31", ivr: [30,32,35,33,36,38,35,37,39,36,34,37,38,36,35,37,38,37,36,38,37,36,35,37,38,38], phase: "Idle", pc: "", tags: [{ t: "LOW_BETA" }], side: [{ t: "FLAT" }], strikes: [], dte: null, status: [] },
+    { sym: "INTC", last: "34.92", ivr: [48,51,55,52,58,61,57,60,63,59,56,60,62,58,57,60,61,59,58,60,61,60,59,61,60,60], phase: "P1", pc: "", tags: [{ t: "GOV_BACKSTOP" }], side: [{ t: "CSP", cls: "amber" }], strikes: ["33"], dte: "21", status: [] },
+    { sym: "DRAM", last: "52.66", ivr: [58,61,64,60,66,69,64,67,70,65,62,66,68,64,63,66,67,65,64,66,67,66,65,67,66,66], phase: "P1", pc: "", tags: [{ t: "HIGH_IV", cls: "teal" }], side: [{ t: "CSP", cls: "amber" }, { t: "CC", cls: "teal" }], strikes: ["50", "58"], dte: null, status: [] },
+  ];
+  const wb = document.getElementById("watchBody");
+  watch.forEach((w) => {
+    const strikeHtml = w.strikes.length
+      ? '<span class="badge-row">' + w.strikes.map((n) => '<span class="mono">' + n + "</span>").join("") + "</span>"
+      : numCell(null);
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td><b>" + w.sym + "</b></td>" +
+      '<td class="mono">' + w.last + "</td>" +
+      '<td><span class="ivr-spark" style="display:inline-block;width:110px;vertical-align:middle"></span> <span class="mono" style="font-size:11px;color:var(--site-text-3)">' + w.ivr[w.ivr.length - 1] + "</span></td>" +
+      "<td>" + (w.pc ? '<span class="tag ' + w.pc + '">' + w.phase + "</span>" : '<span class="tag">' + w.phase + "</span>") + "</td>" +
+      "<td>" + badgeRow(w.tags) + "</td>" +
+      "<td>" + badgeRow(w.side) + "</td>" +
+      "<td>" + strikeHtml + "</td>" +
+      "<td>" + numCell(w.dte) + "</td>" +
+      "<td>" + badgeRow(w.status) + "</td>";
+    wb.appendChild(tr);
+    A.sparkline(tr.querySelector(".ivr-spark"), w.ivr, { w: 110, h: 26, color: "#22d3ee", fill: false });
+  });
+
+  /* system health — green light + meter, refresh every 5s */
+  const healthLight = document.getElementById("healthLight");
+  const healthMeter = document.getElementById("healthMeter");
+  const healthAge = document.getElementById("healthAge");
+  const healthFields = healthBodyRows();
+  let healthCycle = 2840;
+
+  function healthBodyRows() {
+    const rows = {};
+    document.querySelectorAll("#healthBody .field").forEach((row) => {
+      rows[row.querySelector(".k").textContent] = row.querySelector(".v");
+    });
+    return rows;
+  }
+  function clockNow() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+  }
+  function refreshHealth() {
+    healthCycle += 1;
+    const itick = 150 + Math.round(Math.random() * 90);
+    const lag = 6 + Math.round(Math.random() * 18);
+    const loop = 28 + Math.round(Math.random() * 18);
+    let bars = 5;
+    let state = "ok";
+    let label = "Healthy";
+    if (itick > 210 || lag > 18) { bars = 4; }
+    if (itick > 225 || lag > 22) { bars = 3; state = "warn"; label = "Degraded"; }
+
+    healthLight.className = "health-light " + state + " tick";
+    healthLight.title = label + " · " + bars + "/5";
+    healthMeter.className = "health-meter " + state;
+    healthMeter.querySelectorAll("i").forEach((bar, i) => {
+      bar.className = i < bars ? "on" : "";
+    });
+    healthAge.textContent = bars + "/5 · " + clockNow();
+
+    healthFields.Orchestrator.textContent = "running · cycle #" + healthCycle + " · " + loop + "s";
+    healthFields.iTick.textContent = "ok · " + itick + "ms · 12 symbols";
+    healthFields.Store.textContent = "Postgres · lag " + lag + "ms";
+    healthFields.MinIO.textContent = "last backup 22:10 · sync ok";
+    healthFields.Telegram.textContent = "stub · guide ready";
+  }
+  refreshHealth();
+  setInterval(refreshHealth, 5000);
+
+  /* slide-in panels */
+  document.querySelectorAll("[data-panel]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const kind = el.getAttribute("data-panel");
+      if (kind === "nlv") {
+        const body = document.createElement("div");
+        body.innerHTML = '<div class="chart-box" style="height:220px" id="pNlv"></div>' +
+          '<table class="data" style="margin-top:14px"><thead><tr><th>Month</th><th>Premium</th><th>Trades</th><th>Win %</th></tr></thead><tbody>' +
+          A.DATA.months.map((m, i) =>
+            "<tr><td>" + m + "</td><td class='mono'>$" + A.DATA.premiumMonthly[i] + "</td><td>" + A.DATA.tradesMonthly[i] + "</td><td>" + A.DATA.winRateMonthly[i] + "%</td></tr>"
+          ).join("") + "</tbody></table>";
+        A.panel({ title: "NLV · 6 months", body });
+        A.sparkline(body.querySelector("#pNlv"), A.DATA.nlvWeekly, { w: 420, h: 220, color: "#6b96f2" });
+      } else if (kind === "pnl") {
+        const body = document.createElement("div");
+        body.innerHTML = '<div class="chart-box" style="height:220px" id="pPnl"></div>' +
+          '<p style="margin-top:12px;color:var(--site-text-3);font-size:12px">Jul drawdown: strangle loss on TSLA ad-hoc (Mobile slot) — reconciled, rule tightened in settings_v38.</p>';
+        A.panel({ title: "Premium vs P&L", body });
+        A.bars(body.querySelector("#pPnl"), A.DATA.pnlMonthly, { w: 420, h: 220 });
+      } else if (kind === "slots") {
+        A.panel({ title: "IB slot editor", body:
+          '<div class="field"><div class="k">Athena AM</div><div class="v"><code>09:30–12:00 HKT</code></div></div>' +
+          '<div class="field"><div class="k">Mobile</div><div class="v"><code>19:00–21:30 HKT</code></div></div>' +
+          '<div class="field"><div class="k">Athena PM</div><div class="v"><code>21:30–23:55 HKT</code></div></div>' +
+          '<p style="color:var(--site-text-3);font-size:12px;margin-top:12px">Slot changes save as a new Settings version.</p>' +
+          '<div class="row-actions" style="margin-top:14px"><button class="btn primary" data-action="save">Save slots</button></div>' });
+      } else if (kind === "ops") {
+        A.panel({ title: "Ops agent", body:
+          '<div class="field"><div class="k">Allowlist</div><div class="v">health · gateway_restart · athena_restart · backup_now · logs_tail</div></div>' +
+          '<div class="field"><div class="k">Last restart</div><div class="v">Gateway · 2026-09-30 06:12 (auto after Mobile slot)</div></div>' +
+          '<div class="row-actions" style="margin-top:14px">' +
+          '<button class="btn ghost" data-action="ops">Restart Gateway</button>' +
+          '<button class="btn ghost" data-action="ops">Restart Athena</button>' +
+          '<button class="btn ghost" data-action="backup">Backup now</button></div>' });
+      }
+    });
+  });
+
+})();
+</script>
+</body>
+</html>

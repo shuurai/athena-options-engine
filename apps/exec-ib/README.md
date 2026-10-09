@@ -1,0 +1,1 @@
+IB session. Athena slots connect and may send an approved stock limit. Mobile slots disconnect and leave stored orders and positions unchanged. `paper` uses `ATHENA_IB_PAPER_ACCOUNT_ID`. `live` uses each id in `ATHENA_IB_ACCOUNT_IDS`. The books stay separate.

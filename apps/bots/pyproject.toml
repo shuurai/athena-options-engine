@@ -1,0 +1,24 @@
+[project]
+name = "athena-bots"
+version = "0.0.0"
+description = "Telegram long-poll for draft Approve and Reject"
+requires-python = ">=3.12"
+dependencies = [
+    "athena-exec",
+    "athena-settings",
+    "athena-store",
+    "athena-strategy-nfr",
+]
+
+[tool.uv.sources]
+athena-exec = { workspace = true }
+athena-settings = { workspace = true }
+athena-store = { workspace = true }
+athena-strategy-nfr = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/athena_bots"]

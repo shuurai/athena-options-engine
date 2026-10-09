@@ -1,0 +1,13 @@
+[project]
+name = "athena-marketdata"
+version = "0.0.0"
+description = "iTick bar writer"
+requires-python = ">=3.12"
+dependencies = ["athena-store"]
+
+[tool.uv.sources]
+athena-store = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

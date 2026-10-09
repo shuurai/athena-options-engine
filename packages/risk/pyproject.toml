@@ -1,0 +1,13 @@
+[project]
+name = "athena-risk"
+version = "0.0.0"
+description = "Pre-trade guards"
+requires-python = ">=3.12"
+dependencies = ["athena-settings"]
+
+[tool.uv.sources]
+athena-settings = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
