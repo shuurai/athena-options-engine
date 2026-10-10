@@ -33,7 +33,7 @@ No live money until Settings + Approve path + IB slots are proven in paper.
 - control-web one-time Approve page + signed webhook  
 - Local backup job  
 
-**Exit:** End-to-end paper: draft → Approve → simulated fill → audit row.
+**Exit:** End-to-end paper: draft → Approve → a real paper-account order → audit row.
 
 ## Phase 3 — Live approve-gated (2–3 weeks)
 

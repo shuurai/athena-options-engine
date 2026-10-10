@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import UTC, datetime
 from decimal import Decimal
+
+from psycopg.types.json import Jsonb
 
 from athena_exec.broker import BrokerPosition, IbBroker
 from athena_exec.gate import SOFT_BLOCKS, live_block_reason
 from athena_exec.halt import active_reason, note_nav
 from athena_exec.slots import HKT, slot_state
 from athena_settings.model import SettingsPayload
-from athena_exec.options import choose_expiry, choose_strikes
+from athena_exec.options import choose_expiry, choose_strikes, expiry_band, strike_shortlist
 
 log = logging.getLogger("athena.exec")
 
@@ -23,35 +26,37 @@ def run_session(
     account: str,
     broker=None,
     now: datetime | None = None,
-) -> None:
+    sync: bool = True,
+    trading: bool = True,
+    also_sync: list[str] | None = None,
+) -> list[tuple]:
+    """Run one Athena slot. Returns fills that were new this cycle."""
     broker = broker or IbBroker()
     moment = now or datetime.now(HKT)
     slot = slot_state(moment, settings.ib)
-    if slot != "athena":
-        broker.disconnect()
-        log.info("ib_session=%s account=%s", "disconnected" if slot == "mobile" else "idle", account)
-        return
-
     host = os.environ.get("IB_GATEWAY_HOST", settings.ib.gateway_host)
     port = int(os.environ.get("IB_GATEWAY_PORT", str(settings.ib.gateway_port)))
     client_id = int(os.environ.get("IB_CLIENT_ID", str(settings.ib.client_id)))
-    if not broker.connect(host, port, client_id, False):
-        log.info("ib_session=disconnected account=%s", account)
-        return
+    if not _connect_athena(broker, host, port, client_id, slot):
+        log.info("ib_session=%s account=%s", "disconnected" if slot == "mobile" else "idle", account)
+        return []
     log.info("ib_session=connected account=%s", account)
 
     _cache_quotes(conn, broker, settings.watchlist)
     _cache_history(conn, broker, settings.watchlist, moment.date())
-    _cache_strangles(conn, broker, settings.watchlist, moment.date())
-    _sync_positions(conn, account, broker.positions())
-    nav = broker.net_liquidation(account) if account else None
-    if nav is not None:
-        reason = note_nav(conn, account, nav, settings.risk.daily_loss_halt_pct, moment)
-        if reason:
-            log.info("halt=%s account=%s", reason, account)
-    _submit_queued(conn, broker, slot, account)
-    _apply_fills(conn, account, broker.fills())
-    _sync_order_status(conn, broker, account)
+    _cache_strangles(conn, broker, settings, moment.date())
+    if sync:
+        _refresh_account(conn, broker, settings, account, moment)
+    for other in also_sync or []:
+        if other and other != account:
+            _refresh_account(conn, broker, settings, other, moment)
+    if trading:
+        _submit_queued(conn, broker, slot, account)
+    else:
+        log.info("trading off account=%s", account)
+    noticed = _apply_fills(conn, account, broker.fills())
+    noticed.extend(_sync_order_status(conn, broker, account))
+    return noticed
 
 
 def _cache_quotes(conn, broker, symbols: list[str]) -> None:
@@ -114,8 +119,124 @@ def _cache_history(conn, broker, symbols: list[str], today) -> None:
         conn.commit()
 
 
-def _cache_strangles(conn, broker, symbols: list[str], today) -> None:
-    for symbol in symbols:
+def _connect_athena(broker, host: str, port: int, client_id: int, slot: str, attempts: int = 3, pause: float = 1.0) -> bool:
+    """Retry only while the slot is Athena. Mobile and idle stay disconnected."""
+    if slot != "athena":
+        broker.disconnect()
+        return False
+    for attempt in range(attempts):
+        if broker.connect(host, port, client_id, False):
+            return True
+        if attempt + 1 < attempts:
+            time.sleep(pause)
+    return False
+
+
+def _refresh_account(conn, broker, settings: SettingsPayload, account: str, moment: datetime) -> None:
+    _sync_positions(conn, account, broker.positions(), replace=True)
+    _store_account_mark(conn, account, moment.date(), broker, settings.global_currency)
+    nav = broker.net_liquidation(account) if account else None
+    if nav is None:
+        return
+    reason = note_nav(conn, account, nav, settings.risk.daily_loss_halt_pct, moment)
+    if reason:
+        log.info("halt=%s account=%s", reason, account)
+
+
+def _store_account_mark(conn, account: str, day, broker, currency: str = "") -> None:
+    if not account or not hasattr(broker, "cash"):
+        return
+    cash = broker.cash(account)
+    margin = broker.margin(account)
+    base, balances, rates = ("", {}, {})
+    if hasattr(broker, "cash_ledger"):
+        base, balances, rates = broker.cash_ledger(account)
+    if base and currency and hasattr(broker, "fill_rates"):
+        rates = broker.fill_rates(base, rates, (currency,))
+    if cash is None and margin is None and not balances:
+        return
+    conn.execute(
+        """
+        INSERT INTO account_marks (
+            account_id, day, cash, margin, base_currency, cash_balances, fx_rates
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (account_id, day) DO UPDATE SET
+            cash = EXCLUDED.cash,
+            margin = EXCLUDED.margin,
+            base_currency = EXCLUDED.base_currency,
+            cash_balances = EXCLUDED.cash_balances,
+            fx_rates = EXCLUDED.fx_rates
+        """,
+        (
+            account,
+            day,
+            cash,
+            margin,
+            base,
+            Jsonb({code: str(amount) for code, amount in balances.items()}),
+            Jsonb({code: str(rate) for code, rate in rates.items()}),
+        ),
+    )
+    conn.commit()
+
+
+def refresh_display_rates(database_url: str) -> None:
+    """Read the chosen currency and store its IB pair when the ledger has no rate."""
+    import asyncio
+
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    from athena_exec.accounts import active_accounts
+    from athena_settings.repository import load_active
+    from athena_store import connect as store_connect
+
+    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
+    accounts = active_accounts()
+    if not database_url or not accounts:
+        return
+    broker = IbBroker()
+    if not broker.connect(host, port, 4, True):
+        return
+    try:
+        with store_connect(database_url) as conn:
+            for account in accounts:
+                base, _balances, rates = broker.cash_ledger(account)
+                chosen = ""
+                try:
+                    chosen = load_active(conn, account).global_currency
+                except Exception as exc:
+                    log.info("fx settings: %s", exc.__class__.__name__)
+                filled = broker.fill_rates(base, rates, (chosen,) if chosen else ())
+                if not filled:
+                    continue
+                conn.execute(
+                    """
+                    UPDATE account_marks
+                    SET base_currency = %s, fx_rates = %s
+                    WHERE account_id = %s
+                      AND day = (
+                          SELECT max(day) FROM account_marks WHERE account_id = %s
+                      )
+                    """,
+                    (
+                        base,
+                        Jsonb({code: str(rate) for code, rate in filled.items()}),
+                        account,
+                        account,
+                    ),
+                )
+            conn.commit()
+    finally:
+        broker.disconnect()
+
+
+def _cache_strangles(conn, broker, settings: SettingsPayload, today) -> None:
+    strategy = settings.strategy
+    for symbol in settings.watchlist:
         price = conn.execute(
             """
             SELECT close FROM market_bars
@@ -131,12 +252,13 @@ def _cache_strangles(conn, broker, symbols: list[str], today) -> None:
         if chain is None:
             continue
         expiries, _strikes, trading_class, exchange, multiplier = chain
-        expiry = choose_expiry(list(expiries), today)
+        _store_choices(conn, broker, symbol, list(expiries), today, price[0], trading_class, exchange, strategy)
+        expiry = choose_expiry(list(expiries), today, strategy.dte_min, strategy.dte_target)
         if expiry is None:
             log.info("strangle none symbol=%s", symbol)
             continue
         strikes = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
-        picked = choose_strikes(strikes, price[0])
+        picked = choose_strikes(strikes, price[0], strategy.strangle_otm_pct)
         if picked is None:
             log.info("strangle none symbol=%s", symbol)
             continue
@@ -173,16 +295,61 @@ def _cache_strangles(conn, broker, symbols: list[str], today) -> None:
         )
 
 
-def _sync_positions(conn, account: str, rows: list[BrokerPosition]) -> None:
+def _store_choices(conn, broker, symbol: str, expiries: list[str], today, underlying: Decimal, trading_class: str, exchange: str, strategy) -> None:
+    """Keep a short listed band so Approve can change expiry and strike."""
+    band = expiry_band(expiries, today, strategy.dte_min, strategy.dte_max, strategy.dte_target)
+    conn.execute("DELETE FROM option_choices WHERE symbol = %s", (symbol,))
+    for expiry in band:
+        listed = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
+        rows = [("P", strike) for strike in strike_shortlist(listed, underlying, "P", otm_pct=strategy.strangle_otm_pct)]
+        rows.extend(("C", strike) for strike in strike_shortlist(listed, underlying, "C", otm_pct=strategy.strangle_otm_pct))
+        for right, strike in rows:
+            conn.execute(
+                """
+                INSERT INTO option_choices (symbol, expiry, contract_right, strike)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
+                """,
+                (symbol, expiry, right, strike),
+            )
+    conn.commit()
+
+
+def sync_account_positions(conn, account: str, rows: list[BrokerPosition]) -> int:
+    """Replace this account's open book with one IB snapshot. Returns how many are open."""
+    _sync_positions(conn, account, rows, replace=True)
+    found = conn.execute(
+        """
+        SELECT count(*) FROM (
+            SELECT DISTINCT ON (symbol, sec_type, expiry, contract_right, strike) quantity
+            FROM positions
+            WHERE account_id = %s
+            ORDER BY symbol, sec_type, expiry, contract_right, strike, snapshot_at DESC, id DESC
+        ) latest
+        WHERE quantity <> 0
+        """,
+        (account,),
+    ).fetchone()
+    return int(found[0] if found else 0)
+
+
+def _sync_positions(conn, account: str, rows: list[BrokerPosition], replace: bool = False) -> None:
     if not account:
         return
-    wrote = False
+    mine = []
     for row in rows:
-        if row.account != account:
+        if row.account not in {account, ""}:
             continue
+        mine.append(row if row.account else row._replace(account=account))
+    if rows and not mine:
+        return
+    seen = set()
+    for row in mine:
         _insert_position(conn, row)
-        wrote = True
-    if wrote:
+        seen.add(_position_key(row.symbol, row.sec_type, row.expiry, row.right, row.strike))
+    if replace:
+        _close_missing(conn, account, seen)
+    if mine or replace:
         conn.commit()
 
 
@@ -265,24 +432,27 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
         log.info("order submitted id=%s ib=%s", order_id, ib_order_id)
 
 
-def _sync_order_status(conn, broker, account: str) -> None:
+def _sync_order_status(conn, broker, account: str) -> list[tuple]:
+    """Mark working orders from IB. A Filled status with no execution print is still reported."""
+    noticed: list[tuple] = []
     states = broker.order_states()
     if not states:
-        return
+        return noticed
     rows = conn.execute(
         """
-        SELECT id, ib_order_id FROM orders
+        SELECT id, ib_order_id, symbol, tactic, action, draft_id FROM orders
         WHERE account_id = %s AND status = 'submitted' AND ib_order_id IS NOT NULL
         """,
         (account,),
     ).fetchall()
-    for order_id, ib_order_id in rows:
+    for order_id, ib_order_id, symbol, tactic, action, draft_id in rows:
         live = states.get(int(ib_order_id))
         if live is None:
             log.info("order unseen id=%s ib=%s", order_id, ib_order_id)
             continue
         if live == "Filled":
             conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
+            noticed.append((account, symbol, tactic, action, draft_id, None))
             log.info("order filled id=%s ib=%s", order_id, ib_order_id)
         elif live in {"Cancelled", "ApiCancelled", "Inactive"}:
             conn.execute("UPDATE orders SET status = 'cancelled' WHERE id = %s", (order_id,))
@@ -290,29 +460,59 @@ def _sync_order_status(conn, broker, account: str) -> None:
         else:
             log.info("order resting id=%s ib=%s status=%s", order_id, ib_order_id, live)
     conn.commit()
+    return noticed
 
 
-def _apply_fills(conn, account: str, fills: list[tuple[int, str, str, Decimal, Decimal]]) -> None:
-    for ib_order_id, fill_account, symbol, quantity, price in fills:
+def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
+    """Write new executions. A fill with no Athena order is stored as external."""
+    noticed: list[tuple] = []
+    for item in fills:
+        ib_order_id, fill_account, symbol, quantity, price = item[:5]
+        exec_id = str(item[5]) if len(item) > 5 and item[5] else f"{ib_order_id}:{symbol}:{quantity}:{price}"
+        side = item[6] if len(item) > 6 else ""
+        sec_type = item[7] if len(item) > 7 and item[7] else "STK"
         if fill_account and fill_account != account:
+            continue
+        if conn.execute(
+            "SELECT 1 FROM fills WHERE account_id = %s AND exec_id = %s",
+            (account, exec_id),
+        ).fetchone():
             continue
         row = conn.execute(
             """
-            SELECT id, draft_id, tactic, contracts
+            SELECT id, draft_id, tactic, contracts, action
             FROM orders
-            WHERE ib_order_id = %s AND status = 'submitted'
+            WHERE ib_order_id = %s AND account_id = %s AND status = 'submitted'
             """,
-            (ib_order_id,),
+            (ib_order_id, account),
         ).fetchone()
         if row is None:
+            signed = -quantity if side == "SLD" else quantity
+            conn.execute(
+                """
+                INSERT INTO fills (draft_id, symbol, tactic, contracts, price, simulated, account_id, exec_id)
+                VALUES (NULL, %s, 'EXTERNAL', %s, %s, false, %s, %s)
+                """,
+                (symbol, abs(int(quantity)), price, account, exec_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO positions (account_id, symbol, quantity, avg_price, sec_type)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (account, symbol, signed, price, sec_type),
+            )
+            conn.commit()
+            noticed.append((account, symbol, "EXTERNAL", "SLD" if side == "SLD" else "BOT", "", price))
+            log.info("external fill symbol=%s price=%s", symbol, price)
             continue
-        order_id, draft_id, tactic, contracts = row
+        order_id, draft_id, tactic, contracts, action = row
         conn.execute(
             """
-            INSERT INTO fills (draft_id, symbol, tactic, contracts, price, simulated, account_id)
-            VALUES (%s, %s, %s, %s, %s, false, %s)
+            INSERT INTO fills (draft_id, symbol, tactic, contracts, price, simulated, account_id, exec_id)
+            VALUES (%s, %s, %s, %s, %s, false, %s, %s)
             """,
-            (draft_id, symbol, tactic, contracts, price, account),
+            (draft_id, symbol, tactic, contracts, price, account, exec_id),
         )
         conn.execute(
             """
@@ -323,7 +523,42 @@ def _apply_fills(conn, account: str, fills: list[tuple[int, str, str, Decimal, D
         )
         conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
         conn.commit()
+        noticed.append((account, symbol, tactic, action, draft_id, price))
         log.info("fill order=%s symbol=%s price=%s", order_id, symbol, price)
+    return noticed
+
+
+def _position_key(symbol: str, sec_type: str, expiry, right: str, strike) -> tuple:
+    strike_key = None if strike is None else Decimal(strike).normalize()
+    return (symbol, sec_type or "STK", expiry, right or "", strike_key)
+
+
+def _close_missing(conn, account: str, seen: set[tuple]) -> None:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (symbol, sec_type, expiry, contract_right, strike)
+               symbol, sec_type, expiry, contract_right, strike, quantity
+        FROM positions
+        WHERE account_id = %s
+        ORDER BY symbol, sec_type, expiry, contract_right, strike, snapshot_at DESC, id DESC
+        """,
+        (account,),
+    ).fetchall()
+    for symbol, sec_type, expiry, right, strike, quantity in rows:
+        if Decimal(quantity) == 0:
+            continue
+        if _position_key(symbol, sec_type, expiry, right, strike) in seen:
+            continue
+        conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, expiry,
+                contract_right, strike, market_value, unrealized_pnl
+            )
+            VALUES (%s, %s, 0, 0, %s, %s, %s, %s, 0, 0)
+            """,
+            (account, symbol, sec_type or "STK", expiry, right or "", strike),
+        )
 
 
 def _insert_position(conn, row: BrokerPosition) -> None:
@@ -331,9 +566,10 @@ def _insert_position(conn, row: BrokerPosition) -> None:
         """
         INSERT INTO positions (
             account_id, symbol, quantity, avg_price, sec_type, expiry,
-            contract_right, strike, market_price
+            contract_right, strike, market_price, currency, multiplier,
+            market_value, unrealized_pnl, realized_pnl
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             row.account,
@@ -345,5 +581,10 @@ def _insert_position(conn, row: BrokerPosition) -> None:
             row.right,
             row.strike,
             row.market_price,
+            row.currency,
+            row.multiplier,
+            row.market_value,
+            row.unrealized_pnl,
+            row.realized_pnl,
         ),
     )

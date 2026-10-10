@@ -5,6 +5,41 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Athena · Drafts</title>
 <link rel="stylesheet" href="../shared/console.css">
+<style>
+  .app { height: 100vh; }
+  .main {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 20px;
+  }
+  .banner { flex: none; margin-bottom: 14px; }
+  .draft-cols {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 3fr 2fr;
+    gap: 14px;
+  }
+  .draft-stack {
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .decisions {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .decisions .scroll-y { flex: 1; min-height: 0; }
+  .decisions thead th {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--site-surface);
+  }
+</style>
 </head>
 <body class="console">
 <div class="app">
@@ -35,7 +70,8 @@
 
     <div class="banner">FOMC T−1 · NVDA wash density 6/72h. Strangle draft is the NFR P2 playbook — not an impulse ticket.</div>
 
-    <div class="grid" style="gap:14px" id="draftList">
+    <div class="draft-cols">
+    <div class="draft-stack" id="draftList">
       <div class="card" style="border-color:#2f4a7a">
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
           <span class="tag violet">OPEN_STRANGLE</span>
@@ -78,11 +114,11 @@
       </div>
     </div>
 
-    <div class="card" style="margin-top:14px">
+    <div class="card decisions">
       <h2>Recent decisions <a class="more" href="../08-history/index.html">full history →</a></h2>
-      <div class="scroll-y" style="max-height:200px">
+      <div class="scroll-y">
         <table class="data">
-          <thead><tr><th>When</th><th>Draft</th><th>Action</th><th>By</th></tr></thead>
+          <thead><tr><th>When</th><th>Draft</th><th>Action Status</th><th>By</th></tr></thead>
           <tbody>
             <tr><td class="mono">10-07 21:44</td><td class="mono">draft_6b01 · INTC CSP</td><td><span class="tag green">APPROVED</span></td><td>telegram:you</td></tr>
             <tr><td class="mono">10-06 21:38</td><td class="mono">draft_5fa2 · TSLA strangle</td><td><span class="tag red">REJECTED</span></td><td>telegram:you</td></tr>
@@ -92,6 +128,7 @@
           </tbody>
         </table>
       </div>
+    </div>
     </div>
   </main>
 </div>

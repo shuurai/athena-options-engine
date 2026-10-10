@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Owl">
+  <defs>
+    <linearGradient id="owl" x1="8" y1="0" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f6fed"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#owl)" d="M0 0H64V52L52 64H0Z"/>
+  <path fill="#d7e6ff" d="M14 22 H50 L46 28 H18 Z"/>
+  <path fill="#071018" d="M16 30 H28 L25 44 H13 Z"/>
+  <path fill="#071018" d="M36 30 H48 L45 44 H33 Z"/>
+  <path fill="#22d3ee" d="M20 34 H26 L24.5 40 H18.5 Z"/>
+  <path fill="#22d3ee" d="M40 34 H46 L44.5 40 H38.5 Z"/>
+  <path fill="#fff" d="M29 44 H35 L32 52 Z"/>
+</svg>

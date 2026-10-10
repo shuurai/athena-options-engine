@@ -29,6 +29,10 @@
   }
   .prof button:hover { border-color:var(--site-primary); color:var(--site-primary); }
   .prof button.on { background:#101c33; border-color:var(--site-primary); color:#93c5fd; }
+  select.intent {
+    width: 118px; margin: 0; padding: 4px 6px; font: 11px var(--font-mono);
+    background: #0a0c10; color: var(--site-text); border: 1px solid var(--site-border-strong);
+  }
 </style>
 </head>
 <body class="console">
@@ -86,7 +90,7 @@
       <div class="scroll-y" style="max-height:440px">
         <table class="data">
           <thead>
-            <tr><th>Symbol</th><th>Price</th><th>1D %</th><th>Mkt cap</th><th>Classifiers</th><th>IVR</th><th>Phase</th><th>Enabled</th><th>CSP</th><th>CC</th><th>Strangle</th><th></th></tr>
+            <tr><th>Symbol</th><th>Price</th><th>1D %</th><th>Mkt cap</th><th>Classifiers</th><th>IVR</th><th>Phase</th><th>Intent</th><th>Long</th><th>Enabled</th><th>CSP</th><th>CC</th><th>Strangle</th><th></th></tr>
           </thead>
           <tbody id="poolBody"></tbody>
         </table>
@@ -101,14 +105,14 @@
   const A = window.Athena;
 
   const pool = [
-    { sym: "NVDA", name: "NVIDIA", mcap: "5.31T", price: 218.42, chg: -2.84, cls: ["AI_NARRATIVE", "HIGH_BETA", "MAG7"], ivr: 82, phase: "P2", pc: "blue", on: true, csp: true, cc: true, str: true },
-    { sym: "QCOM", name: "Qualcomm", mcap: "188.2B", price: 169.05, chg: 0.62, cls: ["EARNINGS_NEAR"], ivr: 54, phase: "P1", pc: "", on: true, csp: true, cc: true, str: false },
-    { sym: "T", name: "AT&T", mcap: "194.7B", price: 27.18, chg: 0.15, cls: ["STRONG_FCF", "MUST_HOLD"], ivr: 41, phase: "IDLE", pc: "", on: true, csp: true, cc: true, str: false },
-    { sym: "F", name: "Ford", mcap: "56.9B", price: 14.31, chg: -0.48, cls: ["LOW_PRICE", "MUST_HOLD"], ivr: 38, phase: "IDLE", pc: "", on: true, csp: true, cc: true, str: false },
-    { sym: "INTC", name: "Intel", mcap: "148.3B", price: 34.92, chg: 1.24, cls: ["GOV_BACKSTOP"], ivr: 60, phase: "P1", pc: "", on: true, csp: true, cc: false, str: false },
-    { sym: "DRAM", name: "DRAM ETF", mcap: "1.2B", price: 52.66, chg: -1.10, cls: ["MEMORY_CYCLE"], ivr: 66, phase: "P1", pc: "", on: true, csp: true, cc: true, str: true },
-    { sym: "MSFT", name: "Microsoft", mcap: "3.92T", price: 527.40, chg: 0.88, cls: ["MAG7", "LOW_PREMIUM"], ivr: 34, phase: "IDLE", pc: "", on: false, csp: false, cc: true, str: false },
-    { sym: "AVGO", name: "Broadcom", mcap: "1.31T", price: 279.15, chg: 2.05, cls: ["MAG7", "EXPENSIVE"], ivr: 47, phase: "IDLE", pc: "", on: false, csp: false, cc: false, str: false },
+    { sym: "NVDA", name: "NVIDIA", mcap: "5.31T", price: 218.42, chg: -2.84, cls: ["AI_NARRATIVE", "HIGH_BETA", "MAG7"], ivr: 82, phase: "P2", pc: "blue", on: true, intent: "accumulate", long: true, csp: true, cc: true, str: true },
+    { sym: "QCOM", name: "Qualcomm", mcap: "188.2B", price: 169.05, chg: 0.62, cls: ["EARNINGS_NEAR"], ivr: 54, phase: "P1", pc: "", on: true, intent: "income", long: false, csp: true, cc: true, str: false },
+    { sym: "T", name: "AT&T", mcap: "194.7B", price: 27.18, chg: 0.15, cls: ["STRONG_FCF", "MUST_HOLD"], ivr: 41, phase: "IDLE", pc: "", on: true, intent: "accumulate", long: true, csp: true, cc: true, str: false },
+    { sym: "F", name: "Ford", mcap: "56.9B", price: 14.31, chg: -0.48, cls: ["LOW_PRICE", "MUST_HOLD"], ivr: 38, phase: "IDLE", pc: "", on: true, intent: "accumulate", long: true, csp: true, cc: true, str: false },
+    { sym: "INTC", name: "Intel", mcap: "148.3B", price: 34.92, chg: 1.24, cls: ["GOV_BACKSTOP"], ivr: 60, phase: "P1", pc: "", on: true, intent: "income", long: false, csp: true, cc: false, str: false },
+    { sym: "DRAM", name: "DRAM ETF", mcap: "1.2B", price: 52.66, chg: -1.10, cls: ["MEMORY_CYCLE"], ivr: 66, phase: "P1", pc: "", on: true, intent: "income", long: false, csp: true, cc: true, str: true },
+    { sym: "MSFT", name: "Microsoft", mcap: "3.92T", price: 527.40, chg: 0.88, cls: ["MAG7", "LOW_PREMIUM"], ivr: 34, phase: "IDLE", pc: "", on: false, intent: "accumulate", long: true, csp: false, cc: true, str: false },
+    { sym: "AVGO", name: "Broadcom", mcap: "1.31T", price: 279.15, chg: 2.05, cls: ["MAG7", "EXPENSIVE"], ivr: 47, phase: "IDLE", pc: "", on: false, intent: "income", long: false, csp: false, cc: false, str: false },
   ];
 
   const body = document.getElementById("poolBody");
@@ -125,6 +129,8 @@
       "<td>" + s.cls.map((c) => '<span class="tag">' + c + "</span>").join(" ") + "</td>" +
       '<td class="mono">' + s.ivr + "</td>" +
       "<td>" + (s.pc ? '<span class="tag ' + s.pc + '">' + s.phase + "</span>" : '<span class="tag">' + s.phase + "</span>") + "</td>" +
+      '<td><select class="intent" data-k="intent"><option value="income"' + (s.intent === "income" ? " selected" : "") + '>Income</option><option value="accumulate"' + (s.intent === "accumulate" ? " selected" : "") + ">Accumulate</option></select></td>" +
+      '<td><span class="tgl' + (s.long ? " on" : "") + '" data-k="long"></span></td>' +
       '<td><span class="tgl green' + (s.on ? " on" : "") + '" data-k="on"></span></td>' +
       '<td><span class="tgl' + (s.csp ? " on" : "") + '" data-k="csp"></span></td>' +
       '<td><span class="tgl' + (s.cc ? " on" : "") + '" data-k="cc"></span></td>' +
@@ -141,12 +147,16 @@
           tr.style.opacity = on ? "1" : ".45";
           A.toast(s.sym + (on ? " enabled" : " disabled"), on ? "Included in next daily scan" : "Excluded from scanning", on ? "ok" : "warn");
         } else {
-          const label = { csp: "CSP", cc: "CC", str: "Strangle" }[k];
+          const label = { csp: "CSP", cc: "CC", str: "Strangle", long: "Long" }[k];
           A.toast(s.sym + " · " + label + (on ? " on" : " off"), "Tactic permission updated", "info");
         }
       });
     });
 
+    tr.querySelector(".intent").addEventListener("change", (event) => {
+      const label = event.target.value === "income" ? "Income" : "Accumulate";
+      A.toast(s.sym + " intent " + label, "This symbol only. Income sells premium. Accumulate may buy shares.", "info");
+    });
     tr.querySelector("[data-edit]").addEventListener("click", () => {
       A.panel({
         title: "Edit · " + s.sym,

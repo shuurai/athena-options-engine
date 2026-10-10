@@ -9,11 +9,15 @@ import threading
 
 from athena_bots import start_telegram_polling
 from athena_exec.accounts import active_accounts, stamp_legacy_accounts, trading_mode
+from athena_exec.session import refresh_display_rates
 from athena_exec.ops import consume_restart
+from athena_orchestrator.console import start_console_server
 from athena_orchestrator.control import allowlist_from_env, start_control_server
 from athena_orchestrator.paper import run_paper_cycle
+from athena_orchestrator.runtime import begin_running, begin_waiting, mark, note_loop, note_telegram
+from athena_strategy.dsh import set_score_listener
 from athena_orchestrator.tunnel import start_tunnel, stop_tunnel
-from athena_settings import seed_standard_if_empty
+from athena_settings import load_active, seed_standard_if_empty
 from athena_store import apply_migrations, connect
 
 log = logging.getLogger("athena")
@@ -26,13 +30,29 @@ def _env_int(name: str, default: int) -> int:
     return int(raw)
 
 
+def _cycle_sleep(database_url: str, fallback: int) -> int:
+    """Minutes from Settings, in seconds. The env value is only a fallback."""
+    with connect(database_url) as conn:
+        accounts = active_accounts()
+        if not accounts:
+            return fallback
+        try:
+            minutes = load_active(conn, accounts[0]).cycle_minutes
+        except RuntimeError:
+            return fallback
+    return max(1, minutes) * 60
+
+
 async def run_loop() -> None:
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise SystemExit("DATABASE_URL is not set. Copy .env.example to .env.")
 
-    sleep_seconds = _env_int("ATHENA_LOOP_SECONDS", 300)
+    fallback = _env_int("ATHENA_LOOP_SECONDS", 300)
     cycles = _env_int("ATHENA_LOOP_CYCLES", 0)
+    sleep_seconds = _cycle_sleep(database_url, fallback)
+    note_loop(sleep_seconds)
+    set_score_listener(lambda status, detail="": mark(3, status, detail))
 
     log.info("state=INIT")
     with connect(database_url) as conn:
@@ -61,17 +81,27 @@ async def run_loop() -> None:
         if public:
             log.info("control_url=%s", public)
 
-    telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    if telegram_token and os.environ.get("TELEGRAM_MODE", "polling") == "polling":
-        start_telegram_polling(database_url, telegram_token, allowlist_from_env())
+    console_port = _env_int("ATHENA_CONSOLE_PORT", 8788)
+    console = start_console_server(database_url, console_port, allowlist_from_env())
+    threading.Thread(target=console.serve_forever, daemon=True).start()
+    log.info("console_port=%s", console_port)
+    threading.Thread(
+        target=refresh_display_rates, args=(database_url,), daemon=True, name="fx-rates"
+    ).start()
+
+    if os.environ.get("TELEGRAM_MODE", "polling") == "polling":
+        start_telegram_polling(database_url)
+        note_telegram(True)
         log.info("telegram polling")
 
     def cycle() -> None:
         with connect(database_url) as conn:
             run_paper_cycle(conn)
 
+    completed = 1
+    begin_running(completed)
     cycle()
-    completed = 0
+    begin_waiting(sleep_seconds)
     while cycles == 0 or completed < cycles:
         waited = 0
         while waited < sleep_seconds:
@@ -83,5 +113,9 @@ async def run_loop() -> None:
             await asyncio.sleep(step)
             waited += step
         completed += 1
+        begin_running(completed)
         cycle()
+        sleep_seconds = _cycle_sleep(database_url, fallback)
+        note_loop(sleep_seconds)
+        begin_waiting(sleep_seconds)
         log.info("health ok cycle=%s state=IDLE", completed)

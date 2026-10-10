@@ -92,7 +92,7 @@ Athena treats IB accounts as **config**, not baked-in identity:
 
 fanit-cli labels (Primary / Relaxed / Defensive) are **examples** you may seed from — Athena must not assume a fixed account number.
 
-**Live vs paper:** Brokerage account type is whatever IB gives you (live or paper gateway). Athena software mode (`paper` vs `approve_gated_live`) is independent and defaults to `paper` until you enable live submit.
+**Live vs paper:** `ATHENA_TRADING_MODE` is `paper` or `live`. Paper uses `ATHENA_IB_PAPER_ACCOUNT_ID` and places a real order on that paper account after Approve. Live uses every id in `ATHENA_IB_ACCOUNT_IDS`. The Gateway port stays the one you logged in (`4002` paper, `4001` live). Athena does not switch the port.
 
 ## iTick client
 
@@ -104,8 +104,8 @@ Reuse ideas from fanit `itick.ts` / live pricing:
 ## Paper mode
 
 - Same drafts and Approves  
-- Fills simulated from quotes; no IB order submit  
-- Still run IB sync read-only if useful for position realism, or use fixture portfolio  
+- After Approve, Athena sends a real limit order to the paper account  
+- An empty live account list logs and skips orders. Nothing from the other book is deleted  
 
 ## Open config (before first live order)
 

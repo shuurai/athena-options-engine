@@ -3,26 +3,37 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
 import re
+import socket
 from datetime import UTC, date, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from html import unescape
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from urllib.parse import urljoin, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import psycopg
 
 from athena_settings.model import SettingsPayload
+from athena_settings.resolve import deepseek_token, scoring_model
+from athena_strategy.dsh import enrich_sentiment, read_article
+from athena_strategy.types import NEWS_TYPE_CODES
 
 log = logging.getLogger("athena.news")
 
 NEWS_OWNED = {"NEWS_WASH", "FED_EVENT", "EARNINGS_NEAR"}
 ET = ZoneInfo("America/New_York")
 _UA = "Mozilla/5.0 (compatible; AthenaNews/0.1)"
+_PAGE_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+)
+_PAGE_LIMIT = 1_500_000
 _NEGATIVE = (
     "downgrade",
     "miss",
@@ -61,23 +72,138 @@ def ingest_news(conn: psycopg.Connection, symbols: list[str], settings: Settings
     """Fetch enabled sources and store new headlines plus calendar marks."""
     today = datetime.now(ET).date()
     stored = 0
+    fresh: list[tuple[str, str, str]] = []
     news = settings.news
     if news.yahoo:
         for symbol in symbols:
-            stored += _save_headlines(conn, symbol, "yahoo", _yahoo(symbol))
+            count, rows = _save_headlines(conn, symbol, "yahoo", _yahoo(symbol))
+            stored += count
+            fresh.extend(rows)
     if news.finviz:
         for symbol in symbols:
-            stored += _save_headlines(conn, symbol, "finviz", _finviz(symbol))
+            count, rows = _save_headlines(conn, symbol, "finviz", _finviz(symbol))
+            stored += count
+            fresh.extend(rows)
     if news.fed_calendar:
         _save_marks(conn, "FED", "", _fed_meetings())
     for symbol, event_day, title in _earnings(symbols, today, news.earnings_near_days):
         _save_marks(conn, "EARNINGS", symbol, [(event_day, title)])
     conn.commit()
+    updated = enrich_sentiment(
+        conn, fresh, scoring_model(settings), settings.ai.provider, deepseek_token(settings)
+    )
+    if updated:
+        log.info("dsh sentiment updated=%s", updated)
     for symbol in symbols:
         tags = tags_from_events(conn, symbol, settings, today)
         if tags:
             log.info("news_tags symbol=%s tags=%s", symbol, ",".join(sorted(tags)))
     return stored
+
+
+def dismiss_event(conn: psycopg.Connection, fingerprint: str) -> bool:
+    """A false alarm stays stored and no longer counts toward wash density."""
+    row = conn.execute(
+        """
+        UPDATE news_events
+        SET dismissed = true
+        WHERE fingerprint = %s AND dismissed = false
+        RETURNING fingerprint
+        """,
+        (fingerprint,),
+    ).fetchone()
+    conn.commit()
+    return row is not None
+
+
+def store_manual(conn: psycopg.Connection, symbol: str, title: str) -> int:
+    """Store one pasted headline. The next phase pass can tag it."""
+    count, _fresh = _save_headlines(conn, symbol.upper(), "manual", [(datetime.now(UTC), title, "")])
+    conn.commit()
+    return count
+
+
+def ingest_url(
+    conn: psycopg.Connection,
+    url: str,
+    symbols: list[str],
+    model: str,
+    provider: str = "DSH",
+    token: str = "",
+) -> str:
+    """Pull a public page and store the event DSH reads from it."""
+    watched = [item.strip().upper() for item in symbols if item.strip()]
+    if not watched:
+        raise ValueError("Add a watched symbol before ingesting a page.")
+    target = public_url(url)
+    html = _fetch_public(target)
+    title, text = page_text(html)
+    if len(text) < 40:
+        raise ValueError("That page had no article text.")
+    article = read_article(title, text, target, watched, model, provider, token)
+    symbol = article["symbol"]
+    if symbol not in set(watched):
+        raise ValueError("That page is not about a watched symbol.")
+    event_type = article["event_type"] if article["event_type"] in NEWS_TYPE_CODES else "GENERIC"
+    headline = article["title"] or title
+    if not headline:
+        raise ValueError("The model did not return a headline.")
+    count = _insert_event(conn, symbol, "manual", event_type, article["sentiment"], headline[:240], target)
+    conn.commit()
+    if not count:
+        return f"{symbol} already has that headline."
+    log.info("manual ingest symbol=%s", symbol)
+    return f"Stored {symbol}. {headline[:120]}"
+
+
+def public_url(raw: str) -> str:
+    """An http(s) page on a public host. Other targets are refused."""
+    parsed = urlparse(raw.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Use an http or https URL.")
+    if parsed.username or parsed.password:
+        raise ValueError("The URL cannot include a login.")
+    if parsed.port not in {None, 80, 443}:
+        raise ValueError("Use a normal web page URL.")
+    host = parsed.hostname
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None and not _public_ip(literal):
+        raise ValueError("That address is not a public page.")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise ValueError("That host did not resolve.") from exc
+    addresses = []
+    for info in infos:
+        try:
+            addresses.append(ipaddress.ip_address(info[4][0]))
+        except ValueError:
+            continue
+    if not addresses or any(not _public_ip(ip) for ip in addresses):
+        raise ValueError("That address is not a public page.")
+    return parsed.geturl()
+
+
+def page_text(html: str) -> tuple[str, str]:
+    """Title and visible article text. Scripts and styles are dropped."""
+    without = re.sub(
+        r"<(script|style|noscript|svg)\b[^>]*>.*?</\1>",
+        " ",
+        html,
+        flags=re.I | re.S,
+    )
+    title = _meta_title(without)
+    parts = [
+        _plain(part)
+        for part in re.findall(r"<p\b[^>]*>(.*?)</p>", without, flags=re.I | re.S)
+    ]
+    text = " ".join(part for part in parts if part)
+    if len(text) < 80:
+        text = _plain(without)
+    return title[:240], text[:6000]
 
 
 def tags_from_events(
@@ -94,7 +220,7 @@ def tags_from_events(
     count = conn.execute(
         """
         SELECT count(*) FROM news_events
-        WHERE symbol = %s AND sentiment < %s AND ts >= %s
+        WHERE symbol = %s AND sentiment < %s AND ts >= %s AND dismissed = false
         """,
         (symbol, news.wash_sentiment_below, start),
     ).fetchone()[0]
@@ -212,11 +338,25 @@ def parse_nasdaq_earnings(body: object, symbols: set[str]) -> list[tuple[str, da
 
 
 def _finviz_stamp(text: str, previous: datetime | None, now: datetime) -> datetime:
+    local = now.astimezone(ET)
+    label, _, clock_text = text.partition(" ")
+    if label.lower() == "today" and clock_text:
+        clock = datetime.strptime(clock_text, "%I:%M%p")
+        day = local.date()
+        return datetime(day.year, day.month, day.day, clock.hour, clock.minute, tzinfo=ET)
+    if label.lower() == "yesterday" and clock_text:
+        clock = datetime.strptime(clock_text, "%I:%M%p")
+        day = local.date() - timedelta(days=1)
+        return datetime(day.year, day.month, day.day, clock.hour, clock.minute, tzinfo=ET)
     if re.fullmatch(r"\d{1,2}:\d{2}[AP]M", text):
         clock = datetime.strptime(text, "%I:%M%p")
-        day = previous.date() if previous else now.astimezone(ET).date()
+        day = previous.date() if previous else local.date()
         return datetime(day.year, day.month, day.day, clock.hour, clock.minute, tzinfo=ET)
-    parsed = datetime.strptime(text, "%b-%d-%y %I:%M%p")
+    try:
+        parsed = datetime.strptime(text, "%b-%d-%y %I:%M%p")
+    except ValueError:
+        log.info("finviz stamp skipped text=%s", text)
+        return local
     return parsed.replace(tzinfo=ET)
 
 
@@ -273,6 +413,102 @@ def _earnings(symbols: list[str], today: date, window: int) -> list[tuple[str, d
     return found
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    def http_error_302(self, req, fp, code, msg, headers):
+        raise HTTPError(req.full_url, code, msg, headers, fp)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+
+_OPENER = build_opener(_NoRedirect)
+
+
+def _public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    return bool(ip.is_global)
+
+
+def _fetch_public(url: str) -> str:
+    current = url
+    for _hop in range(4):
+        request = Request(current, headers={"User-Agent": _PAGE_UA, "Accept": "text/html,application/xhtml+xml"})
+        try:
+            with _OPENER.open(request, timeout=12) as response:
+                kind = (response.headers.get("Content-Type") or "").lower()
+                if kind and "html" not in kind and "xml" not in kind and not kind.startswith("text/"):
+                    raise ValueError("That URL is not a web page.")
+                raw = _read_limited(response)
+                charset = response.headers.get_content_charset() or "utf-8"
+                return raw.decode(charset, "replace")
+        except HTTPError as exc:
+            location = exc.headers.get("Location") if exc.code in {301, 302, 303, 307, 308} else ""
+            exc.close()
+            if not location:
+                raise ValueError("The page did not load.") from exc
+            current = public_url(urljoin(current, location))
+        except ValueError:
+            raise
+        except (URLError, TimeoutError, OSError) as exc:
+            raise ValueError("The page did not load.") from exc
+    raise ValueError("The page did not load.")
+
+
+def _read_limited(response) -> bytes:
+    chunks = []
+    total = 0
+    while total < _PAGE_LIMIT:
+        chunk = response.read(min(65536, _PAGE_LIMIT - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
+def _meta_title(html: str) -> str:
+    patterns = (
+        r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']',
+        r"<title[^>]*>(.*?)</title>",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html, re.I | re.S)
+        if not match:
+            continue
+        text = _plain(match.group(1))
+        if text:
+            return text
+    return ""
+
+
+def _plain(fragment: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", fragment)
+    return re.sub(r"\s+", " ", unescape(text)).strip()
+
+
+def _insert_event(
+    conn: psycopg.Connection,
+    symbol: str,
+    source: str,
+    event_type: str,
+    sentiment: float,
+    title: str,
+    url: str,
+) -> int:
+    fingerprint = hashlib.sha256(f"{symbol.upper()}|{title.lower()}".encode()).hexdigest()[:24]
+    result = conn.execute(
+        """
+        INSERT INTO news_events (fingerprint, ts, symbol, source, event_type, sentiment, title, url)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (fingerprint) DO NOTHING
+        """,
+        (fingerprint, datetime.now(UTC), symbol, source, event_type, sentiment, title, url),
+    )
+    return result.rowcount
+
+
 def _get(url: str, source: str, symbol: str) -> str | None:
     request = Request(url, headers={"User-Agent": _UA, "Accept": "*/*"})
     try:
@@ -288,8 +524,9 @@ def _save_headlines(
     symbol: str,
     source: str,
     rows: list[tuple[datetime, str, str]],
-) -> int:
+) -> tuple[int, list[tuple[str, str, str]]]:
     written = 0
+    fresh: list[tuple[str, str, str]] = []
     for when, title, url in rows:
         sentiment, event_type = score_title(title)
         fingerprint = hashlib.sha256(f"{symbol.upper()}|{title.lower()}".encode()).hexdigest()[:24]
@@ -302,7 +539,9 @@ def _save_headlines(
             (fingerprint, when, symbol, source, event_type, sentiment, title, url),
         )
         written += result.rowcount
-    return written
+        if result.rowcount:
+            fresh.append((fingerprint, symbol, title))
+    return written, fresh
 
 
 def _save_marks(conn: psycopg.Connection, kind: str, symbol: str, rows: list[tuple[date, str]]) -> None:

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Positions</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .filters button {
+    padding:6px 12px; font-size:11px; font-weight:600; font-family:var(--font-mono);
+    background:transparent; border:1px solid var(--site-border-strong); color:var(--site-text-3);
+    cursor:pointer;
+  }
+  .filters button.on { background:#101c33; border-color:var(--site-primary); color:#93c5fd; }
+  .pnl-pos { color: var(--ath-up); }
+  .pnl-neg { color: var(--ath-down); }
+  .sym-name { font-size: 10.5px; color: var(--site-text-4); }
+  tr.pos { cursor: pointer; }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../08-history/index.html">History</a>
+    <a class="active" href="./index.html">Positions</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">PAPER<br>3 OPEN</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Positions</h1>
+        <p>The latest IBKR book for this account. A stock and an option each get their own row. A flat contract is left off.</p>
+      </div>
+      <div class="chips">
+        <span class="chip info"><span class="dot"></span>3 open</span>
+        <span class="chip"><span class="dot"></span>synced 2026-10-10 07:10</span>
+        <span class="chip"><span class="dot"></span>DUR••••115</span>
+      </div>
+    </div>
+
+    <div class="grid cols-4" style="margin-bottom:14px">
+      <div class="card stat"><div class="label">Open</div><div class="value">3</div><div class="meta">on this account</div></div>
+      <div class="card stat"><div class="label">Stock</div><div class="value">1</div><div class="meta">shares</div></div>
+      <div class="card stat"><div class="label">Option</div><div class="value">2</div><div class="meta">contracts</div></div>
+      <div class="card stat"><div class="label">Open P&amp;L</div><div class="value">mixed</div><div class="meta">USD +1,267.00 &nbsp; HKD -120.00</div></div>
+    </div>
+
+    <div class="card">
+      <h2>Open positions <button class="more" id="sync" type="button">Sync from IB</button></h2>
+      <div class="filters" id="filters">
+        <button class="on" data-f="all" type="button">All</button>
+        <button data-f="stock" type="button">Stock</button>
+        <button data-f="option" type="button">Option</button>
+      </div>
+      <div class="scroll-y" style="max-height:520px">
+        <table class="data">
+          <thead><tr>
+            <th>Symbol</th><th>Type</th><th>Side</th><th>Qty</th><th>Avg</th><th>Mark</th><th>Value</th><th>Open P&amp;L</th><th>Expiry</th><th>Strike</th>
+          </tr></thead>
+          <tbody id="book">
+            <tr class="pos" data-f="stock" data-title="NVDA stock">
+              <td><b>NVDA</b><div class="sym-name">USD</div></td>
+              <td><span class="tag">stock</span></td>
+              <td><span class="tag green">long</span></td>
+              <td class="mono">100</td>
+              <td class="mono">218.40</td>
+              <td class="mono">229.37</td>
+              <td class="mono">22,937.00</td>
+              <td class="mono pnl-pos">+1,097.00</td>
+              <td class="mono">—</td>
+              <td class="mono">—</td>
+            </tr>
+            <tr class="pos" data-f="option" data-title="NVDA 200 put">
+              <td><b>NVDA</b><div class="sym-name">USD</div></td>
+              <td><span class="tag amber">put</span></td>
+              <td><span class="tag amber">short</span></td>
+              <td class="mono">-1</td>
+              <td class="mono">4.80</td>
+              <td class="mono">3.10</td>
+              <td class="mono">-310.00</td>
+              <td class="mono pnl-pos">+170.00</td>
+              <td class="mono">2026-10-16<div class="sym-name">6d</div></td>
+              <td class="mono">200</td>
+            </tr>
+            <tr class="pos" data-f="option" data-title="700 420 call">
+              <td><b>700</b><div class="sym-name">HKD</div></td>
+              <td><span class="tag teal">call</span></td>
+              <td><span class="tag amber">short</span></td>
+              <td class="mono">-1</td>
+              <td class="mono">8.20</td>
+              <td class="mono">9.40</td>
+              <td class="mono">-940.00</td>
+              <td class="mono pnl-neg">-120.00</td>
+              <td class="mono">2026-10-29<div class="sym-name">19d</div></td>
+              <td class="mono">420</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  document.getElementById("filters").addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    document.querySelectorAll("#filters button").forEach((node) => node.classList.remove("on"));
+    button.classList.add("on");
+    const kind = button.getAttribute("data-f");
+    document.querySelectorAll("#book tr").forEach((row) => {
+      row.hidden = kind !== "all" && row.getAttribute("data-f") !== kind;
+    });
+  });
+  document.getElementById("book").addEventListener("click", (event) => {
+    const row = event.target.closest("tr");
+    if (!row || !window.Athena) return;
+    window.Athena.modal({
+      title: row.getAttribute("data-title"),
+      body: "<p class='note'>Fixture row. The live page opens the IB fields: currency, multiplier, realized P&amp;L, and the sync time.</p>"
+    });
+  });
+  document.getElementById("sync").addEventListener("click", () => {
+    if (window.Athena) window.Athena.toast("Fixture", "This mock does not call IB.", "info");
+  });
+})();
+</script>
+</body>
+</html>

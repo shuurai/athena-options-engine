@@ -11,7 +11,14 @@ from athena_settings.model import SettingsPayload
 
 log = logging.getLogger("athena.strategy")
 
-PRICE_OWNED = {"OVERBOUGHT", "OVERSOLD", "SUPPORT_TOUCH", "RESISTANCE_TOUCH"}
+PRICE_OWNED = {
+    "OVERBOUGHT",
+    "OVERSOLD",
+    "SUPPORT_TOUCH",
+    "RESISTANCE_TOUCH",
+    "PRICE_WEAK",
+    "VOLUME_SPIKE",
+}
 
 
 def rsi(closes: list[Decimal], period: int) -> Decimal | None:
@@ -45,8 +52,10 @@ def price_tags(
     oversold: int,
     lookback: int,
     touch_pct: int,
+    volumes: list[Decimal] | None = None,
+    volume_multiple: int = 2,
 ) -> set[str]:
-    """OVERBOUGHT, OVERSOLD, and a touch of the recent high or low."""
+    """Price location, a weaker close, and a volume spike."""
     tags: set[str] = set()
     value = rsi(closes, period)
     if value is not None:
@@ -63,13 +72,20 @@ def price_tags(
             tags.add("SUPPORT_TOUCH")
         if window_high > 0 and abs(close - window_high) / window_high <= band:
             tags.add("RESISTANCE_TOUCH")
+    if len(closes) > lookback and closes[-1] < closes[-1 - lookback]:
+        tags.add("PRICE_WEAK")
+    if volumes is not None and len(volumes) > lookback:
+        prior = volumes[-(lookback + 1):-1]
+        average = sum(prior) / Decimal(len(prior))
+        if average > 0 and volumes[-1] >= average * Decimal(volume_multiple):
+            tags.add("VOLUME_SPIKE")
     return tags
 
 
 def tags_from_prices(conn: psycopg.Connection, symbol: str, settings: SettingsPayload) -> set[str]:
     rows = conn.execute(
         """
-        SELECT high, low, close FROM market_bars
+        SELECT high, low, close, volume FROM market_bars
         WHERE symbol = %s AND source = 'ib-daily'
         ORDER BY ts
         """,
@@ -83,6 +99,7 @@ def tags_from_prices(conn: psycopg.Connection, symbol: str, settings: SettingsPa
     highs = [row[0] for row in rows]
     lows = [row[1] for row in rows]
     closes = [row[2] for row in rows]
+    volumes = [row[3] for row in rows]
     tags = price_tags(
         highs,
         lows,
@@ -92,6 +109,8 @@ def tags_from_prices(conn: psycopg.Connection, symbol: str, settings: SettingsPa
         oversold=strategy.rsi_oversold,
         lookback=strategy.level_lookback,
         touch_pct=strategy.touch_pct,
+        volumes=volumes,
+        volume_multiple=strategy.volume_spike_multiple,
     )
     if tags:
         log.info("price tags symbol=%s tags=%s", symbol, ",".join(sorted(tags)))

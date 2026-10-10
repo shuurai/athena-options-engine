@@ -4,7 +4,7 @@
 
 Athena runs **exactly one** strategy product: the **News Front-Running Cycle (NFR)**.
 
-CSP, CC, Strangle, Hold, Roll, and Close are **tactics** selected by phase + tags + Settings — not separate strategy engines to maintain forever.
+CSP, CC, Strangle, Hold, Roll, and Close are **tactics**. Phases P1–P5 stay as news-cycle context. They do not pick an open. Location and News write one tag set. CSP, Strangle, Purchase, and Call each read it. The consolidator, with thinking on, chooses the drafts. Income or Accumulate, and Long, are per symbol on Universe. Nothing is sent until Approve.
 
 Refine this cycle for 5–10 years. Improvisation = Settings versions + rule comments, not new strategy packages.
 

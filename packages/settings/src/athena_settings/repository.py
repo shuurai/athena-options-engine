@@ -129,14 +129,31 @@ def _payload_of(version: SettingsVersion) -> SettingsPayload:
     return SettingsPayload.model_validate({key: data[key] for key in SettingsPayload.model_fields})
 
 
+_SECRET_LEAVES = {"api_key", "bot_token", "deepseek_token"}
+
+
 def _diff(old: SettingsPayload, new: SettingsPayload) -> str:
     before = _flat(old.model_dump())
     after = _flat(new.model_dump())
     lines = []
     for key in sorted(set(before) | set(after)):
-        if before.get(key) != after.get(key):
-            lines.append(f"{key} {before.get(key)} -> {after.get(key)}")
+        old_value = before.get(key)
+        new_value = after.get(key)
+        if old_value == new_value:
+            continue
+        if key.rsplit(".", 1)[-1] in _SECRET_LEAVES:
+            lines.append(f"{key} {_secret_label(old_value)} -> {_secret_label(new_value)}")
+            continue
+        lines.append(f"{key} {old_value} -> {new_value}")
     return "\n".join(lines)
+
+
+def _secret_label(value: object) -> str:
+    if value in (None,):
+        return "inherit"
+    if value == "":
+        return "cleared"
+    return "set"
 
 
 def _flat(value: object, prefix: str = "") -> dict[str, object]:

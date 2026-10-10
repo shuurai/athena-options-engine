@@ -1,1 +1,1 @@
-Draft size check. A draft above `max_contracts_per_symbol` is stored as `blocked`.
+Draft size check. A draft above `max_contracts_per_symbol`, or above `max_position_per_symbol` after the 10% band, is stored as `blocked`. A zero position cap is off. One contract already above the cap keeps the contract limit.

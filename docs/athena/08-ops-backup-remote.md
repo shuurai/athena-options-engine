@@ -94,6 +94,16 @@ Recommended: **Tailscale** (or WireGuard) so:
 
 Do **not** publish IB Gateway ports to the public internet.
 
+## Console buttons
+
+The cockpit runs three workflows. Each one shows a floating task card, then a toast.
+
+- **Health** checks Orchestrator, iTick, Store, the latest local backup, and Telegram.
+- **Backup now** writes a local snapshot, prunes by `retain_local_days`, and syncs to S3 when that sync is on.
+- **Halt trading** blocks new drafts on this account. **Resume** clears that halt. Privilege stays `all_orders`.
+
+Disk, IB login, and a log tail are not part of that card.
+
 ## Alerting (ops)
 
 CRITICAL → both Feishu and Telegram:

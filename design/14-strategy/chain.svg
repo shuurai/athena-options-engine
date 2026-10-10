@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 860" width="1040" height="860" data-generator="fireworks-tech-graph" data-schema-version="1" data-text-metrics="heuristic-v1" data-style-id="2" data-visual-theme="Dark Terminal" data-diagram-type="agent" data-motion-scene="" data-semantic-profile="generic" data-semantic-valid="true" data-quality-profile="showcase" data-max-bends-per-edge="2" data-max-total-bends="8" data-max-route-stretch="1.35" data-max-bridged-crossings="0" data-min-node-gap="40.0" data-min-container-gutter="20.0" data-min-label-clearance="4.0" data-min-segment-length="16.0">
+  <defs>
+    <marker id="arrowA" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#a855f7"/>
+    </marker>
+    <marker id="arrowB" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#22c55e"/>
+    </marker>
+    <marker id="arrowC" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowE" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185"/>
+    </marker>
+    <marker id="arrowF" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrowG" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#f97316"/>
+    </marker>
+    <marker id="arrowH" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8"/>
+    </marker>
+    <linearGradient id="terminalGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f0f1a"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </linearGradient>
+    <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#3b82f6" flood-opacity="0.65"/>
+    </filter>
+    <filter id="glowPurple" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#a855f7" flood-opacity="0.72"/>
+    </filter>
+    <filter id="glowGreen" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#22c55e" flood-opacity="0.62"/>
+    </filter>
+    <filter id="glowOrange" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#f97316" flood-opacity="0.62"/>
+    </filter>
+    <style>
+    text { font-family: 'SF Mono', 'Fira Code', Menlo, 'Microsoft YaHei', 'SimHei', monospace; }
+    .title { font-size: 30px; font-weight: 700; fill: #e2e8f0; }
+    .subtitle { font-size: 14px; font-weight: 500; fill: #94a3b8; }
+    .section { font-size: 13px; font-weight: 700; fill: #38bdf8; letter-spacing: 1.4px; }
+    .section-sub { font-size: 12px; font-weight: 500; fill: #64748b; }
+    .node-title { font-weight: 700; fill: #e2e8f0; }
+    .node-sub { font-size: 12px; font-weight: 500; fill: #94a3b8; }
+    .node-type { font-size: 12px; font-weight: 700; fill: #64748b; letter-spacing: 0.08em; }
+    .arrow-label { font-size: 12px; font-weight: 600; fill: #cbd5e1; }
+    .legend { font-size: 12px; font-weight: 500; fill: #94a3b8; }
+    .footnote { font-size: 12px; font-weight: 500; fill: #64748b; }
+    .metric-label { font-size: 8.5px; font-weight: 700; fill: #64748b; text-transform: uppercase; }
+    .metric-value { font-size: 9.5px; font-weight: 700; fill: #e2e8f0; }
+    </style>
+  </defs>
+  <rect data-graph-role="background" width="1040.0" height="860.0" fill="url(#terminalGradient)"/>
+  <text x="520.0" y="56" text-anchor="middle" class="title">Signaled entry</text>
+  <text x="520.0" y="82" text-anchor="middle" class="subtitle">One shared tag set. Tactics run side by side. Proposals join once.</text>
+  <path id="loc-tag" data-graph-role="edge" data-edge-id="loc-tag" data-source="location" data-target="tag1" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 128,168 L 128,228" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="news-tag" data-graph-role="edge" data-edge-id="news-tag" data-source="news" data-target="tag4" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 784,168 L 784,228" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="tag-a" data-graph-role="edge" data-edge-id="tag-a" data-source="tag1" data-target="tag2" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 208,252 L 248,252" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="tag-b" data-graph-role="edge" data-edge-id="tag-b" data-source="tag2" data-target="tag3" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 408,252 L 448,252" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="tag-c" data-graph-role="edge" data-edge-id="tag-c" data-source="tag3" data-target="tag4" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 608,252 L 704,252" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="read-csp" data-graph-role="edge" data-edge-id="read-csp" data-source="tag1" data-target="csp" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 128,276 L 128,340" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="read-strangle" data-graph-role="edge" data-edge-id="read-strangle" data-source="tag2" data-target="strangle" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 328,276 L 328,340" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="read-purchase" data-graph-role="edge" data-edge-id="read-purchase" data-source="tag3" data-target="purchase" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 528,276 L 528,340" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="read-call" data-graph-role="edge" data-edge-id="read-call" data-source="tag4" data-target="call" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 784,276 L 784,340" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
+  <path id="see-buy" data-graph-role="edge" data-edge-id="see-buy" data-source="purchase" data-target="call" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 608,372 L 704,372" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="out-csp" data-graph-role="edge" data-edge-id="out-csp" data-source="csp" data-target="prop1" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 128,404 L 128,468" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="out-strangle" data-graph-role="edge" data-edge-id="out-strangle" data-source="strangle" data-target="prop2" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 328,404 L 328,468" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="out-purchase" data-graph-role="edge" data-edge-id="out-purchase" data-source="purchase" data-target="prop3" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 528,404 L 528,468" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="out-call" data-graph-role="edge" data-edge-id="out-call" data-source="call" data-target="prop4" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 784,404 L 784,468" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="join-a" data-graph-role="edge" data-edge-id="join-a" data-source="prop1" data-target="prop2" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 208,492 L 248,492" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="join-b" data-graph-role="edge" data-edge-id="join-b" data-source="prop2" data-target="prop3" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 408,492 L 448,492" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="join-c" data-graph-role="edge" data-edge-id="join-c" data-source="prop4" data-target="prop3" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 704,492 L 608,492" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="to-con" data-graph-role="edge" data-edge-id="to-con" data-source="prop3" data-target="consolidator" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 528,516 L 528,580" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
+  <path id="to-approve" data-graph-role="edge" data-edge-id="to-approve" data-source="consolidator" data-target="approve" data-edge-kind="flow" data-topic-id="" data-flow="control" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 528,636 L 528,700" fill="none" stroke="#a855f7" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowA)"/>
+  <g id="node-location" data-graph-role="node" data-node-id="location" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="48,112,208,168">
+  <rect x="48.0" y="112.0" width="160.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="128.0" y="140.0" text-anchor="middle" class="node-title" font-size="18.0">Location</text>
+  <text x="128.0" y="162.0" text-anchor="middle" class="node-sub">channel</text>
+  </g>
+  <g id="node-news" data-graph-role="node" data-node-id="news" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="704,112,864,168">
+  <rect x="704.0" y="112.0" width="160.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="784.0" y="140.0" text-anchor="middle" class="node-title" font-size="18.0">News</text>
+  <text x="784.0" y="162.0" text-anchor="middle" class="node-sub">headlines</text>
+  </g>
+  <g id="node-tag1" data-graph-role="node" data-node-id="tag1" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="48,228,208,276">
+  <rect x="48.0" y="228.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="128.0" y="252.0" text-anchor="middle" class="node-title" font-size="18.0">Tag set</text>
+  </g>
+  <g id="node-tag2" data-graph-role="node" data-node-id="tag2" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="248,228,408,276">
+  <rect x="248.0" y="228.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="328.0" y="252.0" text-anchor="middle" class="node-title" font-size="18.0">Tag set</text>
+  </g>
+  <g id="node-tag3" data-graph-role="node" data-node-id="tag3" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="448,228,608,276">
+  <rect x="448.0" y="228.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="528.0" y="252.0" text-anchor="middle" class="node-title" font-size="18.0">Tag set</text>
+  </g>
+  <g id="node-tag4" data-graph-role="node" data-node-id="tag4" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="704,228,864,276">
+  <rect x="704.0" y="228.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="784.0" y="252.0" text-anchor="middle" class="node-title" font-size="18.0">Tag set</text>
+  </g>
+  <g id="node-csp" data-graph-role="node" data-node-id="csp" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="48,340,208,404">
+  <rect x="48.0" y="340.0" width="160.0" height="64.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="128.0" y="372.0" text-anchor="middle" class="node-title" font-size="18.0">CSP</text>
+  <text x="128.0" y="394.0" text-anchor="middle" class="node-sub">or quiet</text>
+  </g>
+  <g id="node-strangle" data-graph-role="node" data-node-id="strangle" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="248,340,408,404">
+  <rect x="248.0" y="340.0" width="160.0" height="64.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="328.0" y="372.0" text-anchor="middle" class="node-title" font-size="18.0">Strangle</text>
+  <text x="328.0" y="394.0" text-anchor="middle" class="node-sub">or quiet</text>
+  </g>
+  <g id="node-purchase" data-graph-role="node" data-node-id="purchase" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="448,340,608,404">
+  <rect x="448.0" y="340.0" width="160.0" height="64.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="528.0" y="372.0" text-anchor="middle" class="node-title" font-size="18.0">Purchase</text>
+  <text x="528.0" y="394.0" text-anchor="middle" class="node-sub">or quiet</text>
+  </g>
+  <g id="node-call" data-graph-role="node" data-node-id="call" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="704,340,864,404">
+  <rect x="704.0" y="340.0" width="160.0" height="64.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="784.0" y="372.0" text-anchor="middle" class="node-title" font-size="18.0">Call</text>
+  <text x="784.0" y="394.0" text-anchor="middle" class="node-sub">or quiet</text>
+  </g>
+  <g id="node-prop1" data-graph-role="node" data-node-id="prop1" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="48,468,208,516">
+  <rect x="48.0" y="468.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="128.0" y="492.0" text-anchor="middle" class="node-title" font-size="18.0">Proposal</text>
+  </g>
+  <g id="node-prop2" data-graph-role="node" data-node-id="prop2" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="248,468,408,516">
+  <rect x="248.0" y="468.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="328.0" y="492.0" text-anchor="middle" class="node-title" font-size="18.0">Proposal</text>
+  </g>
+  <g id="node-prop3" data-graph-role="node" data-node-id="prop3" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="448,468,608,516">
+  <rect x="448.0" y="468.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="528.0" y="492.0" text-anchor="middle" class="node-title" font-size="18.0">Proposal</text>
+  </g>
+  <g id="node-prop4" data-graph-role="node" data-node-id="prop4" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="704,468,864,516">
+  <rect x="704.0" y="468.0" width="160.0" height="48.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="784.0" y="492.0" text-anchor="middle" class="node-title" font-size="18.0">Proposal</text>
+  </g>
+  <g id="node-consolidator" data-graph-role="node" data-node-id="consolidator" data-semantic-role="double_rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="368,580,688,636">
+  <rect x="368.0" y="580.0" width="320.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="2.0"/>
+  <rect x="374.0" y="586.0" width="308.0" height="44.0" rx="7.0" fill="none" stroke="#334155" stroke-width="1.2" opacity="0.65"/>
+  <text x="528.0" y="608.0" text-anchor="middle" class="node-title" font-size="18.0">Consolidator</text>
+  <text x="528.0" y="630.0" text-anchor="middle" class="node-sub">thinking on</text>
+  </g>
+  <g id="node-approve" data-graph-role="node" data-node-id="approve" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="388,700,668,756">
+  <rect x="388.0" y="700.0" width="280.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="528.0" y="728.0" text-anchor="middle" class="node-title" font-size="18.0">Approve</text>
+  <text x="528.0" y="750.0" text-anchor="middle" class="node-sub">flags and caps</text>
+  </g>
+  <g id="loc-tag-label" data-graph-role="label" data-owner="loc-tag" data-graph-bounds="65.4,184,125,204">
+  <text x="95.2" y="198.0" text-anchor="middle" class="arrow-label">channel</text>
+  </g>
+  <g id="news-tag-label" data-graph-role="label" data-owner="news-tag" data-graph-bounds="739.16,184,781,204">
+  <text x="760.08" y="198.0" text-anchor="middle" class="arrow-label">news</text>
+  </g>
+  <g id="tag-a-label" data-graph-role="label" data-owner="tag-a" data-graph-bounds="200.12,198,255.88,218">
+  <text x="228.0" y="212.0" text-anchor="middle" class="arrow-label">shared</text>
+  </g>
+  <g id="read-csp-label" data-graph-role="label" data-owner="read-csp" data-graph-bounds="76.2,294,125,314">
+  <text x="100.6" y="308.0" text-anchor="middle" class="arrow-label">reads</text>
+  </g>
+  <g id="see-buy-label" data-graph-role="label" data-owner="see-buy" data-graph-bounds="638,341,674,361">
+  <text x="656.0" y="355.0" text-anchor="middle" class="arrow-label">buy</text>
+  </g>
+  <g id="join-b-label" data-graph-role="label" data-owner="join-b" data-graph-bounds="408.64,438,447.36,458">
+  <text x="428.0" y="452.0" text-anchor="middle" class="arrow-label">join</text>
+  </g>
+  <g id="to-con-label" data-graph-role="label" data-owner="to-con" data-graph-bounds="488,534,524,554">
+  <text x="506.0" y="548.0" text-anchor="middle" class="arrow-label">all</text>
+  </g>
+  <g id="to-approve-label" data-graph-role="label" data-owner="to-approve" data-graph-bounds="469.24,654,525,674">
+  <text x="497.12" y="668.0" text-anchor="middle" class="arrow-label">drafts</text>
+  </g>
+  <g id="legend" data-graph-role="legend">
+    <rect id="legend-zone" data-graph-role="reserved" data-reserved-kind="legend" x="38" y="786" width="367.28" height="46" rx="10" fill="none" stroke="none"/>
+    <line data-graph-role="decoration" x1="48.0" y1="800.0" x2="78.0" y2="800.0" stroke="#fb7185" stroke-width="2.3" marker-end="url(#arrowE)"/>
+    <text data-graph-role="decoration" x="88.0" y="804.0" class="legend">shared tags</text>
+    <line data-graph-role="decoration" x1="189.92000000000002" y1="800.0" x2="219.92000000000002" y2="800.0" stroke="#22c55e" stroke-width="2.3" marker-end="url(#arrowB)"/>
+    <text data-graph-role="decoration" x="229.92000000000002" y="804.0" class="legend">proposal</text>
+    <line data-graph-role="decoration" x1="310.48" y1="800.0" x2="340.48" y2="800.0" stroke="#a855f7" stroke-width="2.3" marker-end="url(#arrowA)"/>
+    <text data-graph-role="decoration" x="350.48" y="804.0" class="legend">guard</text>
+  </g>
+</svg>

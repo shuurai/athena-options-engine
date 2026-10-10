@@ -5,7 +5,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Privilege = Literal["all_orders", "opens_only", "auto_within_risk", "paper_only"]
-RiskProfile = Literal["defensive", "standard", "income", "aggressive", "custom"]
+GlobalCurrency = Literal["HKD", "USD", "AUD", "CNY", "JPY", "CAD"]
+RiskProfile = Literal["defensive", "standard", "income", "aggressive", "test", "custom"]
 
 
 class RiskLimits(BaseModel):
@@ -14,10 +15,12 @@ class RiskLimits(BaseModel):
     cash_reserve_pct: int
     daily_loss_halt_pct: int
     max_contracts_per_symbol: int
+    max_position_per_symbol: int = 0
     min_iv_rank_new_short: int
     min_dte_new: int
     max_short_opt_margin_pct: int
     earnings_blackout_days: int
+    max_orders_per_day: int = 10
 
 
 class IBSlots(BaseModel):
@@ -45,19 +48,61 @@ class NewsSettings(BaseModel):
 
 
 class AISettings(BaseModel):
-    provider: str = "DSH"
-    model: str = "sentiment-v1"
+    provider: Literal["DSH", "DIRECT"] = "DSH"
+    model: str = "deepseek-flash"
     base_url: str = "http://127.0.0.1:8787"
+    deepseek_token: str | None = None
 
 
 class ITickSettings(BaseModel):
     base_url: str = "https://api.itick.org"
+    api_key: str | None = None
+
+
+class AccountEntry(BaseModel):
+    """A configured id. It is not the Gateway session until the environment lists it."""
+
+    account_id: str
+    label: str = ""
+
+
+class AccountSwitches(BaseModel):
+    """None inherits the default: on for the session account, off for any other id."""
+
+    sync: bool | None = None
+    trading: bool | None = None
+
+
+class TacticFlags(BaseModel):
+    """Per-symbol tactic switches. Missing symbols stay on.
+
+    Intent and Long are per symbol. Income does not buy shares.
+    """
+
+    csp: bool = True
+    cc: bool = True
+    strangle: bool = True
+    intent: Literal["income", "accumulate"] = "income"
+    long: bool = False
+
+
+class AgentPrompt(BaseModel):
+    """Standing instruction plus the per-run template."""
+
+    system: str
+    execution: str
 
 
 class NotifySettings(BaseModel):
-    """How long an unapproved draft stays open. The control link uses the same window."""
+    """How long an unapproved draft stays open. The control link uses the same window.
+
+    A None secret inherits the environment. An empty string overrides it.
+    """
 
     draft_ttl_minutes: int = 60
+    bot_token: str | None = None
+    bot_username: str | None = None
+    telegram_user_ids: str | None = None
 
 
 class StrategySettings(BaseModel):
@@ -71,6 +116,7 @@ class StrategySettings(BaseModel):
     rsi_oversold: int = 30
     level_lookback: int = 20
     touch_pct: int = 1
+    volume_spike_multiple: int = 2
     p1_from: int = -7
     p1_to: int = -3
     p2_from: int = -3
@@ -79,10 +125,15 @@ class StrategySettings(BaseModel):
     p4_to: int = 3
     p5_from: int = 5
     p5_to: int = 10
+    strangle_otm_pct: int = 10
+    dte_min: int = 21
+    dte_target: int = 35
+    dte_max: int = 60
 
 
 class SettingsPayload(BaseModel):
     privilege: Privilege = "all_orders"
+    global_currency: GlobalCurrency = "HKD"
     risk: RiskLimits
     ib: IBSlots = Field(default_factory=IBSlots)
     news: NewsSettings = Field(default_factory=NewsSettings)
@@ -91,6 +142,13 @@ class SettingsPayload(BaseModel):
     notify: NotifySettings = Field(default_factory=NotifySettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     watchlist: list[str] = Field(default_factory=lambda: ["NVDA", "QCOM", "T"])
+    blocked_symbols: list[str] = Field(default_factory=list)
+    tactic_flags: dict[str, TacticFlags] = Field(default_factory=dict)
+    agents: dict[str, AgentPrompt] = Field(default_factory=dict)
+    extra_accounts: list[AccountEntry] = Field(default_factory=list)
+    account_controls: dict[str, AccountSwitches] = Field(default_factory=dict)
+    retain_local_days: int = 14
+    cycle_minutes: int = 5
 
 
 def standard_payload() -> SettingsPayload:

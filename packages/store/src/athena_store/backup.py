@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
@@ -20,12 +20,15 @@ TABLES = (
     "positions",
     "halts",
     "nav_marks",
+    "account_marks",
     "news_events",
     "calendar_marks",
     "settings_audits",
     "option_plans",
+    "option_choices",
     "iv_marks",
     "mock_signals",
+    "symbol_facts",
 )
 
 
@@ -41,3 +44,21 @@ def write_snapshot(conn: psycopg.Connection, directory: Path) -> Path:
     path = directory / f"athena-{stamp}.json"
     path.write_text(json.dumps(dump, default=str), encoding="utf-8")
     return path
+
+
+def prune_snapshots(directory: Path, days: int, now: datetime | None = None) -> int:
+    """Remove snapshots older than the retention window. The newest file stays."""
+    files = sorted(directory.glob("athena-*.json"), key=lambda path: path.stat().st_mtime)
+    if len(files) <= 1 or days < 1:
+        return 0
+    latest = files[-1]
+    moment = now or datetime.now(UTC)
+    cutoff = moment.timestamp() - timedelta(days=days).total_seconds()
+    removed = 0
+    for path in files:
+        if path == latest:
+            continue
+        if path.stat().st_mtime < cutoff:
+            path.unlink()
+            removed += 1
+    return removed

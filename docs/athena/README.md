@@ -69,7 +69,8 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 | 1 Monorepo skeleton (orchestrator, settings, store) | **Done** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
 | 2 Paper HITL + iTick seed bars + slot clock + one-time Approve | **Done** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
 | 3 Live approve-gated exec | **Gate done.** No live order until Gateway and the account id are set. |
-| 4 NFR + news depth | Not started |
+| 4 NFR + news depth | **In progress** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
+| Console web | **Local pages are up** on port 8788. Vercel waits on Tailscale. See [10-implementation-tracker.md](10-implementation-tracker.md). |
 
 ---
 

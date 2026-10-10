@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import socket
 import subprocess
 from pathlib import Path
 
@@ -24,7 +25,23 @@ def ops_action(actor: str, allowlist: set[str], command: str) -> str:
             return "ATHENA_GATEWAY_RESTART_CMD is empty"
         subprocess.run(shlex.split(raw), check=False)
         return "Gateway restart command started"
-    raise ValueError("ops command must be athena restart or gateway restart")
+    raise ValueError("ops command must be health, logs, athena restart, or gateway restart")
+
+
+def gateway_open(host: str, port: int, timeout: float = 1.0) -> bool:
+    """True when the Gateway port accepts a connection. This does not log in."""
+    try:
+        with socket.create_connection((host, port), timeout):
+            return True
+    except OSError:
+        return False
+
+
+def log_tail(path: Path, lines: int = 20) -> str:
+    if not path.is_file():
+        return "No log file yet."
+    kept = path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+    return "\n".join(kept)[-1500:] or "No log file yet."
 
 
 def consume_restart() -> bool:

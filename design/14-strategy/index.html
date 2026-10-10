@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Strategy</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .flow { position: relative; margin-bottom: 14px; }
+  .flow h2 span { display: inline-flex; align-items: center; gap: 8px; }
+  button.help-q { width: 18px; height: 18px; padding: 0; letter-spacing: 0; text-transform: none; border: 1px solid var(--site-border-strong); background: transparent; color: var(--site-text-3); font: 11px/16px var(--font-mono); cursor: pointer; }
+  .help-pop { position: absolute; z-index: 5; left: 16px; top: 42px; width: min(360px, calc(100% - 32px)); padding: 10px 12px; background: #10141a; border: 1px solid var(--site-border-strong); color: var(--site-text-3); font-size: 12.5px; line-height: 1.45; font-weight: 400; letter-spacing: 0; text-transform: none; font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+  .flow img { display: block; width: 100%; height: auto; }
+  .agent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; margin-bottom: 14px; }
+  .agent { margin: 0; }
+  .agent.span { grid-column: 1 / -1; }
+  .agent.collapsed h2 { margin-bottom: 0; }
+  .agent.collapsed .body { display: none; }
+  button.fold {
+    width: 22px; height: 22px; padding: 0; flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--site-border-strong); background: transparent;
+    color: var(--site-text-3); letter-spacing: 0; text-transform: none; cursor: pointer;
+  }
+  button.fold svg { display: block; transition: transform .12s; }
+  .agent.collapsed button.fold svg { transform: rotate(-90deg); }
+  .agent .role { font-size: 12px; color: var(--site-text-3); margin: 0 0 12px; line-height: 1.45; }
+  label.prompt { display: block; margin: 0 0 12px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
+  textarea.prompt {
+    display: block; width: 100%; min-height: 140px; margin-top: 6px; padding: 10px;
+    border: 1px solid var(--site-border-strong); background: #0a0c10; color: #9aa5b1;
+    caret-color: #c3cad4;
+    font: 12px/1.45 var(--font-mono); resize: vertical;
+  }
+  @media (max-width: 900px) {
+    .agent-grid { grid-template-columns: 1fr; }
+  }
+  .sample td.quiet { color: var(--site-text-4); }
+  .sample td.keep { color: #93c5fd; }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a class="active" href="./index.html">Strategy</a>
+    <a href="../13-ai-audit/index.html">Audit</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../12-positions/index.html">Positions</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">7 AGENTS<br>PROMPTS EDITABLE</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Strategy</h1>
+        <p>Location and News write one tag set. The tactic agents read it side by side. Their proposals join at the consolidator. Income or Accumulate, and Long, are set per symbol on Universe.</p>
+      </div>
+      <div class="chips">
+        <span class="chip info"><span class="dot"></span>7 AGENTS</span>
+        <span class="chip"><span class="dot"></span>THINKING ON</span>
+      </div>
+    </div>
+    <div class="card flow">
+      <h2><span>How a cycle runs <button class="help-q" type="button" aria-label="How a cycle runs" data-help="They are not one chain. Location and News run together and only emit tags. CSP, Strangle, Purchase, and Call each read that same tag set. They do not call one another. Call is the exception: it also sees the Purchase proposal, and stays quiet until a share purchase fills. The four proposals then join. The consolidator, with thinking on, is the only agent that chooses the drafts. Universe flags, risk caps, and Approve still apply.">?</button></span></h2>
+      <img src="./chain.svg" alt="Location and News fill one tag set. Four tactic agents read it side by side. Call also sees the purchase. Proposals join at the consolidator, then Approve.">
+    </div>
+    <div class="agent-grid" id="agents"></div>
+    <div class="card sample">
+      <h2>NVDA sample <span class="more">fixture, not a live read</span></h2>
+      <p class="card-lead">Last 182.40 is on the lower rail of a rising 63-session channel (180 to 230) and above the 52-week low of 140. On Universe this symbol is Accumulate and Long. No shares are held.</p>
+      <table class="data">
+        <thead><tr><th>Agent</th><th>Proposal</th></tr></thead>
+        <tbody>
+          <tr><td>CSP</td><td class="keep">Cash-secured put, 175 strike, limit 2.40</td></tr>
+          <tr><td>Call</td><td class="quiet">Quiet until the share purchase fills. Then a covered call at the upper rail.</td></tr>
+          <tr><td>Purchase</td><td class="keep">Buy shares at 182.50</td></tr>
+          <tr><td>Strangle</td><td class="quiet">Quiet. News wash is unconfirmed.</td></tr>
+          <tr><td>Consolidator</td><td class="keep">draft_a1 share purchase first. draft_b2 cash-secured put beside it. Both inside the risk cap.</td></tr>
+        </tbody>
+      </table>
+      <p class="slot-note" style="margin-top:12px">An off CSP, CC, Strangle, or Long switch on Universe drops that agent's draft. Nothing is sent until Approve.</p>
+    </div>
+  </main>
+</div>
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const agents = [
+    {
+      name: "Location",
+      role: "Tags only. No order. Names where price sits in the 63-session channel and the 52-week range.",
+      system: "You label a symbol's place in its price channel. You do not propose an order.\nThe channel is the 63-session highest high and lowest low, about three months. A rising channel means both rails are higher than they were 21 sessions ago.\nThe 52-week range is the 252-session highest high and lowest low.\nEmit only these tags when they are true: CHANNEL_RISING, UPPER_RAIL, LOWER_RAIL, HIGH_52W, LOW_52W.\nUPPER_RAIL and LOWER_RAIL mean the last price is within 1% of that rail. HIGH_52W and LOW_52W mean the last price is within 1% of that extreme.\nReply with JSON only: {\"tags\":[\"CHANNEL_RISING\"]}",
+      execution: "Symbol: {{symbol}}\nLast: {{last}}\n63-session high: {{high_63}}\n63-session low: {{low_63}}\n63-session high 21 sessions ago: {{high_63_prior}}\n63-session low 21 sessions ago: {{low_63_prior}}\n252-session high: {{high_252}}\n252-session low: {{low_252}}"
+    },
+    {
+      name: "News",
+      role: "Tags only. No order. A keyword score is used only when this agent does not run.",
+      system: "You read public headlines for one symbol. You do not propose an order.\nnews_wash is true only when the set is a negative narrative cluster.\nevent_type must be one of EARNINGS_RELEASE, FED_RATE_DECISION, GENERIC_NEGATIVE, GENERIC_POSITIVE, GENERIC.\nsentiment is a number from -1.0 to 1.0.\nReply with JSON only: {\"news_wash\":false,\"event_type\":\"GENERIC\",\"sentiment\":0}",
+      execution: "Symbol: {{symbol}}\nHeadlines:\n{{headlines}}"
+    },
+    {
+      name: "CSP",
+      role: "One cash-secured put, or quiet. Used when price is on the lower rail or at the 52-week low.",
+      system: "You may propose one cash-secured put, or stay quiet.\nPropose only when LOWER_RAIL or LOW_52W is present.\nChoose one listed put. The limit is the price to sell, not a marketable through-price.\nDo not choose a size.\nReply with JSON only: {\"quiet\":true} or {\"quiet\":false,\"expiry\":\"YYYY-MM-DD\",\"strike\":0,\"limit\":0,\"reason\":\"\"}",
+      execution: "Symbol: {{symbol}}\nLast: {{last}}\nTags: {{tags}}\nIntent: {{intent}}\nListed puts:\n{{puts}}"
+    },
+    {
+      name: "Strangle",
+      role: "One short strangle, or quiet. A proposal when news wash and high IV agree. Not a forced phase.",
+      system: "You may propose one short strangle, or stay quiet.\nPropose only when NEWS_WASH and HIGH_IV are both present.\nOne short put and one short call, each with a limit.\nDo not choose a size.\nReply with JSON only: {\"quiet\":true} or {\"quiet\":false,\"expiry\":\"YYYY-MM-DD\",\"put_strike\":0,\"put_limit\":0,\"call_strike\":0,\"call_limit\":0,\"reason\":\"\"}",
+      execution: "Symbol: {{symbol}}\nTags: {{tags}}\nListed puts:\n{{puts}}\nListed calls:\n{{calls}}"
+    },
+    {
+      name: "Purchase",
+      role: "One share purchase, or quiet. Used when the symbol is Long and Accumulate, and price is on the lower rail or at the 52-week low.",
+      system: "You may propose one share purchase, or stay quiet.\nPropose only when Long is on, intent is Accumulate, and LOWER_RAIL or LOW_52W is present.\nStay quiet when intent is Income.\nThe limit is the entry price. Do not exceed the position cap you are shown.\nReply with JSON only: {\"quiet\":true} or {\"quiet\":false,\"limit\":0,\"reason\":\"\"}",
+      execution: "Symbol: {{symbol}}\nLast: {{last}}\nIntent: {{intent}}\nLong: {{long}}\nTags: {{tags}}\nPosition cap: {{position_cap}}\nShares already held: {{shares}}"
+    },
+    {
+      name: "Call",
+      role: "One covered call, or quiet. Used at the upper rail or the 52-week high, and only when shares are already held.",
+      system: "You may propose one covered call, or stay quiet.\nPropose only when shares are already held and UPPER_RAIL or HIGH_52W is present.\nIf a share purchase is proposed and not yet filled, stay quiet. The covered call is sold at the upper rail after that fill.\nDo not choose a size.\nReply with JSON only: {\"quiet\":true} or {\"quiet\":false,\"expiry\":\"YYYY-MM-DD\",\"strike\":0,\"limit\":0,\"reason\":\"\"}",
+      execution: "Symbol: {{symbol}}\nLast: {{last}}\nShares held: {{shares}}\nTags: {{tags}}\nOpen purchase proposal: {{purchase}}\nListed calls:\n{{calls}}"
+    },
+    {
+      name: "Consolidator",
+      role: "Thinking on. Chooses the cash-secured put, covered call, or share price, and may sequence them.",
+      system: "Thinking is on.\nYou see every tag and every tactic proposal for one symbol. You choose which drafts to keep and the price on each.\nIntent Income: drop share purchases. Prefer the cash-secured put, covered call, or strangle.\nIntent Accumulate and Long on: a share purchase at the lower rail or the 52-week low may come first. Do not draft the covered call until that purchase fills. A cash-secured put may sit beside the purchase.\nDrop any tactic whose universe flag is off.\nDo not exceed the contract cap or the position cap.\nReply with JSON only: {\"thinking\":\"\",\"drafts\":[{\"id\":\"\",\"tactic\":\"BUY|CSP|CC|STRANGLE\",\"limit\":0,\"reason\":\"\"}]}",
+      execution: "Symbol: {{symbol}}\nIntent: {{intent}}\nLong: {{long}}\nShares held: {{shares}}\nFlags: {{flags}}\nTags: {{tags}}\nContract cap: {{contract_cap}}\nPosition cap: {{position_cap}}\nProposals:\n{{proposals}}"
+    }
+  ];
+
+  const root = document.getElementById("agents");
+  agents.forEach((agent) => {
+    const card = document.createElement("div");
+    card.className = "card agent collapsed" + (agent.name === "Consolidator" ? " span" : "");
+    card.innerHTML =
+      "<h2><span></span>" +
+      '<button class="fold" type="button" aria-expanded="false">' +
+      '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 4.5 L6 8.5 L10 4.5" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>' +
+      "</button></h2>" +
+      '<div class="body">' +
+      '<p class="role"></p>' +
+      '<label class="prompt">System prompt<textarea class="prompt" data-kind="system"></textarea></label>' +
+      '<label class="prompt">Execution prompt<textarea class="prompt" data-kind="execution"></textarea></label>' +
+      '<button class="btn primary" type="button">Save prompts</button>' +
+      "</div>";
+    card.querySelector("h2 span").textContent = agent.name;
+    card.querySelector(".fold").setAttribute("aria-label", "Expand " + agent.name);
+    card.querySelector(".role").textContent = agent.role;
+    card.querySelector("[data-kind=system]").value = agent.system;
+    card.querySelector("[data-kind=execution]").value = agent.execution;
+    card.querySelector(".fold").addEventListener("click", () => {
+      const closed = card.classList.toggle("collapsed");
+      const fold = card.querySelector(".fold");
+      fold.setAttribute("aria-expanded", closed ? "false" : "true");
+      fold.setAttribute("aria-label", (closed ? "Expand " : "Collapse ") + agent.name);
+    });
+    card.querySelector(".btn.primary").addEventListener("click", () => {
+      Athena.toast(agent.name + " prompts saved", "System and execution text stored for the next cycle.", "ok");
+    });
+    root.appendChild(card);
+  });
+
+  const help = document.querySelector(".flow .help-q");
+  help.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const card = help.closest(".card");
+    const open = card.querySelector(".help-pop");
+    if (open) {
+      open.remove();
+      return;
+    }
+    const pop = document.createElement("div");
+    pop.className = "help-pop";
+    pop.textContent = help.getAttribute("data-help");
+    card.appendChild(pop);
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(".help-q") || event.target.closest(".help-pop")) return;
+    document.querySelectorAll(".help-pop").forEach((node) => node.remove());
+  });
+})();
+</script>
+</body>
+</html>

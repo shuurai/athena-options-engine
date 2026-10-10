@@ -18,9 +18,12 @@ Open [`index.html`](./index.html) in a browser (no build step).
 | 4 | [Settings](./04-settings-risk/) | IBKR, iTick, news API, AI API, notify, strategy shape |
 | 11 | [Risk control](./11-risk-control/) | Risk profiles plus limits and approval privilege |
 | 5 | [NFR phase board](./05-nfr-phase-board/) | Phase rail, IVR chart, phase distribution |
+| 14 | [Strategy](./14-strategy/) | Editable system and execution prompts. Intent is per symbol on Universe |
+| 13 | [AI audit](./13-ai-audit/) | Latency, tokens, call meta, and the JSON response |
 | 6 | [Telegram link](./06-telegram-connect/) | Settings page: login widget or one-time start link |
 | 7 | [News wash](./07-news-wash/) | Density/source charts, event modals, manual ingest |
 | 8 | [History](./08-history/) | 6-month ledger, filters, row modals, CSV export |
+| 12 | [Positions](./12-positions/) | IBKR stock and option book, filters, row detail |
 | 9 | [Universe](./09-universe/) | Symbol pool, tactic toggles, screening profile |
 | 10 | [Accounts](./10-accounts/) | Switch active IB account, per-account toggles |
 

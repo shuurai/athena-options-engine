@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Athena · Audit</title>
+<link rel="stylesheet" href="../shared/console.css">
+<style>
+  .filters { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+  .filters button {
+    padding:6px 12px; font-size:11px; font-weight:600; font-family:var(--font-mono);
+    background:transparent; border:1px solid var(--site-border-strong); color:var(--site-text-3);
+    cursor:pointer;
+  }
+  .filters button.on { background:#101c33; border-color:var(--site-primary); color:#93c5fd; }
+  .filters input {
+    width:180px; margin:0; padding:6px 10px; border:1px solid var(--site-border-strong);
+    background:#0a0c10; color:var(--site-text); font:12px var(--font-mono);
+  }
+  tr.hit { cursor:pointer; }
+  .err { color: var(--ath-down); }
+  .think { color:#93c5fd; }
+  .meta { display:grid; grid-template-columns:120px 1fr; gap:4px 10px; margin:0 0 14px; font-size:12px; }
+  .meta span { color:var(--site-text-4); font-family:var(--font-mono); font-size:10px; letter-spacing:.05em; text-transform:uppercase; }
+  .json-block .k { display:block; margin:0 0 6px; font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--site-text-4); font-family:var(--font-mono); }
+  .json {
+    display:block; width:100%; box-sizing:border-box; margin:0;
+    font:11.5px/1.45 var(--font-mono); white-space:pre-wrap; word-break:break-word;
+    color:var(--site-text); background:#0a0c10; border:1px solid var(--site-border); padding:12px;
+  }
+  .ath-panel.wide { width:min(760px, 94vw); }
+</style>
+</head>
+<body class="console">
+<div class="app">
+  <aside class="nav">
+    <div class="brand"><div class="mark">A</div><div><b>Athena</b><span>Options Engine</span></div></div>
+    <a href="../01-cockpit-overview/index.html">Cockpit</a>
+    <a href="../02-draft-approve/index.html">Drafts</a>
+    <a href="../05-nfr-phase-board/index.html">NFR board</a>
+    <a href="../14-strategy/index.html">Strategy</a>
+    <a class="active" href="./index.html">Audit</a>
+    <a href="../07-news-wash/index.html">News</a>
+    <a href="../09-universe/index.html">Universe</a>
+    <a href="../12-positions/index.html">Positions</a>
+    <a href="../08-history/index.html">History</a>
+    <a href="../10-accounts/index.html">Accounts</a>
+    <a href="../11-risk-control/index.html">Risk control</a>
+    <a href="../04-settings-risk/index.html">Settings</a>
+    <div class="foot">NVDA CYCLE<br>THINKING ON</div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Audit</h1>
+        <p>Every model call for this account. Open a row for the call meta, the prompts, and the JSON reply. This page does not approve orders.</p>
+      </div>
+      <div class="chips">
+        <span class="chip info"><span class="dot"></span>7 CALLS</span>
+        <span class="chip"><span class="dot"></span>NVDA</span>
+        <span class="chip warn"><span class="dot"></span>1 FAILED</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>NVDA cycle <span class="more">2026-10-10 08:41 HKT</span></h2>
+      <div class="filters" id="filters">
+        <input id="keyword" type="search" placeholder="Keyword" autocomplete="off" spellcheck="false">
+        <button class="on" type="button" data-agent="all">All</button>
+        <button type="button" data-agent="Location">Location</button>
+        <button type="button" data-agent="News">News</button>
+        <button type="button" data-agent="CSP">CSP</button>
+        <button type="button" data-agent="Call">Call</button>
+        <button type="button" data-agent="Purchase">Purchase</button>
+        <button type="button" data-agent="Strangle">Strangle</button>
+        <button type="button" data-agent="Consolidator">Consolidator</button>
+      </div>
+      <div class="scroll-y" style="max-height:560px">
+        <table class="data">
+          <thead><tr>
+            <th>Time</th><th>Agent</th><th>Symbol</th><th>Latency</th><th>Tokens</th><th>Result</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="../shared/athena.js"></script>
+<script>
+(function () {
+  const rows = [
+    {
+      time: "08:41:02", agent: "Location", symbol: "NVDA",
+      latency: "0.9s", tokens: "640", model: "deepseek-flash", provider: "DIRECT", thinking: "off",
+      result: "Rising channel, lower rail",
+      json: { tags: ["CHANNEL_RISING", "LOWER_RAIL"] }
+    },
+    {
+      time: "08:41:04", agent: "News", symbol: "NVDA", failed: true,
+      latency: "30.0s", tokens: "0", model: "deepseek-flash", provider: "DIRECT", thinking: "off",
+      result: "TimeoutError",
+      json: { error: "TimeoutError" }
+    },
+    {
+      time: "08:41:06", agent: "CSP", symbol: "NVDA",
+      latency: "1.6s", tokens: "910", model: "deepseek-flash", provider: "DIRECT", thinking: "off",
+      result: "Put 175 limit 2.40",
+      json: { quiet: false, expiry: "2026-11-20", strike: 175, limit: 2.4, reason: "Last price is on the lower rail of the 63-session channel." }
+    },
+    {
+      time: "08:41:07", agent: "Call", symbol: "NVDA",
+      latency: "0.7s", tokens: "480", model: "deepseek-flash", provider: "DIRECT", thinking: "off",
+      result: "Quiet",
+      json: { quiet: true, reason: "No shares are held, and price is not at the upper rail." }
+    },
+    {
+      time: "08:41:08", agent: "Purchase", symbol: "NVDA",
+      latency: "1.1s", tokens: "720", model: "deepseek-flash", provider: "DIRECT", thinking: "off",
+      result: "Buy 182.50",
+      json: { quiet: false, limit: 182.5, reason: "Long and Accumulate, price on the lower rail, above the 52-week low." }
+    },
+    {
+      time: "08:41:09", agent: "Strangle", symbol: "NVDA",
+      latency: "0.8s", tokens: "860", model: "deepseek-flash", provider: "DIRECT", thinking: "off",
+      result: "Quiet",
+      json: { quiet: true, reason: "NEWS_WASH is unconfirmed and HIGH_IV is off." }
+    },
+    {
+      time: "08:41:18", agent: "Consolidator", symbol: "NVDA", think: true,
+      latency: "4.8s", tokens: "2,400", model: "deepseek-flash", provider: "DIRECT", thinking: "on",
+      result: "draft_a1 buy, draft_b2 CSP",
+      json: {
+        thinking: "The 63-session channel is rising and price is on the lower rail, not the 52-week low. Intent is Accumulate and Long is on, so the share purchase comes first. The covered call waits until that purchase fills, then it is sold at the upper rail. The cash-secured put can sit beside the purchase. One contract fits the position cap. The news call failed, so the strangle stays out.",
+        drafts: [
+          { id: "draft_a1", tactic: "BUY", limit: 182.5, reason: "Share purchase on the lower rail." },
+          { id: "draft_b2", tactic: "CSP", limit: 2.4, strike: 175, reason: "Cash-secured put beside the purchase." }
+        ]
+      }
+    }
+  ];
+
+  const body = document.getElementById("rows");
+  const keyword = document.getElementById("keyword");
+  let agent = "all";
+
+  function paint() {
+    const needle = keyword.value.trim().toLowerCase();
+    body.innerHTML = "";
+    const shown = rows.filter((row) => {
+      if (agent !== "all" && row.agent !== agent) return false;
+      const hay = (row.agent + " " + row.symbol + " " + row.result).toLowerCase();
+      return !needle || hay.includes(needle);
+    });
+    if (!shown.length) {
+      body.innerHTML = '<tr><td colspan="6">No calls match.</td></tr>';
+      return;
+    }
+    shown.forEach((row) => {
+      const tr = document.createElement("tr");
+      tr.className = "hit";
+      const resultClass = row.failed ? "err" : row.think ? "think" : "";
+      tr.innerHTML =
+        '<td class="mono">' + row.time + "</td>" +
+        "<td>" + row.agent + "</td>" +
+        "<td><b>" + row.symbol + "</b></td>" +
+        '<td class="mono">' + row.latency + "</td>" +
+        '<td class="mono">' + row.tokens + "</td>" +
+        '<td class="' + resultClass + '">' + row.result + "</td>";
+      tr.addEventListener("click", () => {
+        Athena.panel({
+          title: row.agent + " " + row.symbol,
+          body:
+            '<div class="meta"></div>' +
+            '<div class="json-block"><div class="k">JSON response</div><pre class="json"></pre></div>'
+        });
+        const panel = document.querySelector(".ath-panel");
+        panel.classList.add("wide");
+        const meta = panel.querySelector(".meta");
+        [
+          ["Time", row.time],
+          ["Agent", row.agent],
+          ["Symbol", row.symbol],
+          ["Model", row.model],
+          ["Provider", row.provider],
+          ["Thinking", row.thinking],
+          ["Latency", row.latency],
+          ["Est. tokens", row.tokens],
+          ["Status", row.failed ? "error" : "ok"]
+        ].forEach((pair) => {
+          const k = document.createElement("span");
+          k.textContent = pair[0];
+          const v = document.createElement("div");
+          v.textContent = pair[1];
+          meta.appendChild(k);
+          meta.appendChild(v);
+        });
+        panel.querySelector(".json").textContent = JSON.stringify(row.json, null, 2);
+      });
+      body.appendChild(tr);
+    });
+  }
+
+  keyword.addEventListener("input", paint);
+  document.getElementById("filters").addEventListener("click", (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    agent = button.getAttribute("data-agent");
+    document.querySelectorAll("#filters button").forEach((node) => node.classList.remove("on"));
+    button.classList.add("on");
+    paint();
+  });
+  paint();
+})();
+</script>
+</body>
+</html>

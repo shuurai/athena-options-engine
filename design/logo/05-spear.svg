@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Spear">
+  <defs>
+    <linearGradient id="spear" x1="8" y1="0" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f6fed"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#spear)" d="M0 0H64V52L52 64H0Z"/>
+  <path fill="#fff" d="M29 16 H35 V54 H29 Z"/>
+  <path fill="#fff" d="M20 18 L32 6 L44 18 L32 24 Z"/>
+  <path fill="#22d3ee" d="M35 30 L48 36 L35 42 L28 36 Z"/>
+</svg>

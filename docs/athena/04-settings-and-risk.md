@@ -24,7 +24,7 @@ Everything parametric: Settings.
 | **`all_orders`** (default) | Every open, roll, and close requires Approve |
 | **`opens_only`** | Opens need Approve; rolls/closes/risk exits may auto-run if risk passes |
 | **`auto_within_risk`** | Auto-execute when risk guards pass; escalate exceptions / oversize / conflicts |
-| **`paper_only`** | No live IB orders; drafts and paper fills only |
+| **`paper_only`** | Not a separate mode. Paper already sends a real order on the paper account after Approve. Privilege stays `all_orders`. |
 
 ### Changing privilege
 
@@ -42,6 +42,7 @@ Everything parametric: Settings.
 | `max_short_opt_margin_pct` | 50% | Seller margin budget |
 | `cash_reserve_pct` | 30% | CSP collateral buffer |
 | `max_contracts_per_symbol` | 1–3 | Size |
+| `max_position_per_symbol` | 0 | Money cap per symbol, in the ticker currency. Zero is off. One option contract is the latest price times the multiplier. A total within 10% still fits. When one contract is already above the cap, the contract limit is used. |
 | `max_orders_per_day` | 10 | Activity cap |
 | `daily_loss_halt_pct` | 5% | Pause trading |
 | `min_iv_rank_new_short` | 20–50 | Block cheap premium sells |
@@ -50,6 +51,18 @@ Everything parametric: Settings.
 | `reject_streak_halt` | 3 | Pause after IB rejects |
 
 Risk Guard runs **always**, independent of privilege.
+
+Named profiles fill those limits. They do not change privilege.
+
+| Profile | Name size | Cash floor | Contracts | IV rank floor | DTE floor |
+|---------|-----------|------------|-----------|---------------|-----------|
+| defensive | 10% | 40% | 1 | 60 | 21 |
+| standard | 20% | 30% | 3 | 50 | 7 |
+| income | 25% | 25% | 2 | 45 | 14 |
+| aggressive | 35% | 15% | 4 | 30 | 7 |
+| test | 80% | 5% | 12 | 0 | 1 |
+
+**test** is for the paper account. It is the same Approve path and the same Athena slot. It does not send an order while the slot is idle. It also drops the IV rank sample minimum to 1, so a rank can exist before 20 marks. Switching back to standard restores the standard knobs and the sample minimum of 20. With no calendar event, names stay P1 HOLD.
 
 ### 2. Strategy (NFR params)
 
@@ -109,7 +122,7 @@ See [06-data-and-ib.md](06-data-and-ib.md).
 
 - Schema validate on write; reject unknown keys in strict mode  
 - Cross-field checks (e.g. `cash_reserve_pct` + CSP size feasible)  
-- Paper mode ignores live exec even if privilege says auto  
+- Paper mode sends a real order only on the paper account, and only after Approve inside the Athena slot  
 
 ## Suggested UI surfaces
 

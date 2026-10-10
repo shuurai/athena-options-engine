@@ -29,4 +29,7 @@ def main() -> None:
         level=os.environ.get("ATHENA_LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    log_path = Path("var/athena.log")
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.getLogger().addHandler(logging.FileHandler(log_path, encoding="utf-8"))
     asyncio.run(run_loop())

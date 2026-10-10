@@ -10,7 +10,8 @@ import psycopg
 
 from athena_exec.halt import active_reason
 from athena_settings.model import SettingsPayload
-from athena_strategy.drafts import has_open_draft, propose
+from athena_strategy.agents import write_decision
+from athena_strategy.drafts import has_open_draft, stage_draft
 
 log = logging.getLogger("athena.strategy")
 
@@ -47,7 +48,12 @@ def manage_book(
     today: date | None = None,
 ) -> list[str]:
     """Draft roll or profit-take for this account. One pending draft per symbol."""
-    if active_reason(conn, account_id):
+    halt_reason = active_reason(conn, account_id)
+    if halt_reason:
+        write_decision(
+            conn, account_id, "—", "book", "dropped", f"Halted. {halt_reason}",
+            {"items": [_book_step("", "dropped", halt_reason)]},
+        )
         return []
     day = today or date.today()
     rows = conn.execute(
@@ -76,14 +82,16 @@ def manage_book(
             continue
         tactic, reason = choice
         if has_open_draft(conn, account_id, symbol, tactic):
+            _book(conn, account_id, symbol, "dropped", f"{tactic} already open", tactic, "dropped", "draft already open")
             continue
         contracts = max(1, int(abs(quantity)))
         leg = _option_leg(conn, symbol, expiry, right, strike, market_price or avg_price) if sec_type == "OPT" else None
         if sec_type == "OPT" and leg is None:
             log.info("manage waits for a contract symbol=%s tactic=%s", symbol, tactic)
+            _book(conn, account_id, symbol, "dropped", f"{tactic} skipped", tactic, "dropped", "no contract")
             continue
         action = "BUY" if quantity < 0 else "SELL"
-        draft_id = propose(
+        staged = stage_draft(
             conn,
             settings,
             symbol,
@@ -104,10 +112,26 @@ def manage_book(
             multiplier="100" if leg is None else leg[5],
             order_action="" if leg is None else action,
         )
-        if draft_id:
+        if staged["status"] == "pending":
             log.info("manage account=%s symbol=%s tactic=%s", account_id, symbol, tactic)
-            created.append(draft_id)
+            created.append(staged["id"])
+            _book(conn, account_id, symbol, "drafted", f"{tactic} kept", tactic, "kept", staged["detail"], staged["id"])
+        elif staged["status"] == "blocked":
+            _book(conn, account_id, symbol, "dropped", f"{tactic} blocked", tactic, "blocked", staged["detail"], staged["id"])
+        else:
+            _book(conn, account_id, symbol, "dropped", f"{tactic} dropped", tactic, "dropped", staged["detail"])
     return created
+
+
+def _book(conn, account_id, symbol, outcome, summary, tactic, step_outcome, detail, draft_id=None) -> None:
+    write_decision(
+        conn, account_id, symbol, "book", outcome, summary,
+        {"items": [_book_step(tactic, step_outcome, detail, draft_id or "")]},
+    )
+
+
+def _book_step(tactic: str, outcome: str, detail: str, draft_id: str = "") -> dict:
+    return {"tactic": tactic, "outcome": outcome, "detail": detail, "draft_id": draft_id}
 
 
 def _option_leg(conn: psycopg.Connection, symbol: str, expiry, right: str, strike, limit_price):

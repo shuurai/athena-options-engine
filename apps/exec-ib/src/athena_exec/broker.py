@@ -21,12 +21,22 @@ class BrokerPosition(NamedTuple):
     right: str
     strike: Decimal | None
     market_price: Decimal | None
+    currency: str = ""
+    multiplier: Decimal | None = None
+    market_value: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    realized_pnl: Decimal | None = None
+
+
+DISPLAY_CURRENCIES = ("HKD", "USD", "AUD", "CNY", "JPY", "CAD")
+_FX_DENIED = {162, 354, 10089, 10186}
 
 
 class IbBroker:
     def __init__(self) -> None:
         self._ib = None
         self.readonly = True
+        self._fx_closed = False
 
     def connected(self) -> bool:
         return self._ib is not None and self._ib.isConnected()
@@ -48,6 +58,7 @@ class IbBroker:
             return False
         self._ib = ib
         self.readonly = readonly
+        self._fx_closed = False
         return True
 
     def disconnect(self) -> None:
@@ -250,7 +261,7 @@ class IbBroker:
     def positions(self) -> list[BrokerPosition]:
         if self._ib is None:
             return []
-        marks = {item.contract.conId: item.marketPrice for item in self._ib.portfolio()}
+        books = {item.contract.conId: item for item in self._ib.portfolio()}
         seen: set[int] = set()
         rows: list[BrokerPosition] = []
         for item in self._ib.positions():
@@ -261,7 +272,8 @@ class IbBroker:
                     item.contract,
                     item.position,
                     item.avgCost,
-                    marks.get(item.contract.conId),
+                    None,
+                    books.get(item.contract.conId),
                 )
             )
         for item in self._ib.portfolio():
@@ -274,22 +286,160 @@ class IbBroker:
                     item.position,
                     item.averageCost,
                     item.marketPrice,
+                    item,
                 )
             )
         return rows
 
     def net_liquidation(self, account_id: str) -> Decimal | None:
+        """Account net liquidation. Paper books here are in HKD, not only USD."""
+        return self._account_number(account_id, "NetLiquidation")
+
+    def cash(self, account_id: str) -> Decimal | None:
+        return self._account_number(account_id, "TotalCashValue")
+
+    def cash_ledger(self, account_id: str) -> tuple[str, dict[str, Decimal], dict[str, Decimal]]:
+        """Base currency, cash by currency, and how many base units buy one unit.
+
+        Cash can be negative on a margin book. BASE is the consolidated total, so it
+        stays out of the per-currency rows.
+        """
         if self._ib is None:
-            return None
+            return "", {}, {}
+        balances: dict[str, Decimal] = {}
+        rates: dict[str, Decimal] = {}
         for item in self._ib.accountValues(account_id):
-            if item.tag == "NetLiquidation" and item.currency == "USD":
-                return Decimal(item.value)
+            if item.currency in ("", "BASE") or item.value in ("", None):
+                continue
+            number = _number(item.value)
+            if number is None:
+                continue
+            if item.tag == "CashBalance":
+                balances[item.currency] = number
+            elif item.tag == "ExchangeRate":
+                rates[item.currency] = number
+        base = next((code for code, rate in rates.items() if rate == 1), "")
+        return base, balances, rates
+
+    def fill_rates(
+        self,
+        base: str,
+        rates: dict[str, Decimal],
+        wanted: tuple[str, ...] = DISPLAY_CURRENCIES,
+    ) -> dict[str, Decimal]:
+        """Add base-per-unit rates for display currencies the ledger does not price.
+
+        A rate is how many units of `base` buy one unit of the code, the same
+        shape as the account ExchangeRate tag. One refused forex contract stops
+        further pair requests on this connection.
+        """
+        filled = dict(rates)
+        if not base:
+            return filled
+        filled[base] = Decimal(1)
+        for code in wanted:
+            if code == base or filled.get(code, 0) > 0:
+                continue
+            rate = self._rate_in_base(code, base, filled)
+            if rate is not None and rate > 0:
+                filled[code] = rate
+                log.info("fx pair %s quoted", code)
+        return filled
+
+    def _rate_in_base(self, code: str, base: str, known: dict[str, Decimal]) -> Decimal | None:
+        symbols = ("CNH", "CNY") if code == "CNY" else (code,)
+        for symbol in symbols:
+            rate = self._pair_or_cross(symbol, base, known)
+            if rate is not None:
+                return rate
         return None
 
-    def fills(self) -> list[tuple[int, str, str, Decimal, Decimal]]:
+    def _pair_or_cross(self, code: str, base: str, known: dict[str, Decimal]) -> Decimal | None:
+        if self._fx_closed:
+            return None
+        direct = self._fx_price(code, base)
+        if direct is not None:
+            return direct
+        if self._fx_closed:
+            return None
+        inverse = self._fx_price(base, code)
+        if inverse is not None:
+            return Decimal(1) / inverse
+        if self._fx_closed:
+            return None
+        usd = known.get("USD")
+        if usd is None or usd <= 0 or code in ("USD", base) or base == "USD":
+            return None
+        via_usd = self._fx_price(code, "USD")
+        if via_usd is not None:
+            return via_usd * usd
+        if self._fx_closed:
+            return None
+        usd_per_code = self._fx_price("USD", code)
+        if usd_per_code is not None and usd_per_code > 0:
+            return usd / usd_per_code
+        return None
+
+    def _fx_price(self, left: str, right: str) -> Decimal | None:
+        """Last midpoint of left.right, in units of `right` per 1 `left`."""
+        if self._ib is None or self._fx_closed or not left or not right or left == right:
+            return None
+        from ib_insync import Forex
+
+        contract = Forex(left + right)
+        try:
+            found = self._ib.qualifyContracts(contract)
+        except Exception as exc:
+            log.info("fx pair %s%s: %s", left, right, exc.__class__.__name__)
+            return None
+        if not found:
+            return None
+        denied: list[int] = []
+
+        def hear(_req_id, code, _message, _contract) -> None:
+            if code in _FX_DENIED:
+                denied.append(code)
+
+        self._ib.errorEvent += hear
+        bars = []
+        try:
+            bars = self._ib.reqHistoricalData(
+                contract, "", "1 D", "1 min", "MIDPOINT", False, 1
+            )
+        except Exception as exc:
+            log.info("fx pair %s%s: %s", left, right, exc.__class__.__name__)
+        finally:
+            self._ib.errorEvent -= hear
+        if denied:
+            self._fx_closed = True
+            log.info("fx feed closed code=%s", denied[0])
+            return None
+        if not bars:
+            return None
+        close = bars[-1].close
+        if close is None or not math.isfinite(close) or close <= 0:
+            return None
+        return Decimal(str(close))
+
+    def margin(self, account_id: str) -> Decimal | None:
+        return self._account_number(account_id, "MaintMarginReq")
+
+    def _account_number(self, account_id: str, tag: str) -> Decimal | None:
+        if self._ib is None:
+            return None
+        values = [item for item in self._ib.accountValues(account_id) if item.tag == tag and item.value not in ("", None)]
+        for currency in ("USD", "BASE"):
+            for item in values:
+                if item.currency == currency:
+                    return Decimal(item.value)
+        if not values:
+            return None
+        return Decimal(values[0].value)
+
+    def fills(self) -> list[tuple]:
         if self._ib is None:
             return []
-        rows: list[tuple[int, str, str, Decimal, Decimal]] = []
+        rows: list[tuple] = []
         for fill in self._ib.fills():
             rows.append(
                 (
@@ -298,6 +448,9 @@ class IbBroker:
                     fill.contract.symbol,
                     Decimal(str(fill.execution.shares)),
                     Decimal(str(fill.execution.price)),
+                    str(fill.execution.execId or ""),
+                    str(fill.execution.side or ""),
+                    str(fill.contract.secType or "STK"),
                 )
             )
         return rows
@@ -343,6 +496,17 @@ def _cboe_close(ib, symbol: str, expiry: date, strike: Decimal, right: str, trad
     if not bars or not bars[-1].close or bars[-1].close <= 0:
         return None
     return Decimal(str(bars[-1].close))
+
+
+def _number(value) -> Decimal | None:
+    """A finite number. Open P&L and market value may be negative."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return Decimal(str(number))
 
 
 def _positive(value) -> Decimal | None:
@@ -393,13 +557,20 @@ def stock_venue(symbol: str) -> tuple[str, str]:
     return "SMART", "USD"
 
 
-def _broker_position(account: str, contract, quantity, avg_cost, market_price) -> BrokerPosition:
+def _broker_position(account: str, contract, quantity, avg_cost, market_price, book=None) -> BrokerPosition:
     multiplier = Decimal(str(contract.multiplier or "1"))
-    avg = Decimal(str(avg_cost))
-    mark = None if market_price in (None, "") else Decimal(str(market_price))
+    avg = _number(avg_cost) or Decimal(0)
+    mark = _positive(market_price)
+    if book is not None and mark is None:
+        mark = _positive(book.marketPrice)
     if contract.secType == "OPT" and multiplier > 1 and mark is not None and avg > mark * multiplier / 2:
         avg = avg / multiplier
     strike = contract.strike
+    value = unrealized = realized = None
+    if book is not None:
+        value = _number(book.marketValue)
+        unrealized = _number(book.unrealizedPNL)
+        realized = _number(book.realizedPNL)
     return BrokerPosition(
         account,
         contract.symbol,
@@ -410,6 +581,11 @@ def _broker_position(account: str, contract, quantity, avg_cost, market_price) -
         contract.right or "",
         None if strike in (None, 0) else Decimal(str(strike)),
         mark,
+        contract.currency or "",
+        multiplier,
+        value,
+        unrealized,
+        realized,
     )
 
 

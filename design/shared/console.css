@@ -48,10 +48,9 @@ a { color: inherit; text-decoration: none; }
 }
 .nav .mark {
   width: 26px; height: 26px;
-  background: linear-gradient(145deg, #2f6fed, #0e7490);
-  display: grid; place-items: center;
-  font-weight: 700; font-size: 11px; color: #fff;
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+  background: url("../logo/03-strangle.svg") center / contain no-repeat;
+  color: transparent;
+  font-size: 0;
 }
 .nav .brand b { font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
 .nav .brand span { display: block; font-size: 10px; color: var(--site-text-3); margin-top: 2px; font-family: var(--font-mono); }
@@ -74,7 +73,7 @@ a { color: inherit; text-decoration: none; }
 .nav-badge.warn { background: #6b4a12; color: #fbbf24; }
 .nav .foot {
   margin-top: auto; padding: 12px 10px 4px;
-  border-top: 1px solid var(--site-border);
+  border-top: 0;
   font-size: 10.5px; color: var(--site-text-4); line-height: 1.5;
   font-family: var(--font-mono);
 }
@@ -221,6 +220,28 @@ table.data tr:last-child td { border-bottom: 0; }
   font-family: var(--font-mono); font-size: 11.5px;
   background: var(--site-surface-2); padding: 1px 6px;
   border: 1px solid var(--site-border);
+}
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):hover,
+textarea:hover,
+select:hover {
+  border-color: #3a4350;
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):focus,
+input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]):focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible {
+  border-color: rgba(107, 150, 242, 0.38);
 }
 
 .banner {

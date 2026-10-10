@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Helm">
+  <defs>
+    <linearGradient id="helm" x1="8" y1="0" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f6fed"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#helm)" d="M0 0H64V52L52 64H0Z"/>
+  <path fill="#fff" fill-rule="evenodd" d="M32 8 L40 16 H24 Z M16 18 H48 L52 28 V38 L42 54 H22 L12 38 V28 Z M28 32 H36 V44 H28 Z"/>
+</svg>

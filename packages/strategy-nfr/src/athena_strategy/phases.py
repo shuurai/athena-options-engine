@@ -9,7 +9,7 @@ import psycopg
 
 from athena_exec.halt import active_reason
 from athena_settings.model import SettingsPayload
-from athena_strategy.drafts import has_open_draft, propose
+from athena_strategy.drafts import has_open_draft, open_quantity, propose
 from athena_strategy.iv import IV_OWNED, tags_from_iv
 from athena_strategy.mock import mock_input
 from athena_strategy.news import NEWS_OWNED, tags_from_events
@@ -33,7 +33,7 @@ def choose_phase(current: str, tags: set[str], event_offset: int | None, setting
     p5_from = 5 if windows is None else windows.p5_from
     p5_to = 10 if windows is None else windows.p5_to
     if event_offset is not None:
-        if p2_from <= event_offset <= p2_to and "NEWS_WASH" in tags and "HIGH_IV" in tags:
+        if p2_from <= event_offset <= p2_to and _panic(tags):
             return "P2"
         if event_offset == 0:
             return "P3"
@@ -48,9 +48,9 @@ def choose_phase(current: str, tags: set[str], event_offset: int | None, setting
         if event_offset < p1_from or event_offset > p5_to:
             return "P1"
         return phase
-    if phase == "P2" and "NEWS_WASH" not in tags:
+    if phase == "P2" and not _panic(tags):
         return "P1"
-    if "NEWS_WASH" in tags and "HIGH_IV" in tags:
+    if _panic(tags):
         return "P2"
     if phase == "P3" and "LOW_IV" in tags:
         return "P4"
@@ -59,6 +59,13 @@ def choose_phase(current: str, tags: set[str], event_offset: int | None, setting
     if phase == "P5" and not tags:
         return "P1"
     return phase
+
+
+def _panic(tags: set[str]) -> bool:
+    """News plus high IV, or a weak price plus a volume spike."""
+    news_iv = "NEWS_WASH" in tags and "HIGH_IV" in tags
+    price_volume = "PRICE_WEAK" in tags and "VOLUME_SPIKE" in tags
+    return news_iv or price_volume
 
 
 def choose_tactic(phase: str, tags: set[str], has_shares: bool, has_short: bool = False) -> str:
@@ -98,6 +105,8 @@ def evaluate_symbol(
     """Persist phase plus tactic for one account. Draft only an actionable tactic."""
     if active_reason(conn, account_id):
         return None
+    if symbol.upper() in {item.upper() for item in settings.blocked_symbols}:
+        return None
     current, stored = _load(conn, account_id, symbol)
     mocked = mock_input(conn, symbol) if tags is None else None
     no_event = False
@@ -124,6 +133,8 @@ def evaluate_symbol(
     else:
         phase = choose_phase(current, active_tags, event_offset, settings)
         tactic = choose_tactic(phase, active_tags, has_shares, has_short)
+    if tactic in {"OPEN_STRANGLE", "OPEN_CSP", "OPEN_CC"}:
+        tactic = "HOLD"
     if event_offset is not None:
         log.info("phase offset symbol=%s days=%s", symbol, event_offset)
     tag_text = ",".join(sorted(active_tags))
@@ -149,12 +160,16 @@ def evaluate_symbol(
             return None
         expiry, put_strike, call_strike, put_limit, call_limit, trading_class, option_exchange, multiplier = option
         credit = put_limit + call_limit
+        contracts = open_quantity(conn, settings, account_id, symbol, multiplier)
+        if contracts < 1:
+            log.info("open skipped symbol=%s position cap", symbol)
+            return None
         return propose(
             conn,
             settings,
             symbol,
             tactic,
-            1,
+            contracts,
             f"{phase} {tactic}. Sell {put_strike} put and {call_strike} call.",
             phase,
             account_id,
@@ -175,12 +190,16 @@ def evaluate_symbol(
             log.info("csp draft waits for a priced put symbol=%s", symbol)
             return None
         expiry, strike, limit_price, trading_class, option_exchange, multiplier = leg
+        contracts = open_quantity(conn, settings, account_id, symbol, multiplier)
+        if contracts < 1:
+            log.info("open skipped symbol=%s position cap", symbol)
+            return None
         return propose(
             conn,
             settings,
             symbol,
             tactic,
-            1,
+            contracts,
             f"{phase} {tactic}. Sell {strike} put.",
             phase,
             account_id,
@@ -199,12 +218,16 @@ def evaluate_symbol(
             log.info("cc draft waits for a priced call symbol=%s", symbol)
             return None
         expiry, strike, limit_price, trading_class, option_exchange, multiplier = leg
+        contracts = open_quantity(conn, settings, account_id, symbol, multiplier)
+        if contracts < 1:
+            log.info("open skipped symbol=%s position cap", symbol)
+            return None
         return propose(
             conn,
             settings,
             symbol,
             tactic,
-            1,
+            contracts,
             f"{phase} {tactic}. Sell {strike} call.",
             phase,
             account_id,

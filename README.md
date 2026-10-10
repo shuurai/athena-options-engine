@@ -29,7 +29,7 @@ uv sync
 uv run athena-orchestrator
 ```
 
-The process logs `state=INIT`, applies migrations, seeds Settings version 1 (Standard profile) if none is active, logs `state=IDLE` and a health line, then sleeps for `ATHENA_LOOP_SECONDS` (default 300). It does not send orders.
+The process logs `state=INIT`, applies migrations, seeds Settings version 1 (Standard profile) if none is active, logs `state=IDLE` and a health line, then sleeps for the Settings cycle (default 5 minutes). It does not send orders.
 
 One pass, for a check:
 

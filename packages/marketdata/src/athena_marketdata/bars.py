@@ -38,6 +38,13 @@ def write_watchlist_bars(
             if cached is None:
                 log.info("hk bar waits for the IB session symbol=%s", symbol)
             continue
+        if bar is None:
+            real = conn.execute(
+                "SELECT 1 FROM market_bars WHERE symbol = %s AND source <> 'seed' LIMIT 1",
+                (symbol,),
+            ).fetchone()
+            if real is not None:
+                continue
         source = "itick" if bar else "seed"
         close = bar if bar is not None else SEED_CLOSE.get(symbol, Decimal("100"))
         conn.execute(

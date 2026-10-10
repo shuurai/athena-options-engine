@@ -4,7 +4,7 @@ Define the pool of symbols Athena screens every day for NFR tactics.
 
 ## Features
 
-- Pool table: symbol, name, price, 1D % change, market cap, classifiers, IVR, phase, toggles (enabled, CSP, CC, strangle)
+- Pool table: symbol, name, price, 1D % change, market cap, classifiers, IVR, phase, intent (Income or Accumulate), Long, toggles (enabled, CSP, CC, strangle)
 - Market data columns: current price (mono), day change % (green/red), market cap (T/B)
 - Edit panel shows price + change + mkt cap alongside IVR/phase
 - Add symbol modal (ticker, thesis, must-hold)

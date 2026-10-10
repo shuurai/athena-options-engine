@@ -19,7 +19,7 @@ Both become structured `news_events` for the tag engine + DSH sentiment assist.
   "timestamp": "ISO-8601",
   "symbols": ["NVDA"],
   "source": "yahoo|finviz|fed|ib|msn|manual|...",
-  "event_type": "FED_RATE_DECISION|EARNINGS_RELEASE|ANTITRUST_FINE|AI_REGULATION|SUPPLY_CHAIN|GENERIC_NEGATIVE|GENERIC_POSITIVE|NARRATIVE_ATTACK",
+  "event_type": "GENERIC_NEGATIVE|GENERIC_POSITIVE|NARRATIVE_ATTACK|FED_RATE_DECISION|EARNINGS_RELEASE|AI_REGULATION|SUPPLY_CHAIN|ANTITRUST_FINE|GENERIC",
   "sentiment": -1.0,
   "severity": 1,
   "credibility": 0.0,
@@ -33,6 +33,22 @@ Both become structured `news_events` for the tag engine + DSH sentiment assist.
 - **severity:** 1–5  
 - **credibility:** 0–1 (source tier; social starts lower)
 
+### Type glossary
+
+Only these types are stored. Anything else is saved as `GENERIC`. Badge colors match the news stream.
+
+| Type | Badge | Meaning |
+|------|-------|---------|
+| `GENERIC_NEGATIVE` | red | A negative headline with no named event. |
+| `GENERIC_POSITIVE` | green | A positive headline with no named event. |
+| `NARRATIVE_ATTACK` | red | Clustered negative spin, often from a weak source. |
+| `FED_RATE_DECISION` | blue | A Fed or FOMC rate decision. |
+| `EARNINGS_RELEASE` | blue | An earnings release or earnings date. |
+| `AI_REGULATION` | amber | AI rules, disclosure, or a regulatory proposal. |
+| `SUPPLY_CHAIN` | amber | A supply, memory, or component constraint. |
+| `ANTITRUST_FINE` | amber | An antitrust case, fine, or competition probe. |
+| `GENERIC` | plain | A headline that fits none of the named types. |
+
 ## Source tiers (phased)
 
 ### Tier A — MVP (ToS-friendly / API/RSS)
@@ -44,7 +60,7 @@ Both become structured `news_events` for the tag engine + DSH sentiment assist.
 | Fed / FOMC calendar | Macro T dates |
 | Earnings calendars | EARNINGS_NEAR |
 | IB news (if available on account) | Broker-side headlines |
-| Manual / bot paste | You forward a link; parser ingests |
+| Manual URL | Console button pulls the page; DSH writes symbol, type, and sentiment. Telegram can still paste a headline. |
 
 ### Tier B — Expand when stable
 
@@ -62,7 +78,7 @@ Both become structured `news_events` for the tag engine + DSH sentiment assist.
 | Rednote (小红书) | Same |
 | TikTok | Same |
 
-**Policy:** Athena must support a `manual_ingest` and `user_forward` path so you can drop social posts into the pipeline without building banned scrapers on day one. Automated Tier C only after explicit compliance review.
+**Policy:** The console manual ingest takes a public URL, pulls the page, and asks DSH for the symbol, headline, type, and sentiment. Telegram can still paste a headline. Automated Tier C only after explicit compliance review.
 
 ## NEWS_WASH detection (sketch)
 
@@ -77,7 +93,7 @@ Wash alone does **not** auto-trade at default privilege; it moves phase/tags and
 ## DSH role
 
 - Optional enrichment: summarize cluster, score sentiment/severity, flag “coordinated negative narrative?”  
-- Pattern: headless `dsh` worker (fanit/fanbao style) — analysis sidecar, **not** SoR  
+- Pattern: headless `dsh --profile headless` when the AI provider is `DSH` and `DSH_BIN` is set. `DIRECT` calls the DeepSeek chat API with `DEEPSEEK_TOKEN` instead. The `dsh web` browser app is not the scoring API. Sidecar, **not** SoR  
 - Hard rules + calendar still work if DSH is down  
 
 ## Dedup and storage
