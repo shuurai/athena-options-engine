@@ -56,15 +56,23 @@ def manage_book(
         )
         return []
     day = today or date.today()
+    replaying = conn.execute(
+        """
+        SELECT 1 FROM sim_runs
+        WHERE account_id = %s AND status IN ('active', 'halted') AND cursor_date IS NOT NULL
+        LIMIT 1
+        """,
+        (account_id,),
+    ).fetchone()
     rows = conn.execute(
         """
         SELECT DISTINCT ON (symbol, expiry, contract_right, strike)
             symbol, quantity, avg_price, sec_type, expiry, contract_right, strike, market_price
         FROM positions
-        WHERE account_id = %s
+        WHERE account_id = %s AND simulated = %s
         ORDER BY symbol, expiry, contract_right, strike, snapshot_at DESC
         """,
-        (account_id,),
+        (account_id, replaying is not None),
     ).fetchall()
     created: list[str] = []
     for symbol, quantity, avg_price, sec_type, expiry, right, strike, market_price in rows:

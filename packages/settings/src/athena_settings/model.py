@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Privilege = Literal["all_orders", "opens_only", "auto_within_risk", "paper_only"]
 GlobalCurrency = Literal["HKD", "USD", "AUD", "CNY", "JPY", "CAD"]
@@ -47,11 +47,68 @@ class NewsSettings(BaseModel):
     earnings_near_days: int = 7
 
 
+ProviderName = Literal["DSH", "DEEPSEEK", "OPENROUTER", "CLAUDE", "KIMI"]
+
+# OpenRouter ids for the ten most-used text models in the week ending 9 Oct 2026.
+OPENROUTER_MODELS = (
+    "deepseek/deepseek-v4.1-flash",
+    "stealth/space-bunny-alpha",
+    "z-ai/glm-5.3-flash",
+    "xiaomi/mimo-v2.6-flash",
+    "tencent/hy4-preview",
+    "openai/gpt-6-luna",
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "deepseek/deepseek-v4-flash-0731",
+    "anthropic/claude-opus-5.5",
+    "z-ai/glm-5.3",
+)
+DEEPSEEK_MODELS = ("deepseek-flash", "deepseek-v4-pro")
+CLAUDE_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5")
+KIMI_MODELS = ("kimi-k2.6", "kimi-k3", "kimi-k2.7-code")
+MODELS: dict[str, tuple[str, ...]] = {
+    "DSH": DEEPSEEK_MODELS,
+    "DEEPSEEK": DEEPSEEK_MODELS,
+    "OPENROUTER": OPENROUTER_MODELS,
+    "CLAUDE": CLAUDE_MODELS,
+    "KIMI": KIMI_MODELS,
+}
+CREDENTIAL_ENV = {
+    "DEEPSEEK": "DEEPSEEK_TOKEN",
+    "OPENROUTER": "OPENROUTER_API_KEY",
+    "CLAUDE": "ANTHROPIC_API_KEY",
+    "KIMI": "MOONSHOT_API_KEY",
+}
+CREDENTIAL_FIELD = {
+    "DEEPSEEK": "deepseek_token",
+    "OPENROUTER": "openrouter_token",
+    "CLAUDE": "claude_token",
+    "KIMI": "kimi_token",
+}
+
+
+def normalize_provider(value: object) -> str:
+    """DIRECT is the old DeepSeek name. KIMI API is the label shown in Settings."""
+    text = str(value or "DSH").strip().upper()
+    if text == "DIRECT":
+        return "DEEPSEEK"
+    if text in {"KIMI API", "KIMI"}:
+        return "KIMI"
+    return text
+
+
 class AISettings(BaseModel):
-    provider: Literal["DSH", "DIRECT"] = "DSH"
+    provider: ProviderName = "DSH"
     model: str = "deepseek-flash"
     base_url: str = "http://127.0.0.1:8787"
     deepseek_token: str | None = None
+    openrouter_token: str | None = None
+    claude_token: str | None = None
+    kimi_token: str | None = None
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def _provider(cls, value: object) -> str:
+        return normalize_provider(value)
 
 
 class ITickSettings(BaseModel):
@@ -87,10 +144,20 @@ class TacticFlags(BaseModel):
 
 
 class AgentPrompt(BaseModel):
-    """Standing instruction plus the per-run template."""
+    """Standing instruction plus the per-run template.
+
+    reasoning None means the standing default: on for the consolidator, off for the rest.
+    """
 
     system: str
     execution: str
+    reasoning: bool | None = None
+
+
+class DeveloperSettings(BaseModel):
+    """None means no key. The console can reveal the stored value."""
+
+    api_key: str | None = None
 
 
 class NotifySettings(BaseModel):
@@ -131,6 +198,9 @@ class StrategySettings(BaseModel):
     dte_max: int = 60
 
 
+SIM_SYMBOLS = ["NVDA", "MSFT", "NOK", "AAPL", "IGV", "NIO", "AMZN", "AVGO"]
+
+
 class SettingsPayload(BaseModel):
     privilege: Privilege = "all_orders"
     global_currency: GlobalCurrency = "HKD"
@@ -140,6 +210,7 @@ class SettingsPayload(BaseModel):
     ai: AISettings = Field(default_factory=AISettings)
     itick: ITickSettings = Field(default_factory=ITickSettings)
     notify: NotifySettings = Field(default_factory=NotifySettings)
+    developer: DeveloperSettings = Field(default_factory=DeveloperSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     watchlist: list[str] = Field(default_factory=lambda: ["NVDA", "QCOM", "T"])
     blocked_symbols: list[str] = Field(default_factory=list)
@@ -149,6 +220,7 @@ class SettingsPayload(BaseModel):
     account_controls: dict[str, AccountSwitches] = Field(default_factory=dict)
     retain_local_days: int = 14
     cycle_minutes: int = 5
+    sim_symbols: list[str] = Field(default_factory=lambda: list(SIM_SYMBOLS))
 
 
 def standard_payload() -> SettingsPayload:

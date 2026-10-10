@@ -15,6 +15,7 @@ from urllib import error, request
 
 import psycopg
 
+from athena_settings.model import MODELS, normalize_provider
 from athena_strategy.classifiers import CLASSIFIER_CODES, clean_classifiers
 from athena_strategy.types import NEWS_TYPE_CODES
 
@@ -31,6 +32,9 @@ _SECRET_PREFIXES = (
     "CONTROL_WEB_SIGNING",
     "DSH_API",
     "DEEPSEEK_",
+    "OPENROUTER_",
+    "ANTHROPIC_",
+    "MOONSHOT_",
 )
 
 
@@ -123,9 +127,7 @@ def classify_symbol(symbol: str, facts: dict, model: str, provider: str = "DSH",
         token,
         False,
     )
-    if result["error"] == "no token":
-        result["error"] = "DeepSeek token is not set."
-    elif result["error"] == "dsh missing":
+    if result["error"] == "dsh missing":
         result["error"] = "DSH is not configured."
     if result["error"]:
         return None, result
@@ -166,7 +168,7 @@ def enrich_sentiment(
     token: str = "",
 ) -> int:
     """Replace keyword sentiment for new headlines. Returns how many rows changed."""
-    name = "deepseek" if provider == "DIRECT" else "dsh"
+    name = "dsh" if normalize_provider(provider) == "DSH" else normalize_provider(provider).lower()
     if _missing(provider, token) or not rows:
         _hear("skipped", f"{name} skipped")
         return 0
@@ -194,15 +196,25 @@ def enrich_sentiment(
 
 
 def _missing(provider: str, token: str) -> str:
-    if provider == "DIRECT":
-        return "" if token.strip() else "DeepSeek token is not set."
+    if normalize_provider(provider) != "DSH":
+        return "" if token.strip() else "Credential token is not set."
     if os.environ.get("DSH_BIN", "").strip():
         return ""
     return "DSH is not configured."
 
 
+def _provider_name(provider: str) -> str:
+    return {
+        "DSH": "DSH",
+        "DEEPSEEK": "DeepSeek",
+        "OPENROUTER": "OpenRouter",
+        "CLAUDE": "Claude",
+        "KIMI": "Kimi",
+    }.get(normalize_provider(provider), "AI")
+
+
 def _empty_message(provider: str, kind: str) -> str:
-    who = "DeepSeek" if provider == "DIRECT" else "DSH"
+    who = _provider_name(provider)
     if kind == "page":
         return f"{who} did not finish the page."
     if kind == "news event":
@@ -234,8 +246,11 @@ def _final_json(stream: str) -> object | None:
 
 def _complete(prompt: str, model: str, provider: str = "DSH", token: str = "") -> str:
     """Model text as a headless final event, or empty when the call does not finish."""
-    if provider == "DIRECT":
-        return _direct(prompt, model, token)
+    if normalize_provider(provider) != "DSH":
+        result = chat("", prompt, model, provider, token, False)
+        if result["error"] or not str(result["text"]).strip():
+            return ""
+        return json.dumps({"type": "final", "text": result["text"]})
     command = os.environ.get("DSH_BIN", "").strip()
     if not command:
         return ""
@@ -262,6 +277,69 @@ def _complete(prompt: str, model: str, provider: str = "DSH", token: str = "") -
     return completed.stdout
 
 
+_CHAT_URL = {
+    "DEEPSEEK": "https://api.deepseek.com/chat/completions",
+    "OPENROUTER": "https://openrouter.ai/api/v1/chat/completions",
+    "KIMI": "https://api.moonshot.ai/v1/chat/completions",
+    "CLAUDE": "https://api.anthropic.com/v1/messages",
+}
+
+
+def request_body(provider: str, model: str, system: str, user: str, reasoning: bool) -> dict:
+    """The JSON body for one chat. Reasoning on means that provider's medium setting."""
+    chosen = normalize_provider(provider)
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    if chosen in {"DSH", "DEEPSEEK"}:
+        body = {
+            "model": model or "deepseek-flash",
+            "messages": messages,
+            "temperature": 0,
+            "stream": False,
+        }
+        if chosen == "DEEPSEEK":
+            if reasoning:
+                body["thinking"] = {"type": "enabled"}
+                body["reasoning_effort"] = "medium"
+            else:
+                body["thinking"] = {"type": "disabled"}
+        return body
+    if chosen == "OPENROUTER":
+        return {
+            "model": model or MODELS["OPENROUTER"][0],
+            "messages": messages,
+            "temperature": 0,
+            "stream": False,
+            "reasoning": {"effort": "medium" if reasoning else "none"},
+        }
+    if chosen == "KIMI":
+        picked = model or MODELS["KIMI"][0]
+        body = {
+            "model": picked,
+            "messages": messages,
+            "temperature": 0,
+            "stream": False,
+        }
+        if picked == "kimi-k3":
+            if reasoning:
+                body["reasoning_effort"] = "high"
+            return body
+        if reasoning:
+            body["thinking"] = {"type": "enabled"}
+        elif picked != "kimi-k2.7-code":
+            body["thinking"] = {"type": "disabled"}
+        return body
+    return {
+        "model": model or MODELS["CLAUDE"][0],
+        "max_tokens": 8192,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+        "output_config": {"effort": "medium"},
+    }
+
+
 def chat(
     system: str,
     user: str,
@@ -273,56 +351,64 @@ def chat(
     """One completion. Returns text, tokens, and error. The token is never logged."""
     started = time.perf_counter()
     timeout = 90 if thinking else 30
-    if provider == "DIRECT":
-        result = _direct_chat(system, user, model, token, thinking, timeout)
-    else:
+    chosen = normalize_provider(provider)
+    if chosen == "DSH":
         result = _dsh_chat(system, user, model, timeout)
+    else:
+        result = _provider_chat(chosen, system, user, model, token, thinking, timeout)
     result["latency_ms"] = int((time.perf_counter() - started) * 1000)
     return result
 
 
-def _direct_chat(system: str, user: str, model: str, token: str, thinking: bool, timeout: int) -> dict:
+def _provider_chat(
+    provider: str, system: str, user: str, model: str, token: str, thinking: bool, timeout: int
+) -> dict:
+    posted = request_body(provider, model, system, user, thinking)
     if not token.strip():
-        return {"text": "", "tokens": 0, "error": "no token"}
-    body = json.dumps(
-        {
-            "model": model or "deepseek-flash",
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": 0,
-            "thinking": {"type": "enabled" if thinking else "disabled"},
-            "stream": False,
-        }
-    ).encode()
-    call = request.Request(
-        "https://api.deepseek.com/chat/completions",
-        data=body,
-        headers={"Authorization": "Bearer " + token.strip(), "Content-Type": "application/json"},
-        method="POST",
-    )
+        return {"text": "", "tokens": 0, "error": "Credential token is not set.", "request": posted}
+    headers = {"Content-Type": "application/json"}
+    if provider == "CLAUDE":
+        headers["x-api-key"] = token.strip()
+        headers["anthropic-version"] = "2023-06-01"
+    else:
+        headers["Authorization"] = "Bearer " + token.strip()
+    call = request.Request(_CHAT_URL[provider], data=json.dumps(posted).encode(), headers=headers, method="POST")
     try:
         with request.urlopen(call, timeout=timeout) as response:
             payload = json.loads(response.read().decode())
-        text = payload["choices"][0]["message"]["content"]
-        usage = payload.get("usage") or {}
-        tokens = int(usage.get("total_tokens") or 0)
+        text, tokens = _reply(provider, payload)
     except error.HTTPError as exc:
-        log.info("deepseek skipped status=%s", exc.code)
-        return {"text": "", "tokens": 0, "error": f"HTTP {exc.code}"}
+        log.info("%s skipped status=%s", provider.lower(), exc.code)
+        return {"text": "", "tokens": 0, "error": f"HTTP {exc.code}", "request": posted}
     except Exception as exc:
-        log.info("deepseek skipped error=%s", exc.__class__.__name__)
-        return {"text": "", "tokens": 0, "error": exc.__class__.__name__}
-    if not isinstance(text, str) or not text.strip():
-        return {"text": "", "tokens": tokens, "error": "empty"}
-    return {"text": text, "tokens": tokens, "error": ""}
+        log.info("%s skipped error=%s", provider.lower(), exc.__class__.__name__)
+        return {"text": "", "tokens": 0, "error": exc.__class__.__name__, "request": posted}
+    if not text.strip():
+        return {"text": "", "tokens": tokens, "error": "empty", "request": posted}
+    return {"text": text, "tokens": tokens, "error": "", "request": posted}
+
+
+def _reply(provider: str, payload: dict) -> tuple[str, int]:
+    if provider == "CLAUDE":
+        blocks = payload.get("content") or []
+        text = "".join(
+            str(block.get("text") or "")
+            for block in blocks
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+        usage = payload.get("usage") or {}
+        tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+        return text, tokens
+    message = (payload.get("choices") or [{}])[0].get("message") or {}
+    usage = payload.get("usage") or {}
+    return str(message.get("content") or ""), int(usage.get("total_tokens") or 0)
 
 
 def _dsh_chat(system: str, user: str, model: str, timeout: int) -> dict:
+    posted = request_body("DSH", model, system, user, False)
     command = os.environ.get("DSH_BIN", "").strip()
     if not command:
-        return {"text": "", "tokens": 0, "error": "dsh missing"}
+        return {"text": "", "tokens": 0, "error": "dsh missing", "request": posted}
     patch = _model_patch(model or "deepseek-flash")
     prompt = system + "\n\n" + user
     try:
@@ -337,18 +423,18 @@ def _dsh_chat(system: str, user: str, model: str, timeout: int) -> dict:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            return {"text": "", "tokens": 0, "error": "TimeoutError"}
+            return {"text": "", "tokens": 0, "error": "TimeoutError", "request": posted}
         except OSError as exc:
             log.info("dsh skipped error=%s", exc.__class__.__name__)
-            return {"text": "", "tokens": 0, "error": exc.__class__.__name__}
+            return {"text": "", "tokens": 0, "error": exc.__class__.__name__, "request": posted}
     finally:
         Path(patch).unlink(missing_ok=True)
     if completed.returncode != 0:
         log.info("dsh skipped exit=%s", completed.returncode)
-        return {"text": "", "tokens": 0, "error": f"exit {completed.returncode}"}
+        return {"text": "", "tokens": 0, "error": f"exit {completed.returncode}", "request": posted}
     payload = _final_json(completed.stdout)
     if isinstance(payload, dict):
-        return {"text": json.dumps(payload), "tokens": 0, "error": ""}
+        return {"text": json.dumps(payload), "tokens": 0, "error": "", "request": posted}
     final = ""
     for line in completed.stdout.splitlines():
         try:
@@ -358,43 +444,8 @@ def _dsh_chat(system: str, user: str, model: str, timeout: int) -> dict:
         if event.get("type") == "final":
             final = str(event.get("text") or "")
     if not final.strip():
-        return {"text": "", "tokens": 0, "error": "empty"}
-    return {"text": final, "tokens": 0, "error": ""}
-
-
-def _direct(prompt: str, model: str, token: str) -> str:
-    """One DeepSeek chat completion, wrapped as the headless final event."""
-    if not token.strip():
-        return ""
-    body = json.dumps(
-        {
-            "model": model or "deepseek-flash",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0,
-            "thinking": {"type": "disabled"},
-            "stream": False,
-        }
-    ).encode()
-    call = request.Request(
-        "https://api.deepseek.com/chat/completions",
-        data=body,
-        headers={"Authorization": "Bearer " + token.strip(), "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with request.urlopen(call, timeout=30) as response:
-            payload = json.loads(response.read().decode())
-        text = payload["choices"][0]["message"]["content"]
-    except error.HTTPError as exc:
-        log.info("deepseek skipped status=%s", exc.code)
-        return ""
-    except Exception as exc:
-        log.info("deepseek skipped error=%s", exc.__class__.__name__)
-        return ""
-    if not isinstance(text, str) or not text.strip():
-        log.info("deepseek skipped error=empty")
-        return ""
-    return json.dumps({"type": "final", "text": text})
+        return {"text": "", "tokens": 0, "error": "empty", "request": posted}
+    return {"text": final, "tokens": 0, "error": "", "request": posted}
 
 
 def _profile_prompt(symbol: str, facts: dict) -> str:

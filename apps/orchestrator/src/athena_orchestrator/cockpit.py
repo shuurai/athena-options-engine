@@ -635,5 +635,6 @@ def footer() -> str:
         f'<div class="cycle-row"><span class="cycle-mark" data-cycle="mark"></span>'
         f'<span data-cycle="line">{line}</span></div>'
         f'<div class="{clock_class}" data-cycle="clock">{clock}</div>'
-        f'<div data-cycle="up">uptime {view["uptime"]}</div>'
+        f'<span class="chip stretch"><span class="sq"></span>'
+        f'<span data-cycle="up">uptime {view["uptime"]}</span></span>'
     )

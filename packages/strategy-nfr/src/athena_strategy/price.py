@@ -83,14 +83,9 @@ def price_tags(
 
 
 def tags_from_prices(conn: psycopg.Connection, symbol: str, settings: SettingsPayload) -> set[str]:
-    rows = conn.execute(
-        """
-        SELECT high, low, close, volume FROM market_bars
-        WHERE symbol = %s AND source = 'ib-daily'
-        ORDER BY ts
-        """,
-        (symbol,),
-    ).fetchall()
+    from athena_strategy.simbars import load_daily
+
+    rows = load_daily(conn, symbol)
     strategy = settings.strategy
     needed = max(strategy.rsi_period + 1, strategy.level_lookback)
     if len(rows) < needed:

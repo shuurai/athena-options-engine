@@ -23,7 +23,18 @@ def itick_key(settings: SettingsPayload) -> str:
 
 
 def deepseek_token(settings: SettingsPayload) -> str:
-    return pick(settings.ai.deepseek_token, "DEEPSEEK_TOKEN")
+    """The credential for the selected provider. DSH does not use one."""
+    field = {
+        "DEEPSEEK": "deepseek_token",
+        "OPENROUTER": "openrouter_token",
+        "CLAUDE": "claude_token",
+        "KIMI": "kimi_token",
+    }.get(settings.ai.provider)
+    if field is None:
+        return ""
+    from athena_settings.model import CREDENTIAL_ENV
+
+    return pick(getattr(settings.ai, field), CREDENTIAL_ENV[settings.ai.provider])
 
 
 def scoring_model(settings: SettingsPayload) -> str:

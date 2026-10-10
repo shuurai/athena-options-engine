@@ -40,6 +40,26 @@ def note_view(symbols: list[str]) -> None:
 
 def ib_move(conn, symbol: str) -> tuple[str, str, str]:
     """Latest IB price and the change versus the prior day's IB close."""
+    from athena_strategy.simbars import in_replay, load_daily
+
+    if in_replay(conn, symbol):
+        daily = load_daily(conn, symbol)
+        if not daily:
+            return DASH, DASH, ""
+        last = Decimal(daily[-1][2])
+        previous = None
+        for row in reversed(daily[:-1]):
+            close = Decimal(row[2])
+            if close == 0 or close == last:
+                continue
+            previous = close
+            break
+        price = f"{last:,.2f}"
+        if previous is None or previous == 0:
+            return price, DASH, ""
+        change = (last - previous) / previous * Decimal(100)
+        tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
+        return price, f"{change:+.2f}%", tone
     rows = conn.execute(
         """
         SELECT ts, close FROM market_bars

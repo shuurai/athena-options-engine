@@ -114,15 +114,18 @@ def evaluate_symbol(
         active_tags, event_offset = mocked
         has_shares = _long_shares(conn, account_id, symbol)
     elif tags is None:
+        from athena_strategy.simbars import replay_cursor
+
+        as_of = replay_cursor(conn, symbol) or date.today()
         active_tags = (
             (stored - NEWS_OWNED - IV_OWNED - PRICE_OWNED)
-            | tags_from_events(conn, symbol, settings)
+            | tags_from_events(conn, symbol, settings, as_of)
             | tags_from_iv(conn, symbol, settings)
             | tags_from_prices(conn, symbol, settings)
         )
         has_shares = _long_shares(conn, account_id, symbol)
         if event_offset is None:
-            event_offset = calendar_offset(conn, symbol, date.today(), settings)
+            event_offset = calendar_offset(conn, symbol, as_of, settings)
             no_event = event_offset is None
     else:
         active_tags = set(tags)
@@ -334,14 +337,16 @@ def _call_leg(conn: psycopg.Connection, symbol: str):
 
 
 def _long_shares(conn: psycopg.Connection, account_id: str, symbol: str) -> bool:
+    from athena_strategy.simbars import in_replay
+
     row = conn.execute(
         """
         SELECT quantity FROM positions
-        WHERE account_id = %s AND symbol = %s AND sec_type = 'STK'
+        WHERE account_id = %s AND symbol = %s AND sec_type = 'STK' AND simulated = %s
         ORDER BY snapshot_at DESC, id DESC
         LIMIT 1
         """,
-        (account_id, symbol),
+        (account_id, symbol, in_replay(conn, symbol)),
     ).fetchone()
     return row is not None and row[0] > 0
 

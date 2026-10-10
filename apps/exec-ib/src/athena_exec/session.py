@@ -234,38 +234,30 @@ def refresh_display_rates(database_url: str) -> None:
         broker.disconnect()
 
 
-def _cache_strangles(conn, broker, settings: SettingsPayload, today) -> None:
+def cache_symbol_chain(conn, broker, settings: SettingsPayload, symbol: str, underlying: Decimal, today) -> None:
+    """Snapshot one name's listed band and a strangle plan. Reused by a paper replay."""
     strategy = settings.strategy
-    for symbol in settings.watchlist:
-        price = conn.execute(
-            """
-            SELECT close FROM market_bars
-            WHERE symbol = %s AND source = 'ib-delayed'
-            ORDER BY ts DESC
-            LIMIT 1
-            """,
-            (symbol,),
-        ).fetchone()
-        if price is None:
-            continue
-        chain = broker.option_chain(symbol)
-        if chain is None:
-            continue
-        expiries, _strikes, trading_class, exchange, multiplier = chain
-        _store_choices(conn, broker, symbol, list(expiries), today, price[0], trading_class, exchange, strategy)
-        expiry = choose_expiry(list(expiries), today, strategy.dte_min, strategy.dte_target)
-        if expiry is None:
-            log.info("strangle none symbol=%s", symbol)
-            continue
-        strikes = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
-        picked = choose_strikes(strikes, price[0], strategy.strangle_otm_pct)
-        if picked is None:
-            log.info("strangle none symbol=%s", symbol)
-            continue
-        put_strike, call_strike = picked
-        put_limit = broker.option_ask(symbol, expiry, put_strike, "P", trading_class, exchange, multiplier)
-        call_limit = broker.option_ask(symbol, expiry, call_strike, "C", trading_class, exchange, multiplier)
-        conn.execute(
+    chain = broker.option_chain(symbol)
+    if chain is None:
+        return
+    expiries, _strikes, trading_class, exchange, multiplier = chain
+    expiry = choose_expiry(list(expiries), today, strategy.dte_min, strategy.dte_target)
+    _store_choices(
+        conn, broker, symbol, list(expiries), today, underlying,
+        trading_class, exchange, multiplier, strategy, expiry,
+    )
+    if expiry is None:
+        log.info("strangle none symbol=%s", symbol)
+        return
+    strikes = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
+    picked = choose_strikes(strikes, underlying, strategy.strangle_otm_pct)
+    if picked is None:
+        log.info("strangle none symbol=%s", symbol)
+        return
+    put_strike, call_strike = picked
+    put_limit = broker.option_ask(symbol, expiry, put_strike, "P", trading_class, exchange, multiplier)
+    call_limit = broker.option_ask(symbol, expiry, call_strike, "C", trading_class, exchange, multiplier)
+    conn.execute(
             """
             INSERT INTO option_plans (
                 symbol, expiry, put_strike, call_strike, put_limit, call_limit,
@@ -287,16 +279,35 @@ def _cache_strangles(conn, broker, settings: SettingsPayload, today) -> None:
                 symbol, expiry, put_strike, call_strike, put_limit, call_limit,
                 trading_class, exchange, multiplier,
             ),
-        )
-        conn.commit()
-        log.info(
-            "strangle symbol=%s expiry=%s put=%s call=%s",
-            symbol, expiry, put_strike, call_strike,
-        )
+    )
+    conn.commit()
+    log.info(
+        "strangle symbol=%s expiry=%s put=%s call=%s",
+        symbol, expiry, put_strike, call_strike,
+    )
 
 
-def _store_choices(conn, broker, symbol: str, expiries: list[str], today, underlying: Decimal, trading_class: str, exchange: str, strategy) -> None:
-    """Keep a short listed band so Approve can change expiry and strike."""
+def _cache_strangles(conn, broker, settings: SettingsPayload, today) -> None:
+    for symbol in settings.watchlist:
+        price = conn.execute(
+            """
+            SELECT close FROM market_bars
+            WHERE symbol = %s AND source = 'ib-delayed'
+            ORDER BY ts DESC
+            LIMIT 1
+            """,
+            (symbol,),
+        ).fetchone()
+        if price is None:
+            continue
+        cache_symbol_chain(conn, broker, settings, symbol, price[0], today)
+
+
+def _store_choices(
+    conn, broker, symbol: str, expiries: list[str], today, underlying: Decimal,
+    trading_class: str, exchange: str, multiplier: str, strategy, target,
+) -> None:
+    """Keep a short listed band. The target expiry also stores each ask."""
     band = expiry_band(expiries, today, strategy.dte_min, strategy.dte_max, strategy.dte_target)
     conn.execute("DELETE FROM option_choices WHERE symbol = %s", (symbol,))
     for expiry in band:
@@ -304,13 +315,18 @@ def _store_choices(conn, broker, symbol: str, expiries: list[str], today, underl
         rows = [("P", strike) for strike in strike_shortlist(listed, underlying, "P", otm_pct=strategy.strangle_otm_pct)]
         rows.extend(("C", strike) for strike in strike_shortlist(listed, underlying, "C", otm_pct=strategy.strangle_otm_pct))
         for right, strike in rows:
+            limit_price = None
+            if target is not None and expiry == target:
+                limit_price = broker.option_ask(
+                    symbol, expiry, strike, right, trading_class, exchange, multiplier,
+                )
             conn.execute(
                 """
-                INSERT INTO option_choices (symbol, expiry, contract_right, strike)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO option_choices (symbol, expiry, contract_right, strike, limit_price)
+                VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING
                 """,
-                (symbol, expiry, right, strike),
+                (symbol, expiry, right, strike, limit_price),
             )
     conn.commit()
 
@@ -323,7 +339,7 @@ def sync_account_positions(conn, account: str, rows: list[BrokerPosition]) -> in
         SELECT count(*) FROM (
             SELECT DISTINCT ON (symbol, sec_type, expiry, contract_right, strike) quantity
             FROM positions
-            WHERE account_id = %s
+            WHERE account_id = %s AND simulated = false
             ORDER BY symbol, sec_type, expiry, contract_right, strike, snapshot_at DESC, id DESC
         ) latest
         WHERE quantity <> 0
@@ -364,7 +380,7 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
                orders.ib_order_id
         FROM orders
         JOIN drafts ON drafts.id = orders.draft_id
-        WHERE orders.status = 'queued' AND orders.account_id = %s
+        WHERE orders.status = 'queued' AND orders.account_id = %s AND orders.simulated = false
         """,
         (account,),
     ).fetchall()
@@ -539,7 +555,7 @@ def _close_missing(conn, account: str, seen: set[tuple]) -> None:
         SELECT DISTINCT ON (symbol, sec_type, expiry, contract_right, strike)
                symbol, sec_type, expiry, contract_right, strike, quantity
         FROM positions
-        WHERE account_id = %s
+        WHERE account_id = %s AND simulated = false
         ORDER BY symbol, sec_type, expiry, contract_right, strike, snapshot_at DESC, id DESC
         """,
         (account,),

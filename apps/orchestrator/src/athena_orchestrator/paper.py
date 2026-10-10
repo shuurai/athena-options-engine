@@ -27,6 +27,7 @@ from athena_strategy.iv import record_iv_marks
 from athena_strategy.mock import prepare_mock_orders
 from athena_strategy.manage import manage_book
 from athena_orchestrator.runtime import finish, mark
+from athena_orchestrator.sim import cycle_gate, symbols_for
 from athena_strategy.news import ingest_news
 
 log = logging.getLogger("athena")
@@ -39,6 +40,11 @@ def run_paper_cycle(conn: psycopg.Connection) -> None:
     for account in accounts:
         seed_standard_if_empty(conn, account)
         books.append((account, load_active(conn, account)))
+
+    gates = {account: cycle_gate(conn, account) for account, _settings in books}
+    if books and any(mode != "live" for mode, _day in gates.values()):
+        _replay_cycle(conn, books, gates)
+        return
 
     if books:
         for account, settings in books:
@@ -149,6 +155,79 @@ def run_paper_cycle(conn: psycopg.Connection) -> None:
                 log.error("%s", exc)
 
     finish(5, f"phases={phase_count}")
+    finish(6, f"drafts={draft_count}")
+    mark(7, "running")
+    directory = Path(os.environ.get("ATHENA_LOCAL_BACKUP_DIR", "var/backups"))
+    path = write_snapshot(conn, directory)
+    retain = books[0][1].retain_local_days if books else 14
+    removed = prune_snapshots(directory, retain)
+    log.info("backup=%s pruned=%s", path.name, removed)
+    finish(7, f"backup={path.name} pruned={removed}")
+    try:
+        key = sync_snapshot(path)
+    except Exception as exc:
+        log.error("s3 sync failed: %s", exc)
+        return
+    if key:
+        log.info("s3=%s", key)
+
+
+def _replay_cycle(conn: psycopg.Connection, books: list, gates: dict) -> None:
+    """One stored day. Live session, quotes, and news stay off."""
+    mark(0, "skipped", "simulation")
+    finish(0, "sim")
+    mark(1, "skipped", "live quotes off")
+    finish(1, "bars=0")
+    mark(2, "skipped", "live news off")
+    finish(2, "news=0")
+    mark(4, "running")
+    iv_count = 0
+    phase_count = 0
+    draft_count = 0
+    for account, settings in books:
+        mode, day = gates[account]
+        ttl = settings.notify.draft_ttl_minutes
+        for draft_id, symbol, tactic, draft_account in expire_pending(conn, account, ttl):
+            log.info("draft expired id=%s symbol=%s", draft_id, symbol)
+            try:
+                notify_expired(draft_id, symbol, tactic, draft_account)
+            except RuntimeError as exc:
+                log.error("%s", exc)
+        if mode != "play" or day is None:
+            log.info("simulation account=%s mode=%s", account, mode)
+            continue
+        names = symbols_for(conn, account)
+        scoped = settings.model_copy(update={"watchlist": names})
+        iv_count += record_iv_marks(conn, names, day)
+        mark(5, "running")
+        draft_ids = []
+        if control_flag(settings, account, "trading", True):
+            draft_ids = evaluate_watchlist(conn, scoped, account)
+            draft_ids.extend(run_signaled(conn, scoped, account))
+            draft_ids.extend(manage_book(conn, scoped, account, day))
+        phase_count += len(names)
+        draft_count += len(draft_ids)
+        for draft_id in draft_ids:
+            token = issue_link(conn, draft_id, ttl_minutes=ttl)
+            row = conn.execute(
+                """
+                SELECT symbol, tactic, contracts, phase, reason, account_id
+                FROM drafts WHERE id = %s
+                """,
+                (draft_id,),
+            ).fetchone()
+            symbol, tactic, contracts, phase, reason, draft_account = row
+            log.info("control_token=%s account=%s replay=%s", token, draft_account, day)
+            try:
+                notify_draft(
+                    draft_id, symbol, tactic, contracts, phase, reason,
+                    control_page_url(token), draft_account,
+                )
+            except RuntimeError as exc:
+                log.error("%s", exc)
+    finish(4, f"iv={iv_count}")
+    finish(5, f"phases={phase_count}")
+    mark(6, "running")
     finish(6, f"drafts={draft_count}")
     mark(7, "running")
     directory = Path(os.environ.get("ATHENA_LOCAL_BACKUP_DIR", "var/backups"))

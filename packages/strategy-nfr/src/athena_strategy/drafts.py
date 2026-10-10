@@ -204,7 +204,9 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
         """,
         (symbol,),
     ).fetchall()
-    today = date.today()
+    from athena_strategy.simbars import replay_cursor
+
+    today = replay_cursor(conn, symbol) or date.today()
     nearest = None
     if earnings:
         offsets = [(row[0] - today).days for row in earnings]
@@ -283,7 +285,27 @@ def open_quantity(
     return allowed_open(limits, price, mult, _exposure(conn, account_id, symbol, price))
 
 
+def _symbol_in_replay(conn: psycopg.Connection, account_id: str, symbol: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1 FROM sim_runs
+        WHERE account_id = %s AND status IN ('active', 'halted')
+          AND position(',' || %s || ',' in ',' || symbols || ',') > 0
+        LIMIT 1
+        """,
+        (account_id, symbol.upper()),
+    ).fetchone()
+    return row is not None
+
+
 def _latest_price(conn: psycopg.Connection, symbol: str) -> Decimal | None:
+    from athena_strategy.simbars import in_replay, last_close
+
+    if in_replay(conn, symbol):
+        close = last_close(conn, symbol)
+        if close is None or close <= 0:
+            return None
+        return Decimal(close)
     row = conn.execute(
         """
         SELECT close FROM market_bars
@@ -431,19 +453,22 @@ def stage_draft(
         )
     status = "blocked" if blocked else "pending"
     draft_id = "draft_" + secrets.token_hex(3)
+    simulated = _symbol_in_replay(conn, account_id, symbol)
     conn.execute(
         """
         INSERT INTO drafts (
             id, symbol, tactic, contracts, status, reason, phase, account_id,
             instrument, limit_price, expiry, put_strike, call_strike,
-            put_limit, call_limit, trading_class, option_exchange, multiplier, order_action
+            put_limit, call_limit, trading_class, option_exchange, multiplier, order_action,
+            simulated
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             draft_id, symbol, tactic, contracts, status, blocked or reason, phase, account_id,
             instrument, limit_price, expiry, put_strike, call_strike,
             put_limit, call_limit, trading_class, option_exchange, multiplier, order_action,
+            simulated,
         ),
     )
     conn.commit()
@@ -801,14 +826,17 @@ def _insert_order(
     multiplier: str,
     ib_order_id: int | None = None,
 ) -> None:
+    simulated = _draft_simulated(conn, draft_id)
+    if simulated and status == "queued" and action != "CANCEL":
+        status = "filled"
     conn.execute(
         """
         INSERT INTO orders (
             id, draft_id, account_id, symbol, tactic, action, contracts, limit_price,
             status, block_reason, expiry, strike, contract_right, trading_class, option_exchange, multiplier,
-            ib_order_id
+            ib_order_id, simulated
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             "ord_" + secrets.token_hex(3),
@@ -828,5 +856,83 @@ def _insert_order(
             option_exchange,
             multiplier,
             ib_order_id,
+            simulated,
+        ),
+    )
+    if simulated and status == "filled":
+        _book_simulated(
+            conn, draft_id, account_id, symbol, tactic, action, contracts,
+            limit_price, expiry, strike, right, multiplier,
+        )
+
+
+def _draft_simulated(conn: psycopg.Connection, draft_id: str) -> bool:
+    row = conn.execute("SELECT simulated FROM drafts WHERE id = %s", (draft_id,)).fetchone()
+    return bool(row and row[0])
+
+
+def _book_simulated(
+    conn: psycopg.Connection,
+    draft_id: str,
+    account_id: str,
+    symbol: str,
+    tactic: str,
+    action: str,
+    contracts: int,
+    limit_price,
+    expiry,
+    strike,
+    right: str,
+    multiplier: str,
+) -> None:
+    """A replay fill at the draft limit. Nothing is sent to IB."""
+    if limit_price is None or Decimal(limit_price) <= 0 or contracts <= 0:
+        return
+    price = Decimal(limit_price)
+    conn.execute(
+        """
+        INSERT INTO fills (draft_id, symbol, tactic, contracts, price, simulated, account_id)
+        VALUES (%s, %s, %s, %s, %s, true, %s)
+        """,
+        (draft_id, symbol, tactic, contracts, price, account_id),
+    )
+    signed = Decimal(contracts) if action == "BUY" else Decimal(-contracts)
+    sec_type = "OPT" if right else "STK"
+    existing = conn.execute(
+        """
+        SELECT quantity, avg_price FROM positions
+        WHERE account_id = %s AND symbol = %s AND simulated = true AND sec_type = %s
+          AND contract_right = %s
+          AND expiry IS NOT DISTINCT FROM %s
+          AND strike IS NOT DISTINCT FROM %s
+        ORDER BY snapshot_at DESC, id DESC
+        LIMIT 1
+        """,
+        (account_id, symbol, sec_type, right or "", expiry, strike),
+    ).fetchone()
+    if existing is None:
+        quantity = signed
+        average = price
+    else:
+        old_qty = Decimal(existing[0])
+        old_avg = Decimal(existing[1])
+        quantity = old_qty + signed
+        if old_qty == 0 or (old_qty > 0) != (signed > 0):
+            average = price if quantity != 0 else old_avg
+        else:
+            average = (old_avg * abs(old_qty) + price * abs(signed)) / abs(quantity or signed)
+    mult = Decimal(multiplier or "1") if sec_type == "OPT" else Decimal(1)
+    conn.execute(
+        """
+        INSERT INTO positions (
+            account_id, symbol, quantity, avg_price, sec_type, expiry,
+            contract_right, strike, market_price, currency, multiplier,
+            market_value, unrealized_pnl, simulated
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'USD', %s, %s, 0, true)
+        """,
+        (
+            account_id, symbol, quantity, average, sec_type, expiry,
+            right or "", strike, price, mult, quantity * price * mult,
         ),
     )

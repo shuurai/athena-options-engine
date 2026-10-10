@@ -295,6 +295,178 @@ def _finish(task_id: str, status: str, detail: str, title: str) -> None:
         task["finished"] = time.time()
 
 
+def begin_simulate(database_url: str, account: str, start: str, months: str) -> dict:
+    """Download daily history, snapshot the chain, then arm the replay."""
+    from datetime import date
+
+    from athena_orchestrator.sim import prepare
+
+    try:
+        day = date.fromisoformat(start)
+        count = int(months)
+    except ValueError as exc:
+        raise ValueError("Choose a start date and a duration.") from exc
+    with connect(database_url) as conn:
+        settings = load_active(conn, account)
+        names = [symbol.strip().upper() for symbol in settings.sim_symbols if symbol.strip()]
+        run_id, _end, duration = prepare(conn, account, day, count, names)
+    task, fresh = _start("simulate", "Simulation", "Downloading history")
+    if fresh:
+        threading.Thread(
+            target=_run_simulate,
+            args=(task["id"], database_url, account, run_id, names, duration),
+            name="athena-sim",
+            daemon=True,
+        ).start()
+    return task
+
+
+def begin_liquidate(database_url: str, account: str) -> dict:
+    from athena_exec.accounts import trading_mode
+
+    if trading_mode() != "paper":
+        raise ValueError("Liquidate runs in paper mode.")
+    task, fresh = _start("liquidate", "Liquidate", "Closing the book")
+    if fresh:
+        threading.Thread(
+            target=_run_liquidate,
+            args=(task["id"], database_url, account),
+            name="athena-liquidate",
+            daemon=True,
+        ).start()
+    return task
+
+
+def _start(kind: str, title: str, detail: str) -> tuple[dict, bool]:
+    with _LOCK:
+        for task in _TASKS.values():
+            if task.get("kind") == kind and task["status"] == "running":
+                return _public(task), False
+        task = {
+            "id": uuid.uuid4().hex[:12],
+            "symbol": "",
+            "verb": kind,
+            "title": title,
+            "status": "running",
+            "detail": detail,
+            "finished": 0.0,
+            "kind": kind,
+        }
+        _TASKS[task["id"]] = task
+        return _public(task), True
+
+
+def _run_simulate(task_id: str, database_url: str, account: str, run_id: str, symbols: list[str], duration: str) -> None:
+    import asyncio
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from athena_exec.session import cache_symbol_chain
+    from athena_orchestrator.sim import activate, fail, latest_close, still_downloading, store_bars
+
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
+    broker = IbBroker()
+    written = 0
+    try:
+        with _IB_LOCK:
+            if not broker.connect(host, port, _PROBE_CLIENT, True):
+                raise RuntimeError("IB Gateway did not connect.")
+            try:
+                with connect(database_url) as conn:
+                    settings = load_active(conn, account)
+                    today = datetime.now(ZoneInfo("Asia/Hong_Kong")).date()
+                    for symbol in symbols:
+                        if not still_downloading(conn, run_id):
+                            _finish(task_id, "done", "Stopped", "Simulation")
+                            return
+                        _update(task_id, f"Downloading {symbol}")
+                        bars = broker.history_span(symbol, duration)
+                        written += store_bars(conn, run_id, symbol, bars)
+                        price = latest_close(conn, run_id, symbol)
+                        if price is None:
+                            continue
+                        _update(task_id, f"Chain {symbol}")
+                        try:
+                            cache_symbol_chain(conn, broker, settings, symbol, price, today)
+                        except Exception as exc:
+                            log.info("chain skipped symbol=%s error=%s", symbol, exc)
+            finally:
+                broker.disconnect()
+        with connect(database_url) as conn:
+            activate(conn, run_id)
+    except Exception as exc:
+        log.info("simulation failed run=%s error=%s", run_id, exc)
+        with connect(database_url) as conn:
+            fail(conn, run_id)
+        _finish(task_id, "error", str(exc), "Simulation")
+        return
+    _finish(task_id, "done", f"{written} daily bars stored", "Simulation")
+
+
+def _run_liquidate(task_id: str, database_url: str, account: str) -> None:
+    import asyncio
+
+    from athena_orchestrator.sim import delete_simulated_positions, real_positions
+
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    with connect(database_url) as conn:
+        removed = delete_simulated_positions(conn, account)
+        rows = [row for row in real_positions(conn, account) if row[1] is not None and row[1] != 0]
+    if not rows:
+        _finish(task_id, "done", f"Deleted {removed} simulated positions.", "Liquidate")
+        return
+    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
+    broker = IbBroker()
+    closed: list[str] = []
+    errors: list[str] = []
+    with _IB_LOCK:
+        if not broker.connect(host, port, _PROBE_CLIENT, False):
+            _finish(task_id, "error", "IB Gateway did not connect.", "Liquidate")
+            return
+        try:
+            for symbol, quantity, sec_type, expiry, right, strike, mark, multiplier in rows:
+                qty = abs(int(quantity))
+                if qty <= 0:
+                    continue
+                action = "SELL" if quantity > 0 else "BUY"
+                try:
+                    if sec_type == "OPT":
+                        limit = mark
+                        if limit is None or limit <= 0:
+                            raise RuntimeError("no option price")
+                        chain = broker.option_chain(symbol)
+                        if chain is None or expiry is None or strike is None:
+                            raise RuntimeError("no option chain")
+                        _expiries, _strikes, trading_class, exchange, chain_mult = chain
+                        broker.place_option_limit(
+                            account, symbol, expiry, strike, right or "C", trading_class, exchange,
+                            action, qty, limit, multiplier or chain_mult or "100",
+                        )
+                    else:
+                        limit = broker.last_price(symbol) or mark
+                        if limit is None or limit <= 0:
+                            raise RuntimeError("no stock price")
+                        broker.place_limit(account, symbol, action, qty, limit)
+                    closed.append(symbol)
+                except Exception as exc:
+                    errors.append(f"{symbol}: {exc}")
+        finally:
+            broker.disconnect()
+    detail = f"Deleted {removed} simulated positions. Limit close sent for {', '.join(closed) or 'none'}."
+    if errors:
+        detail += " " + "; ".join(errors)
+    _finish(task_id, "error" if errors and not closed else "done", detail, "Liquidate")
+
+
 def _public(task: dict) -> dict:
     return {
         "id": task["id"],

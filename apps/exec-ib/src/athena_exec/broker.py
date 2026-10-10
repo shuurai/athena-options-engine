@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import NamedTuple
 
@@ -133,6 +133,78 @@ class IbBroker:
             return []
         bars = self._ib.reqHistoricalData(contract, "", "60 D", "1 day", "TRADES", True, 1)
         return list(bars or [])
+
+    def history_span(self, symbol: str, duration: str) -> list[tuple]:
+        """Daily TRADES bars for one IB duration, such as '2 Y'. Empty when none exist."""
+        if self._ib is None:
+            return []
+        from ib_insync import Stock
+
+        exchange, currency = stock_venue(symbol)
+        contract = Stock(symbol, exchange, currency)
+        if not self._ib.qualifyContracts(contract):
+            return []
+        bars = self._ib.reqHistoricalData(contract, "", duration, "1 day", "TRADES", True, 1)
+        found = []
+        for bar in bars or []:
+            found.append(
+                (
+                    bar.date,
+                    Decimal(str(bar.open)),
+                    Decimal(str(bar.high)),
+                    Decimal(str(bar.low)),
+                    Decimal(str(bar.close)),
+                    Decimal(str(bar.volume or 0)),
+                )
+            )
+        return found
+
+    def historical(self, contract, duration: str, bar_size: str, end: str = "") -> list[dict]:
+        """TRADES candles. An option with no trades falls back to the midpoint."""
+        if self._ib is None:
+            raise RuntimeError("IB Gateway did not connect.")
+        if not self._found(contract):
+            label = contract.localSymbol or contract.symbol
+            raise RuntimeError(f"IB did not find {label}")
+        what = "TRADES"
+        bars = self._ib.reqHistoricalData(contract, end, duration, bar_size, what, True, 1)
+        if not bars and getattr(contract, "secType", "") == "OPT":
+            what = "MIDPOINT"
+            bars = self._ib.reqHistoricalData(contract, end, duration, bar_size, what, True, 1)
+        return [_candle(bar) for bar in bars or []]
+
+    def describe(self, contract) -> dict:
+        """Qualified contract facts. longName comes from the contract details."""
+        if self._ib is None:
+            raise RuntimeError("IB Gateway did not connect.")
+        if not self._found(contract):
+            label = contract.localSymbol or contract.symbol
+            raise RuntimeError(f"IB did not find {label}")
+        details = self._ib.reqContractDetails(contract)
+        long_name = ""
+        primary = ""
+        if details:
+            long_name = details[0].longName or ""
+            primary = details[0].contract.primaryExchange or ""
+            contract = details[0].contract
+        return {
+            "symbol": contract.symbol,
+            "sec_type": contract.secType or "",
+            "exchange": contract.exchange or "",
+            "primary_exchange": primary,
+            "currency": contract.currency or "",
+            "name": long_name,
+            "con_id": int(contract.conId or 0),
+            "trading_class": contract.tradingClass or "",
+        }
+
+    def _found(self, contract) -> bool:
+        if self._ib.qualifyContracts(contract):
+            return True
+        if getattr(contract, "secType", "") == "OPT" and contract.exchange == "SMART":
+            contract.exchange = "CBOE"
+            return bool(self._ib.qualifyContracts(contract))
+        return False
 
     def place_option_limit(
         self,
@@ -548,6 +620,30 @@ def _pick_chain(chains):
         if chain.exchange == "SMART":
             return chain
     return max(chains, key=lambda chain: len(chain.strikes))
+
+
+def _candle(bar) -> dict:
+    raw = bar.date
+    if isinstance(raw, datetime):
+        day = raw.date().isoformat()
+        stamp = raw.isoformat()
+    elif isinstance(raw, date):
+        day = raw.isoformat()
+        stamp = day
+    else:
+        text = str(raw)
+        compact = text[:10].replace("-", "")
+        day = f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}" if len(compact) >= 8 and compact[:8].isdigit() else text[:10]
+        stamp = text
+    return {
+        "date": day,
+        "time": stamp,
+        "open": float(bar.open),
+        "high": float(bar.high),
+        "low": float(bar.low),
+        "close": float(bar.close),
+        "volume": float(bar.volume or 0),
+    }
 
 
 def stock_venue(symbol: str) -> tuple[str, str]:

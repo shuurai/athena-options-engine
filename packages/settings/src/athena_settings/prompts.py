@@ -39,11 +39,21 @@ def resolved_agents(settings: SettingsPayload) -> dict[str, AgentPrompt]:
     merged = default_agents()
     for name, prompt in settings.agents.items():
         if name in merged and prompt.system.strip() and prompt.execution.strip():
+            if prompt.reasoning is None:
+                prompt = prompt.model_copy(update={"reasoning": merged[name].reasoning})
             merged[name] = prompt
     return merged
 
 
 def default_agents() -> dict[str, AgentPrompt]:
+    agents = _standing_agents()
+    for name, prompt in agents.items():
+        if prompt.reasoning is None:
+            agents[name] = prompt.model_copy(update={"reasoning": False})
+    return agents
+
+
+def _standing_agents() -> dict[str, AgentPrompt]:
     return {
         "Location": AgentPrompt(
             system=(
@@ -80,8 +90,9 @@ def default_agents() -> dict[str, AgentPrompt]:
         "CSP": AgentPrompt(
             system=(
                 "You may propose one cash-secured put, or stay quiet.\n"
-                "Propose only when LOWER_RAIL or LOW_52W is present.\n"
-                "Choose one listed put. The limit is the price to sell, not a marketable through-price.\n"
+                "Propose only when LOWER_RAIL, LOW_52W, or PULLBACK is present.\n"
+                "PULLBACK is a mega-cap dip inside a rising channel. Other names do not get that tag.\n"
+                "Choose one listed put that has a limit. The limit is the price to sell, not a marketable through-price.\n"
                 "Do not choose a size.\n"
                 'Reply with JSON only: {"quiet":true} or {"quiet":false,"expiry":"YYYY-MM-DD","strike":0,"limit":0,"reason":""}'
             ),
@@ -95,7 +106,7 @@ def default_agents() -> dict[str, AgentPrompt]:
                 "Propose only when shares are already held and UPPER_RAIL or HIGH_52W is present.\n"
                 "If a share purchase is proposed and not yet filled, stay quiet. "
                 "The covered call is sold at the upper rail after that fill.\n"
-                "Do not choose a size.\n"
+                "Choose one listed call that has a limit. Do not choose a size.\n"
                 'Reply with JSON only: {"quiet":true} or {"quiet":false,"expiry":"YYYY-MM-DD","strike":0,"limit":0,"reason":""}'
             ),
             execution=(
@@ -109,6 +120,7 @@ def default_agents() -> dict[str, AgentPrompt]:
                 "Propose only when Long is on, intent is Accumulate, and LOWER_RAIL or LOW_52W is present.\n"
                 "Stay quiet when intent is Income.\n"
                 "The limit is the entry price. Do not exceed the position cap you are shown.\n"
+                "Position cap off means there is no money cap. Do not treat it as a ban on a new position.\n"
                 'Reply with JSON only: {"quiet":true} or {"quiet":false,"limit":0,"reason":""}'
             ),
             execution=(
@@ -120,7 +132,7 @@ def default_agents() -> dict[str, AgentPrompt]:
             system=(
                 "You may propose one short strangle, or stay quiet.\n"
                 "Propose only when NEWS_WASH and HIGH_IV are both present.\n"
-                "One short put and one short call, each with a limit.\n"
+                "One short put and one short call, each with a limit, chosen from the listed lines.\n"
                 "Do not choose a size.\n"
                 'Reply with JSON only: {"quiet":true} or {"quiet":false,"expiry":"YYYY-MM-DD","put_strike":0,"put_limit":0,"call_strike":0,"call_limit":0,"reason":""}'
             ),
@@ -135,13 +147,18 @@ def default_agents() -> dict[str, AgentPrompt]:
                 "Intent Accumulate and Long on: a share purchase at the lower rail or the 52-week low may come first. "
                 "Do not draft the covered call until that purchase fills. A cash-secured put may sit beside the purchase.\n"
                 "Drop any tactic whose universe flag is off.\n"
-                "Do not exceed the contract cap or the position cap.\n"
+                "Do not exceed the contract cap. Position cap off means there is no money cap. "
+                "Do not treat it as a ban on a new position.\n"
+                "Respect the min DTE, the earnings blackout, and the cash reserve you are shown.\n"
                 'Reply with JSON only: {"thinking":"","drafts":[{"id":"","tactic":"BUY|CSP|CC|STRANGLE","limit":0,"reason":""}]}'
             ),
             execution=(
                 "Symbol: {{symbol}}\nIntent: {{intent}}\nLong: {{long}}\nShares held: {{shares}}\n"
                 "Flags: {{flags}}\nTags: {{tags}}\nContract cap: {{contract_cap}}\n"
-                "Position cap: {{position_cap}}\nProposals:\n{{proposals}}"
+                "Position cap: {{position_cap}}\nMin DTE: {{min_dte}}\n"
+                "Earnings blackout: {{earnings_blackout}} days\n"
+                "Cash reserve: {{cash_reserve}}%\nProposals:\n{{proposals}}"
             ),
+            reasoning=True,
         ),
     }

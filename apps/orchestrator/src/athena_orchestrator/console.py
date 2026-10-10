@@ -44,6 +44,7 @@ _MARK_HREF = " ".join(_MARK.split()).replace("#", "%23").replace('"', "'")
 
 NAV = (
     ("/", "Cockpit"),
+    ("/simulation", "Simulation"),
     ("/drafts", "Drafts"),
     ("/phase", "NFR board"),
     ("/strategy", "Strategy"),
@@ -55,6 +56,7 @@ NAV = (
     ("/accounts", "Accounts"),
     ("/risk", "Risk control"),
     ("/settings", "Settings"),
+    ("/skill", "Skill"),
 )
 
 _EXTRA_CSS = """
@@ -72,7 +74,41 @@ html, body.console { height: 100%; overflow: hidden; }
   gap: 14px; overflow: hidden;
 }
 .stage > .note, .stage > .profiles { flex: none; }
-.stage > .fill, .stage > form.fill, .stage > .split { flex: 1 1 auto; min-height: 0; }
+.stage > .fill, .stage > form.fill, .stage > .split, .stage > .sim-page { flex: 1 1 auto; min-height: 0; }
+.sim-page { display: flex; flex-direction: column; gap: 14px; }
+.sim-facts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 16px; margin: 4px 0 14px; }
+.sim-facts .k { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
+.sim-facts .v { margin-top: 4px; font-family: var(--font-mono); font-size: 13px; color: var(--site-text); }
+.sim-note { margin: 0 0 12px; color: var(--site-text-3); font-size: 12.5px; }
+.sim-charts { flex: 1 1 auto; min-height: 0; }
+.sim-progress { flex: none; }
+.sim-idle {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  color: var(--site-text-3);
+}
+.sim-idle svg { width: 96px; height: 96px; animation: sim-bob 3.6s ease-in-out infinite; }
+.sim-idle p { margin: 0; font-size: 13px; }
+@keyframes sim-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sim-idle svg { animation: none; }
+}
+.sim-row { margin-bottom: 12px; }
+.sim-row h2 { justify-content: flex-start; }
+.sim-window { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; }
+.sim-box { position: relative; height: 480px; }
+.sim-plot { position: absolute; inset: 8px 12px 8px; cursor: crosshair; }
+.sim-plot svg { display: block; width: 100%; height: 100%; }
+.sim-read { position: absolute; left: 8px; top: 4px; z-index: 2; font: 12px/1.3 var(--font-mono); color: var(--site-text-2); pointer-events: none; white-space: nowrap; }
+.sim-read .up { color: #16c784; }
+.sim-read .dn { color: #ea3943; }
+.sim-read .mu { color: #8b95a3; }
+.sim-plot.space { cursor: grab; }
+.sim-plot.dragging { cursor: grabbing; }
+.btn:disabled { opacity: .45; cursor: default; }
 .stage > .share { flex: 1 1 0; min-height: 0; }
 .stage > .card.fill { flex: 1.4 1 0; }
 .share > .card { display: flex; flex-direction: column; min-height: 0; overflow: auto; }
@@ -108,6 +144,39 @@ form.fill > .settings-cols {
 .settings-col > .card > .scroll-y { overflow: visible; }
 .settings-col > .card.fill { flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .settings-col > .card.fill > .scroll-y { overflow: auto; }
+.card.danger { border-color: #7f1d1d; background: #2a1212; }
+.card.danger h2 { color: #fca5a5; }
+.btn.danger { background: #7f1d1d; color: #fff; border-color: #7f1d1d; }
+.sim-find { position: relative; margin: 4px 0 10px; }
+.sim-menu {
+  position: absolute; z-index: 8; left: 0; right: 0; top: calc(100% + 4px);
+  max-height: 180px; overflow: auto;
+  background: var(--site-surface); border: 1px solid var(--site-border-strong);
+}
+.sim-menu button {
+  display: flex; width: 100%; gap: 8px; align-items: baseline;
+  background: transparent; border: 0; color: inherit; text-align: left;
+  padding: 7px 10px; cursor: pointer; font: inherit;
+}
+.sim-menu button:hover, .sim-menu button.on { background: #1c2430; }
+.sim-menu .name { color: var(--site-text-3); font-size: 12px; font-weight: 400; }
+.sim-picks { display: flex; flex-wrap: wrap; gap: 6px; max-height: 168px; overflow: auto; }
+.sim-pick {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px 2px 2px 8px; border: 1px solid var(--site-border-strong); font-size: 12px;
+}
+.sim-x {
+  width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 0; color: var(--site-text-4); cursor: pointer; padding: 0;
+}
+.sim-x:hover { color: #ea3943; }
+.sim-x svg { width: 10px; height: 10px; }
+.sim-empty { margin: 0; color: var(--site-text-3); font-size: 12px; }
+.settings-field { position: relative; display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.settings-field > label, .toggle-row > div:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.toggle-row { position: relative; }
+.toggle-row .help-pop, .settings-field .help-pop { top: calc(100% - 4px); left: 0; right: auto; width: min(280px, 100%); }
+.preset-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .scroll-y thead th { position: sticky; top: 0; background: var(--site-surface); z-index: 1; }
 .stage > .strategy-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
 .cycle-split {
@@ -272,6 +341,11 @@ table.data tbody tr.phase-pick.selected:hover { background: #15243d; }
 .px-tick { animation: px-tick .7s ease; }
 @keyframes px-tick { 0% { color: #93c5fd; } 100% { color: inherit; } }
 .input { width: 100%; padding: 9px 11px; border: 1px solid var(--site-border-strong); font: 12.5px var(--font-mono); background: #0a0c10; color: var(--site-text); }
+.sim-date { position: relative; margin-top: 4px; }
+.sim-date .k { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
+.sim-date-face { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 6px; padding: 9px 11px; border: 1px solid var(--site-border-strong); background: #0a0c10; color: var(--site-text); font: 13px var(--font-mono); pointer-events: none; }
+.sim-date-face svg { width: 16px; height: 16px; color: #93c5fd; }
+.sim-date input[type="date"] { position: absolute; left: 0; right: 0; bottom: 0; height: 38px; opacity: 0; cursor: pointer; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .form-grid label { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--site-text-4); text-transform: uppercase; letter-spacing: .05em; font-family: var(--font-mono); }
 .form-grid > div { position: relative; }
@@ -297,14 +371,16 @@ table.data tbody tr.phase-pick.selected:hover { background: #15243d; }
 .card h2 span { display: inline-flex; align-items: center; gap: 10px; }
 button.help-q { width: 18px; height: 18px; padding: 0; flex: none; letter-spacing: 0; text-transform: none; border: 1px solid var(--site-border-strong); background: transparent; color: var(--site-text-3); font-size: 11px; line-height: 16px; cursor: pointer; }
 .ath-panel .diff { white-space: pre-wrap; vertical-align: top; }
-.help-pop { position: absolute; z-index: 5; right: 16px; top: 36px; width: min(260px, calc(100% - 32px)); padding: 10px 12px; background: #10141a; border: 1px solid var(--site-border-strong); color: var(--site-text-3); font-size: 12.5px; line-height: 1.45; font-weight: 400; letter-spacing: 0; text-transform: none; font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
+.help-pop { position: fixed; z-index: 30; right: auto; top: auto; left: 0; width: min(280px, calc(100vw - 24px)); padding: 10px 12px; background: #10141a; border: 1px solid var(--site-border-strong); color: var(--site-text-3); font-size: 12.5px; line-height: 1.45; font-weight: 400; letter-spacing: 0; text-transform: none; font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
 .tgl { margin: 0 4px 0 0; padding: 4px 8px; font-size: 10px; font-family: var(--font-mono); background: transparent; border: 1px solid var(--site-border-strong); color: var(--site-text-3); }
 .tgl.on { background: #101c33; border-color: var(--site-primary); color: #93c5fd; }
 .acct { border: 1px solid var(--site-border); background: var(--site-surface); padding: 16px; position: relative; }
 .acct.active { border-color: var(--site-primary); box-shadow: inset 0 0 0 1px #2f6fed55; }
 .acct .a-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .acct .a-name { font-size: 15px; font-weight: 700; }
-.acct .a-id { font-family: var(--font-mono); font-size: 11px; color: var(--site-text-4); margin-top: 2px; }
+.acct .a-id { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--site-text-4); margin-top: 2px; }
+.acct .a-id .copy-plain svg, .ath-panel .field .copy-plain svg { width: 16px; height: 16px; }
+.ath-panel .field .v:has(.copy-plain) { display: flex; align-items: center; gap: 6px; }
 .acct .a-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin-top: 14px; }
 .acct .a-stat .l { font-size: 10px; color: var(--site-text-4); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .05em; }
 .acct .a-stat .v { font-size: 15px; font-weight: 700; font-family: var(--font-mono); margin-top: 2px; }
@@ -323,6 +399,8 @@ button.btn.busy::after {
 @keyframes ath-spin { to { transform: rotate(360deg); } }
 .nav .foot { display: flex; flex-direction: column; align-items: stretch; gap: 6px; font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
 .nav .foot .chip, .nav .foot .cycle-row { align-self: flex-start; max-width: 100%; }
+.nav .foot .chip.stretch { align-self: stretch; width: 100%; box-sizing: border-box; }
+.chip .sq { width: 6px; height: 6px; background: currentColor; flex: none; }
 .cycle-clock {
   width: 100%; box-sizing: border-box; text-align: center;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -346,7 +424,7 @@ button.btn.busy::after {
 .cycle-bar i { display: block; height: 100%; background: #6b96f2; }
 .screen-bar { position: fixed; left: 0; right: 0; top: 0; z-index: 30; height: 3px; background: #1c2430; pointer-events: none; }
 .screen-bar i { display: block; height: 100%; background: #6b96f2; }
-.nav .foot [data-cycle="up"] { font-family: var(--font-mono); font-size: 10.5px; color: var(--site-text-4); }
+.nav .foot [data-cycle="up"] { font-family: var(--font-mono); font-size: 10.5px; }
 .chip { text-transform: none; letter-spacing: .02em; }
 .stage .card h2, .stage .stat .label, .stage table.data th { text-transform: none; letter-spacing: .02em; }
 .health-card h2, .health-card .field .k { text-transform: uppercase; letter-spacing: .1em; }
@@ -359,6 +437,21 @@ button.btn.busy::after {
 .copy-plain { display: inline-flex; padding: 0; margin: 0; border: 0; background: none; color: inherit; cursor: pointer; line-height: 0; }
 .copy-plain svg { width: 13px; height: 13px; display: block; }
 .copy-plain:hover { color: var(--site-primary); }
+.key-row { display: flex; align-items: center; gap: 8px; }
+.key-row .input { flex: 1; min-width: 0; }
+.key-plain { display: inline-flex; padding: 0; margin: 0; border: 0; background: none; color: inherit; cursor: pointer; line-height: 0; }
+.key-plain svg { width: 16px; height: 16px; display: block; }
+.key-plain:hover { color: var(--site-primary); }
+.skill-doc h3 { margin: 18px 0 6px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.skill-call { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.skill-call .mono { color: var(--site-text-2); font-size: 12.5px; }
+.skill-doc p, .skill-doc li { color: var(--site-text-2); }
+.skill-doc pre { white-space: pre-wrap; }
+.skill-doc .json .jk { color: #93c5fd; }
+.skill-doc .json .js { color: #9dcea0; }
+.skill-doc .json .jn { color: #e8c07a; }
+.skill-doc .json .jb { color: #d2b4f0; }
+.skill-doc .json .jp { color: #6b7684; }
 .card.stat .meta { white-space: pre-line; }
 .ath-panel { box-shadow: -24px 0 60px rgba(0,0,0,.45); }
 .ath-panel .p-head b { font-size: 13px; letter-spacing: .04em; font-family: var(--font-mono); text-transform: none; font-weight: 600; }
@@ -436,9 +529,24 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
 
     configure(database_url)
     class Handler(BaseHTTPRequestHandler):
+        def do_OPTIONS(self) -> None:
+            path = urlparse(self.path).path
+            if path.startswith("/api/v1"):
+                self._send_api(204, "")
+                return
+            self.send_response(404)
+            self.end_headers()
+
         def do_GET(self) -> None:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
+            if parsed.path.startswith("/api/v1"):
+                with connect(database_url) as conn:
+                    from athena_orchestrator.developer import handle
+
+                    status, body = handle(conn, "GET", parsed.path, query, b"", self.headers)
+                self._send_api(status, body)
+                return
             if parsed.path == "/api/tasks":
                 self._send(200, json.dumps({"tasks": list_tasks()}), "json")
                 return
@@ -454,6 +562,12 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                     account = _account()
                     self._send(200, json.dumps(snapshot(conn, account)), "json")
                 return
+            if parsed.path == "/api/simulation":
+                with connect(database_url) as conn:
+                    from athena_orchestrator.sim import progress
+
+                    self._send(200, json.dumps(progress(conn, _account())), "json")
+                return
             with connect(database_url) as conn:
                 status, body, kind = _get(conn, parsed.path, query)
             self._send(status, body, kind)
@@ -461,7 +575,15 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
         def do_POST(self) -> None:
             path = urlparse(self.path).path
             length = int(self.headers.get("Content-Length", "0"))
-            form = parse_qs(self.rfile.read(length).decode("utf-8"))
+            raw = self.rfile.read(length)
+            if path.startswith("/api/v1"):
+                with connect(database_url) as conn:
+                    from athena_orchestrator.developer import handle
+
+                    status, body = handle(conn, "POST", path, {}, raw, self.headers)
+                self._send_api(status, body)
+                return
+            form = parse_qs(raw.decode("utf-8"))
             with connect(database_url) as conn:
                 from athena_settings.resolve import live_allowlist
 
@@ -487,7 +609,19 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
             else:
                 content = "text/html; charset=utf-8"
             self.send_header("Content-Type", content)
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_api(self, status: int, body: str) -> None:
+            data = body.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Api-Key")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             self.end_headers()
             self.wfile.write(data)
 
@@ -554,6 +688,42 @@ def _post_tasks(conn, form: dict, actor: str, database_url: str) -> tuple[int, s
     try:
         if action == "positions":
             task = begin_positions(database_url, account)
+        elif action == "simulate":
+            from athena_orchestrator.tasks import begin_simulate
+
+            task = begin_simulate(
+                database_url,
+                account,
+                (form.get("start") or [""])[0],
+                (form.get("months") or [""])[0],
+            )
+        elif action == "sim-stop":
+            from athena_orchestrator.sim import stop
+
+            return 200, json.dumps({"ok": True, "message": stop(conn, account)}), "json"
+        elif action == "sim-halt":
+            from athena_orchestrator.sim import halt
+
+            return 200, json.dumps({"ok": True, "message": halt(conn, account)}), "json"
+        elif action == "sim-resume":
+            from athena_orchestrator.sim import resume
+
+            return 200, json.dumps({"ok": True, "message": resume(conn, account)}), "json"
+        elif action == "sim-reset":
+            from athena_orchestrator.sim import reset
+
+            return 200, json.dumps({"ok": True, "message": reset(conn, account)}), "json"
+        elif action == "flush":
+            from athena_orchestrator.sim import flush
+
+            return 200, json.dumps({
+                "ok": True,
+                "message": flush(conn, account, (form.get("phrase") or [""])[0]),
+            }), "json"
+        elif action == "liquidate":
+            from athena_orchestrator.tasks import begin_liquidate
+
+            task = begin_liquidate(database_url, account)
         else:
             task = begin_fill(
                 conn,
@@ -570,7 +740,9 @@ def _post_tasks(conn, form: dict, actor: str, database_url: str) -> tuple[int, s
 
 def _get(conn, path: str, query: dict | None = None) -> tuple[int, str, str]:
     if path == "/api/health":
-        return 200, json.dumps(health_report(conn)), "json"
+        report = health_report(conn)
+        report["replay"] = _replay_text(conn, _account())
+        return 200, json.dumps(report), "json"
     if path == "/":
         return 200, _cockpit(conn), "html"
     built = pages.build(conn, path, query or {})
@@ -637,7 +809,7 @@ def _toast_title(text: str, ok: bool) -> tuple[str, str]:
     return "Saved", "ok"
 
 
-def _nav_badges(conn) -> dict[str, tuple[int, bool, str]]:
+def _nav_badges(conn) -> dict[str, tuple[int | str, bool, str]]:
     """Counts of rows that arrived today. A zero stays off the menu."""
     account = _account()
     if not account or conn is None:
@@ -653,6 +825,14 @@ def _nav_badges(conn) -> dict[str, tuple[int, bool, str]]:
     ).fetchone()[0]
     fills = conn.execute(
         "SELECT count(*) FROM fills WHERE account_id = %s AND created_at >= %s",
+        (account, start),
+    ).fetchone()[0]
+    calls = conn.execute(
+        "SELECT count(*) FROM ai_calls WHERE account_id = %s AND called_at >= %s",
+        (account, start),
+    ).fetchone()[0]
+    decisions = conn.execute(
+        "SELECT count(*) FROM decision_trails WHERE account_id = %s AND logged_at >= %s",
         (account, start),
     ).fetchone()[0]
     opened = conn.execute(
@@ -682,13 +862,25 @@ def _nav_badges(conn) -> dict[str, tuple[int, bool, str]]:
         """,
         (account, account, start),
     ).fetchone()[0]
-    found = {
+    found: dict[str, tuple[int | str, bool, str]] = {
         "/drafts": (int(drafts), False, "new today"),
         "/news": (int(news), True, "new today"),
         "/history": (int(fills), False, "new today"),
+        "/audit": (int(calls) + int(decisions), False, "today"),
         "/positions": (int(opened), False, "new today"),
     }
-    return {href: item for href, item in found.items() if item[0] > 0}
+    from athena_orchestrator.sim import progress
+
+    replay = progress(conn, account)
+    if replay["status"] in {"active", "halted"} and int(replay["total"]) > 0:
+        day = int(replay["day"])
+        total = int(replay["total"])
+        found["/simulation"] = (
+            f"{day}/{total}",
+            replay["status"] == "halted",
+            f"Day {day} of {total}",
+        )
+    return {href: item for href, item in found.items() if item[0]}
 
 
 def _layout(
@@ -709,8 +901,14 @@ def _layout(
         if badge:
             count, warn, caption = badge
             kind = "nav-badge warn" if warn else "nav-badge"
+            if isinstance(count, str):
+                tip = caption
+                shown = count
+            else:
+                tip = f"{count} {caption}"
+                shown = str(count)
             mark = (
-                f'<span class="{kind}" title="{count} {escape(caption, quote=True)}">{count}</span>'
+                f'<span class="{kind}" title="{escape(tip, quote=True)}">{escape(shown)}</span>'
             )
         links.append(f"<a{current} href=\"{href}\">{escape(label)}{mark}</a>")
     chip_html = "".join(
@@ -790,11 +988,55 @@ def _cockpit(conn) -> str:
     rows = watchlist(conn, account, settings.watchlist, settings.strategy.ivr_min_samples, now.date())
     halted = active_reason(conn, account)
     payload = json.dumps({"nlv": facts["nlv"], "months": facts["months"], "pnl": facts["pnl"]}).replace("<", "\\u003c")
-    body = _cockpit_body(facts, slots, health, rows, settings, halted) + f'<script type="application/json" id="cockpit-data">{payload}</script>'
-    return _layout("/", "cockpit", body, chips, "sleeve marks, today's slots, and the watchlist for this account.", conn=conn)
+    body = _cockpit_body(
+        facts, slots, health, rows, settings, halted, _sim_actions(conn, account), _replay_text(conn, account)
+    )
+    body += f'<script type="application/json" id="cockpit-data">{payload}</script>'
+    return _layout(
+        "/", "cockpit", body, chips,
+        "sleeve marks, today's slots, and the watchlist for this account.",
+        conn=conn,
+    )
 
 
-def _cockpit_body(facts: dict, slots: list[dict], health: dict, rows: list[dict], settings, halted: str | None) -> str:
+def _replay_text(conn, account: str) -> str:
+    """The open replay, as one health row. Empty when nothing is in progress."""
+    if not account or trading_mode() != "paper":
+        return ""
+    from athena_orchestrator.sim import progress
+
+    info = progress(conn, account)
+    if info["status"] not in {"downloading", "active", "halted"}:
+        return ""
+    if info["status"] == "downloading" or int(info["total"]) <= 0:
+        return "Downloading"
+    day = f"Day {int(info['day'])} of {int(info['total'])}"
+    when = info["cursor_label"]
+    if info["status"] == "halted":
+        return ", ".join(part for part in ("Halted", day, when) if part)
+    return ", ".join(part for part in (day, when) if part)
+
+
+def _sim_actions(conn, account: str) -> str:
+    if trading_mode() != "paper":
+        return ""
+    from athena_orchestrator.sim import view
+
+    if view(conn, account) is None:
+        return '<button class="btn primary" type="button" data-cmd="simulate">Simulate</button>'
+    return '<button class="btn" type="button" disabled>Simulate</button>'
+
+
+def _cockpit_body(
+    facts: dict,
+    slots: list[dict],
+    health: dict,
+    rows: list[dict],
+    settings,
+    halted: str | None,
+    sim: str,
+    replay: str,
+) -> str:
     copy_svg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>'
     ttl = f'<span class="tag">ttl {escape(facts["ttl"])}</span> ' if facts["ttl"] else ""
     slot_rows = "".join(
@@ -861,10 +1103,11 @@ def _cockpit_body(facts: dict, slots: list[dict], health: dict, rows: list[dict]
       <span class="health-meter {escape(health["state"])}" id="healthMeter">{bars}</span>
       <span class="health-age" id="healthAge">{health["ok"]}/5</span></span>
       <button class="more" data-cmd="ops" type="button">ops panel →</button></h2>
-    <div id="healthBody" style="flex:1">{fields}</div>
+    <div id="healthBody" style="flex:1">{fields}{"" if not replay else f'<div class="field"><div class="k">Replay</div><div class="v" data-health="Replay">{escape(replay)}</div></div>'}</div>
     <div class="row-actions" style="margin-top:12px">
       <button class="btn ghost icon-btn" data-cmd="health" type="button" aria-label="Refresh health"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/></svg></button>
       <button class="btn ghost" data-cmd="backup" type="button">Backup now</button>
+      {sim}
       <button class="{halt_class}" data-cmd="{halt_cmd}" type="button">{halt_label}</button>
     </div>
   </div>
@@ -965,6 +1208,14 @@ _CLIENT_JS = r"""
     }
     return root;
   }
+  function maskCenter(value) {
+    const count = value.length;
+    if (count < 2) return value;
+    const hidden = Math.floor(count / 2);
+    const front = Math.floor((count - hidden) / 2);
+    const back = count - hidden - front;
+    return value.slice(0, front) + "•".repeat(hidden) + value.slice(count - back);
+  }
   function toast(title, sub, kind) {
     const root = dock().querySelector(".ath-toasts");
     const el = document.createElement("div");
@@ -990,7 +1241,12 @@ _CLIENT_JS = r"""
     const flash = document.getElementById("ath-flash");
     if (flash) toast(flash.getAttribute("data-title") || "Saved", flash.getAttribute("data-sub") || "", flash.getAttribute("data-kind") || "ok");
   }
+  let flushTimer = null;
   function closeAll() {
+    if (flushTimer) {
+      clearInterval(flushTimer);
+      flushTimer = null;
+    }
     document.querySelectorAll(".ath-panel, .ath-modal, .ath-overlay").forEach((node) => node.remove());
   }
   function overlay() {
@@ -1124,7 +1380,7 @@ _CLIENT_JS = r"""
           return;
         }
         settingsForm.querySelectorAll("input[type=password]").forEach((input) => {
-          if (!input.value) return;
+          if (!input.value || input.readOnly) return;
           const row = input.closest("label") && input.closest("label").previousElementSibling;
           const tag = row && row.querySelector(".tag");
           if (tag) {
@@ -1144,9 +1400,53 @@ _CLIENT_JS = r"""
         }
       });
     }
+    function syncAiProvider() {
+      const provider = settingsForm.querySelector("[name=ai_provider]");
+      const model = settingsForm.querySelector("[name=model]");
+      const catalog = document.getElementById("ai-models");
+      const block = document.getElementById("credential-block");
+      const help = document.getElementById("credential-help");
+      const readyNode = document.getElementById("credential-ready");
+      if (!provider || !model || !catalog) return;
+      const lists = JSON.parse(catalog.textContent);
+      const names = lists[provider.value] || [];
+      const current = model.value;
+      model.replaceChildren();
+      names.forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        if (name === current) option.selected = true;
+        model.appendChild(option);
+      });
+      if (names.length && !names.includes(model.value)) model.value = names[0];
+      if (block) block.hidden = provider.value === "DSH";
+      const envs = {
+        DEEPSEEK: "DEEPSEEK_TOKEN",
+        OPENROUTER: "OPENROUTER_API_KEY",
+        CLAUDE: "ANTHROPIC_API_KEY",
+        KIMI: "MOONSHOT_API_KEY"
+      };
+      if (help) {
+        const env = envs[provider.value];
+        help.textContent = env
+          ? "Leave blank to keep the saved token. An empty stored value uses " + env + "."
+          : "";
+      }
+      if (readyNode && block) {
+        const ready = JSON.parse(readyNode.textContent);
+        const tag = block.querySelector(".tag");
+        if (tag) {
+          const set = !!ready[provider.value];
+          tag.textContent = set ? "SET" : "EMPTY";
+          tag.className = set ? "tag green" : "tag";
+        }
+      }
+    }
     settingsForm.addEventListener("change", (event) => {
       const target = event.target;
       if (!target || !target.name) return;
+      if (target.name === "ai_provider") syncAiProvider();
       if (target.type === "checkbox") {
         const tag = target.parentElement && target.parentElement.querySelector(".tag");
         if (tag) {
@@ -1161,6 +1461,104 @@ _CLIENT_JS = r"""
       event.preventDefault();
       saveSettings();
     });
+    const simFind = document.getElementById("sim-find");
+    const simMenu = settingsForm.querySelector(".sim-menu");
+    const simPicks = document.getElementById("sim-picks");
+    const simUniverseNode = document.getElementById("sim-universe");
+    if (simFind && simMenu && simPicks && simUniverseNode) {
+      let universe = [];
+      try { universe = JSON.parse(simUniverseNode.textContent || "[]"); } catch (err) { universe = []; }
+      function pickedSymbols() {
+        return Array.from(simPicks.querySelectorAll("input[name=sim_symbol]")).map((input) => input.value);
+      }
+      function paintEmpty() {
+        let note = simPicks.querySelector(".sim-empty");
+        if (pickedSymbols().length) {
+          if (note) note.remove();
+          return;
+        }
+        if (!note) {
+          note = document.createElement("p");
+          note.className = "sim-empty";
+          note.textContent = "None selected.";
+          simPicks.appendChild(note);
+        }
+      }
+      function closeMenu() {
+        simMenu.hidden = true;
+        simMenu.innerHTML = "";
+      }
+      function paintMenu() {
+        const query = simFind.value.trim().toUpperCase();
+        const taken = new Set(pickedSymbols());
+        const matches = universe.filter((item) => {
+          if (taken.has(item.symbol)) return false;
+          if (!query) return true;
+          return item.symbol.indexOf(query) !== -1 || (item.name || "").toUpperCase().indexOf(query) !== -1;
+        }).slice(0, 8);
+        simMenu.innerHTML = "";
+        if (!matches.length) {
+          simMenu.hidden = true;
+          return;
+        }
+        matches.forEach((item) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          const label = document.createElement("b");
+          label.textContent = item.symbol;
+          button.appendChild(label);
+          if (item.name) {
+            const name = document.createElement("span");
+            name.className = "name";
+            name.textContent = item.name;
+            button.appendChild(name);
+          }
+          button.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            addSymbol(item.symbol);
+          });
+          simMenu.appendChild(button);
+        });
+        simMenu.hidden = false;
+      }
+      function addSymbol(symbol) {
+        if (pickedSymbols().indexOf(symbol) !== -1) return;
+        const chip = document.createElement("span");
+        chip.className = "sim-pick";
+        chip.innerHTML = "<b></b><button class=\"sim-x\" type=\"button\"><svg viewBox=\"0 0 12 12\" aria-hidden=\"true\"><path d=\"M3 3l6 6M9 3L3 9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/></svg></button><input type=\"hidden\" name=\"sim_symbol\">";
+        chip.querySelector("b").textContent = symbol;
+        chip.querySelector("button").setAttribute("aria-label", "Remove " + symbol);
+        chip.querySelector("input").value = symbol;
+        const note = simPicks.querySelector(".sim-empty");
+        if (note) note.remove();
+        simPicks.appendChild(chip);
+        simFind.value = "";
+        closeMenu();
+        saveSettings();
+      }
+      simFind.addEventListener("input", paintMenu);
+      simFind.addEventListener("focus", paintMenu);
+      simFind.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeMenu();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const first = simMenu.querySelector("button");
+          if (first) first.dispatchEvent(new MouseEvent("mousedown"));
+        }
+      });
+      simPicks.addEventListener("click", (event) => {
+        const button = event.target.closest(".sim-x");
+        if (!button) return;
+        const chip = button.closest(".sim-pick");
+        if (chip) chip.remove();
+        paintEmpty();
+        closeMenu();
+        saveSettings();
+      });
+      document.addEventListener("click", (event) => {
+        if (!event.target.closest(".sim-find")) closeMenu();
+      });
+    }
   }
   const riskForm = document.getElementById("risk-form");
   if (riskForm) {
@@ -1234,6 +1632,21 @@ _CLIENT_JS = r"""
   });
   function post(url, body) {
     return fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }).then((res) => res.json());
+  }
+  function watchTask(id) {
+    const timer = setInterval(() => {
+      fetch("/api/tasks").then((res) => res.json()).then((body) => {
+        const task = (body.tasks || []).find((item) => item.id === id);
+        if (!task || task.status === "running") return;
+        clearInterval(timer);
+        if (task.status === "done") {
+          remember(task.title || "Done", task.detail || "", "ok");
+          location.reload();
+          return;
+        }
+        toast(task.title || "Failed", task.detail || "", "err");
+      }).catch(() => {});
+    }, 1000);
   }
   const opsLabels = {
     backup: ["Backing up…", "Backup now"],
@@ -1392,6 +1805,9 @@ _CLIENT_JS = r"""
         document.dispatchEvent(new Event("ath-feed"));
       });
   }
+  document.addEventListener("scroll", () => {
+    document.querySelectorAll(".help-pop").forEach((node) => node.remove());
+  }, true);
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".help-q") && !event.target.closest(".help-pop")) {
       document.querySelectorAll(".help-pop").forEach((node) => node.remove());
@@ -1405,11 +1821,187 @@ _CLIENT_JS = r"""
     const btn = event.target.closest("[data-cmd]");
     if (!btn) return;
     const cmd = btn.getAttribute("data-cmd");
+    if (cmd === "reveal-key") {
+      const root = btn.closest(".key-row") || btn.parentElement;
+      const node = root.querySelector("input, [data-secret]");
+      if (!node) return;
+      if (node.tagName === "INPUT") {
+        node.type = node.type === "password" ? "text" : "password";
+      } else {
+        const hidden = node.getAttribute("data-hidden") !== "0";
+        const secret = node.getAttribute("data-secret") || "";
+        node.textContent = hidden ? secret : (node.getAttribute("data-mask") || maskCenter(secret));
+        node.setAttribute("data-hidden", hidden ? "0" : "1");
+      }
+      return;
+    }
     if (cmd === "refresh-list") {
       const box = document.querySelector("[data-feed]");
       if (!box) return;
       btn.classList.add("busy");
       pullFeed(box, true).finally(() => btn.classList.remove("busy"));
+      return;
+    }
+    if (cmd === "simulate") {
+      const body = document.createElement("div");
+      body.innerHTML = '<div class="preset-row"></div><div class="sim-date"><div class="k">Start date</div><div class="sim-date-face"><span id="sim-label"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="1"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></div><input type="date" id="sim-start"></div>';
+      const presets = body.querySelector(".preset-row");
+      const start = body.querySelector("#sim-start");
+      const label = body.querySelector("#sim-label");
+      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      let months = "1";
+      const localDate = (date) => {
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return date.getFullYear() + "-" + month + "-" + day;
+      };
+      const paintDate = () => {
+        const parts = (start.value || "").split("-");
+        if (parts.length !== 3) {
+          label.textContent = "Choose a date";
+          return;
+        }
+        label.textContent = Number(parts[2]) + " " + monthNames[Number(parts[1]) - 1] + " " + parts[0];
+      };
+      const applyMonths = (count, choice) => {
+        months = String(count);
+        presets.querySelectorAll("button").forEach((node) => node.classList.remove("primary"));
+        choice.classList.add("primary");
+        const date = new Date();
+        date.setMonth(date.getMonth() - count);
+        start.value = localDate(date);
+        paintDate();
+      };
+      start.max = localDate(new Date());
+      start.addEventListener("change", paintDate);
+      start.addEventListener("input", paintDate);
+      ["1 month", "2 months", "3 months"].forEach((label, index) => {
+        const choice = document.createElement("button");
+        choice.className = "btn";
+        choice.type = "button";
+        choice.textContent = label;
+        choice.addEventListener("click", () => applyMonths(index + 1, choice));
+        presets.appendChild(choice);
+        if (index === 0) applyMonths(1, choice);
+      });
+      const go = document.createElement("button");
+      go.className = "btn primary";
+      go.type = "button";
+      go.textContent = "Start";
+      go.addEventListener("click", () => {
+        if (!start.value) {
+          toast("Start date", "Choose a date.", "err");
+          return;
+        }
+        go.disabled = true;
+        post("/api/tasks", "action=simulate&months=" + months + "&start=" + encodeURIComponent(start.value))
+          .then((result) => {
+            if (!result.ok) throw new Error(result.message || "Could not start.");
+            closeAll();
+            const task = result.task || {};
+            toast("Simulation", task.detail || "Downloading history", "ok");
+            if (task.id) watchTask(task.id);
+          })
+          .catch((err) => {
+            go.disabled = false;
+            toast("Simulation", err.message || "Could not start.", "err");
+          });
+      });
+      const cancel = document.createElement("button");
+      cancel.className = "btn ghost";
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", closeAll);
+      modal("Simulate", body, [cancel, go]);
+      return;
+    }
+    if (cmd === "sim-stop") {
+      post("/api/tasks", "action=sim-stop").then((result) => {
+        if (!result.ok) throw new Error(result.message || "Could not stop.");
+        remember("Simulation", result.message || "Stopped", "ok");
+        location.reload();
+      }).catch((err) => toast("Simulation", err.message || "Could not stop.", "err"));
+      return;
+    }
+    if (cmd === "sim-halt" || cmd === "sim-resume") {
+      const action = cmd === "sim-halt" ? "sim-halt" : "sim-resume";
+      post("/api/tasks", "action=" + action).then((result) => {
+        if (!result.ok) throw new Error(result.message || "Could not update the simulation.");
+        remember("Simulation", result.message || "Updated", "ok");
+        location.reload();
+      }).catch((err) => toast("Simulation", err.message || "Could not update the simulation.", "err"));
+      return;
+    }
+    if (cmd === "sim-reset") {
+      confirmBox(
+        "Reset simulation",
+        "This deletes the replay and its bars, and clears simulated drafts, orders, fills, positions, and audit rows. Real rows stay.",
+        () => {
+          post("/api/tasks", "action=sim-reset").then((result) => {
+            if (!result.ok) throw new Error(result.message || "Could not reset.");
+            remember("Simulation", result.message || "Cleared", "ok");
+            location.reload();
+          }).catch((err) => toast("Simulation", err.message || "Could not reset.", "err"));
+        },
+        "Reset"
+      );
+      return;
+    }
+    if (cmd === "liquidate") {
+      confirmBox("Liquidate All", "Delete simulated positions and send one limit close for each real position.", () => {
+        post("/api/tasks", "action=liquidate").then((result) => {
+          if (!result.ok) throw new Error(result.message || "Could not close.");
+          const task = result.task || {};
+          toast("Liquidate", task.detail || "Working", "ok");
+          if (task.id) watchTask(task.id);
+        }).catch((err) => toast("Liquidate", err.message || "Could not close.", "err"));
+      }, "Liquidate All");
+      return;
+    }
+    if (cmd === "flush") {
+      const body = document.createElement("div");
+      body.innerHTML = '<p>This wipes drafts, orders, fills, positions, and audit for this account. Settings and the watchlist stay.</p><label>Type I CONFIRM<input class="input" id="flush-phrase" autocomplete="off"></label>';
+      const phrase = body.querySelector("#flush-phrase");
+      const go = document.createElement("button");
+      go.className = "btn danger";
+      go.type = "button";
+      go.textContent = "Flush All";
+      const cancel = document.createElement("button");
+      cancel.className = "btn ghost";
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", closeAll);
+      go.addEventListener("click", () => {
+        if (flushTimer) return;
+        if (phrase.value !== "I CONFIRM") {
+          toast("Flush", "Type I CONFIRM.", "err");
+          return;
+        }
+        let left = 30;
+        phrase.disabled = true;
+        go.textContent = left + "s";
+        flushTimer = setInterval(() => {
+          left -= 1;
+          if (left > 0) {
+            go.textContent = left + "s";
+            return;
+          }
+          clearInterval(flushTimer);
+          flushTimer = null;
+          post("/api/tasks", "action=flush&phrase=" + encodeURIComponent("I CONFIRM"))
+            .then((result) => {
+              if (!result.ok) throw new Error(result.message || "Could not flush.");
+              closeAll();
+              remember("Flush", result.message || "Cleared", "ok");
+              location.reload();
+            })
+            .catch((err) => {
+              closeAll();
+              toast("Flush", err.message || "Could not flush.", "err");
+            });
+        }, 1000);
+      });
+      modal("Flush All", body, [cancel, go]);
       return;
     }
     if (cmd === "cycle-fold") {
@@ -1504,6 +2096,19 @@ _CLIENT_JS = r"""
       btn.setAttribute("aria-label", (closed ? "Expand " : "Collapse ") + card.querySelector("h2 span").textContent);
       return;
     }
+    function jsonBlock(title, value) {
+      const block = document.createElement("div");
+      block.className = "json-block";
+      const label = document.createElement("div");
+      label.className = "k";
+      label.textContent = title;
+      const pre = document.createElement("pre");
+      pre.className = "json";
+      pre.textContent = JSON.stringify(value || {}, null, 2);
+      block.appendChild(label);
+      block.appendChild(pre);
+      return block;
+    }
     if (cmd === "audit-row") {
       let row = {};
       try { row = JSON.parse(btn.getAttribute("data-json") || "{}"); } catch (err) { return; }
@@ -1514,7 +2119,8 @@ _CLIENT_JS = r"""
         [
           ["Time", row.time], ["Source", row.source], ["Symbol", row.symbol],
           ["Outcome", row.status], ["Summary", row.result], ["Phase", row.phase],
-          ["Intent", row.intent], ["Long", row.long], ["Flags", row.flags], ["Tags", row.tags]
+          ["Intent", row.intent], ["Long", row.long], ["Flags", row.flags], ["Tags", row.tags],
+          ["Book", row.simulated ? "Simulation" : ""]
         ].forEach((pair) => {
           if (!pair[1]) return;
           const k = document.createElement("span");
@@ -1553,8 +2159,10 @@ _CLIENT_JS = r"""
       [
         ["Time", row.time], ["Agent", row.agent], ["Symbol", row.symbol],
         ["Model", row.model], ["Provider", row.provider], ["Thinking", row.thinking],
-        ["Latency", row.latency], ["Est. tokens", row.tokens], ["Status", row.status]
+        ["Latency", row.latency], ["Est. tokens", row.tokens], ["Status", row.status],
+        ["Book", row.simulated ? "Simulation" : ""]
       ].forEach((pair) => {
+        if (!pair[1]) return;
         const k = document.createElement("span");
         k.textContent = pair[0];
         const v = document.createElement("div");
@@ -1562,30 +2170,35 @@ _CLIENT_JS = r"""
         meta.appendChild(k);
         meta.appendChild(v);
       });
-      const block = document.createElement("div");
-      block.className = "json-block";
-      block.innerHTML = '<div class="k">JSON response</div>';
-      const pre = document.createElement("pre");
-      pre.className = "json";
-      pre.textContent = JSON.stringify(row.json || {}, null, 2);
-      block.appendChild(pre);
       body.appendChild(meta);
-      body.appendChild(block);
+      body.appendChild(jsonBlock("JSON prompt", row.prompt || {}));
+      body.appendChild(jsonBlock("JSON response", row.json || {}));
       panel((row.agent || "Call") + " " + (row.symbol || ""), body, true);
       return;
     }
     if (cmd === "help-q") {
-      const card = btn.closest("label") ? btn.closest("label").parentElement : btn.closest(".card");
-      const open = card.querySelector(".help-pop");
-      if (open) {
+      const key = btn.getAttribute("aria-label") || "";
+      const open = document.querySelector(".help-pop");
+      if (open && open.dataset.for === key) {
         open.remove();
         return;
       }
       document.querySelectorAll(".help-pop").forEach((node) => node.remove());
       const pop = document.createElement("div");
       pop.className = "help-pop";
+      pop.dataset.for = key;
       pop.textContent = btn.getAttribute("data-help") || "";
-      card.appendChild(pop);
+      document.body.appendChild(pop);
+      const rect = btn.getBoundingClientRect();
+      const width = Math.min(280, window.innerWidth - 24);
+      let left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+      pop.style.left = left + "px";
+      pop.style.width = width + "px";
+      pop.style.top = (rect.bottom + 6) + "px";
+      const placed = pop.getBoundingClientRect();
+      if (placed.bottom > window.innerHeight - 8) {
+        pop.style.top = Math.max(8, rect.top - placed.height - 6) + "px";
+      }
       return;
     }
     if (cmd === "view-book") {
@@ -1956,6 +2569,25 @@ _CLIENT_JS = r"""
       const node = document.querySelector('[data-health="' + item.name + '"]');
       if (node) node.textContent = item.text;
     });
+    paintReplay(report);
+  }
+  function paintReplay(report) {
+    if (!report || !("replay" in report)) return;
+    const body = document.getElementById("healthBody");
+    if (!body) return;
+    let node = body.querySelector('[data-health="Replay"]');
+    if (!report.replay) {
+      if (node && node.parentElement) node.parentElement.remove();
+      return;
+    }
+    if (!node) {
+      const field = document.createElement("div");
+      field.className = "field";
+      field.innerHTML = '<div class="k">Replay</div><div class="v" data-health="Replay"></div>';
+      body.appendChild(field);
+      node = field.querySelector("[data-health]");
+    }
+    node.textContent = report.replay;
   }
   setInterval(() => {
     fetch("/api/health").then((res) => res.json()).then(paintHealth).catch(() => {});
@@ -1997,6 +2629,7 @@ _CLIENT_JS = r"""
         const node = document.querySelector('[data-health="' + item.name + '"]');
         if (node) node.textContent = item.text;
       });
+      paintReplay(health);
     }).catch(() => {});
   }
   function paintTasks(tasks) {
@@ -2229,7 +2862,8 @@ _CLIENT_JS = r"""
       audit.querySelectorAll("tbody tr.hit").forEach((row) => {
         let data = {};
         try { data = JSON.parse(row.getAttribute("data-json") || "{}"); } catch (err) {}
-        const hay = ((data.agent || "") + " " + (data.symbol || "") + " " + (data.result || "")).toLowerCase();
+        const book = data.simulated ? " simulation" : "";
+        const hay = ((data.agent || "") + " " + (data.symbol || "") + " " + (data.status || "") + " " + (data.model || "") + " " + (data.result || "") + book).toLowerCase();
         row.hidden = (agent !== "all" && data.agent !== agent) || (needle && !hay.includes(needle));
       });
     };
@@ -2330,6 +2964,276 @@ _CLIENT_JS = r"""
     document.addEventListener("ath-feed", pump);
     feed.addEventListener("scroll", pump, { passive: true });
   }
+  function simWindow(count, index) {
+    const span = 60;
+    const half = span / 2;
+    if (count <= span || index < half) return 0;
+    if (count - index - 1 < half) return Math.max(0, count - span);
+    return index - half;
+  }
+  function paintSimText(info) {
+    const status = document.getElementById("sim-status");
+    if (!status) return;
+    status.textContent = info.label || "None";
+    const day = document.getElementById("sim-day");
+    const span = document.getElementById("sim-window");
+    const step = document.getElementById("sim-step");
+    const left = document.getElementById("sim-left");
+    if (day) day.textContent = info.cursor_label || "Not started";
+    if (span) span.textContent = (info.start_label || "—") + " – " + (info.end_label || "—");
+    if (step) step.textContent = "Day " + info.day + " of " + info.total;
+    if (left) left.textContent = info.left + " cycles left";
+    const link = document.querySelector('.nav a[href="/simulation"]');
+    if (!link) return;
+    let badge = link.querySelector(".nav-badge");
+    const on = (info.status === "active" || info.status === "halted") && info.total > 0;
+    if (!on) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      link.appendChild(badge);
+    }
+    badge.className = info.status === "halted" ? "nav-badge warn" : "nav-badge";
+    badge.textContent = info.day + "/" + info.total;
+    badge.title = "Day " + info.day + " of " + info.total;
+  }
+  function simStep(span) {
+    const raw = span / 5;
+    if (!(raw > 0)) return 1;
+    const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / pow;
+    const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+    return nice * pow;
+  }
+  function simVol(value) {
+    const n = Number(value) || 0;
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + "B";
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + "M";
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+    return String(Math.round(n));
+  }
+  function simDay(iso) {
+    return iso.slice(8, 10) + "/" + iso.slice(5, 7);
+  }
+  function paintSimPlot(el, dates, bars, cursor, start) {
+    const width = Math.max(el.clientWidth, 320);
+    const height = Math.max(el.clientHeight, 280);
+    const slots = 60;
+    const padL = 8;
+    const padR = 58;
+    const priceTop = 26;
+    const volH = Math.max(64, Math.round(height * 0.16));
+    const dateH = 16;
+    const priceBottom = height - volH - dateH;
+    const priceH = Math.max(priceBottom - priceTop, 40);
+    const plotW = width - padL - padR;
+    const slot = plotW / slots;
+    const visible = [];
+    for (let i = 0; i < slots; i++) {
+      const at = start + i;
+      visible.push(at < dates.length ? bars[at] : null);
+    }
+    let low = Infinity;
+    let high = -Infinity;
+    let maxVol = 0;
+    visible.forEach((bar) => {
+      if (!bar) return;
+      low = Math.min(low, bar.l);
+      high = Math.max(high, bar.h);
+      maxVol = Math.max(maxVol, bar.v || 0);
+    });
+    let read = el.querySelector(".sim-read");
+    if (!read) {
+      read = document.createElement("div");
+      read.className = "sim-read";
+      el.appendChild(read);
+    }
+    if (!isFinite(low)) {
+      const old = el.querySelector("svg");
+      if (old) old.remove();
+      read.textContent = "";
+      return;
+    }
+    const mid = (high + low) / 2;
+    const pad = Math.max((high - low) * 0.1, mid * 0.01);
+    const top = high + pad;
+    const floor = Math.max(low - pad, 0);
+    const span = top - floor || 1;
+    const yOf = (price) => priceTop + (top - price) / span * priceH;
+    const volTop = priceBottom + dateH;
+    const volBase = height - 2;
+    const parts = [];
+    const step = simStep(top - floor);
+    for (let price = Math.ceil(floor / step) * step; price <= top + step * 0.01; price += step) {
+      const y = yOf(price);
+      if (y < priceTop - 1 || y > priceBottom + 1) continue;
+      parts.push('<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (padL + plotW) + '" y2="' + y.toFixed(1) + '" stroke="#243044" stroke-width="1"></line>');
+      parts.push('<text x="' + (width - padR + 6) + '" y="' + (y + 3).toFixed(1) + '" fill="#6b7684" font-size="10" font-family="ui-monospace, monospace">' + price.toFixed(2) + "</text>");
+    }
+    parts.push('<line x1="' + padL + '" y1="' + priceBottom + '" x2="' + (padL + plotW) + '" y2="' + priceBottom + '" stroke="#2a3340" stroke-width="1"></line>');
+    const bw = Math.max(slot * 0.62, 2);
+    visible.forEach((bar, i) => {
+      if (!bar) return;
+      const x = padL + (i + 0.5) * slot;
+      const date = dates[start + i];
+      const played = cursor && date <= cursor;
+      const color = !played ? "#7d8794" : (bar.c >= bar.o ? "#16c784" : "#ea3943");
+      const fade = played ? "" : ' opacity="0.45"';
+      const bodyTop = yOf(Math.max(bar.o, bar.c));
+      const bodyH = Math.max(yOf(Math.min(bar.o, bar.c)) - bodyTop, 1);
+      parts.push('<line x1="' + x.toFixed(1) + '" y1="' + yOf(bar.h).toFixed(1) + '" x2="' + x.toFixed(1) + '" y2="' + yOf(bar.l).toFixed(1) + '" stroke="' + color + '" stroke-width="1.2"' + fade + "></line>");
+      parts.push('<rect x="' + (x - bw / 2).toFixed(1) + '" y="' + bodyTop.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bodyH.toFixed(1) + '" fill="' + color + '"' + fade + "></rect>");
+      if (i % 2 === 0) {
+        parts.push('<text x="' + x.toFixed(1) + '" y="' + (priceBottom + 12) + '" fill="#6b7684" font-size="10" text-anchor="middle" font-family="ui-monospace, monospace">' + simDay(date) + "</text>");
+      }
+      const vh = maxVol > 0 ? ((bar.v || 0) / maxVol) * (volBase - volTop - 2) : 0;
+      parts.push('<rect x="' + (x - bw / 2).toFixed(1) + '" y="' + (volBase - vh).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(vh, 1).toFixed(1) + '" fill="' + color + '"' + fade + "></rect>");
+      if (cursor && date === cursor) {
+        parts.push('<line x1="' + x.toFixed(1) + '" y1="' + priceTop + '" x2="' + x.toFixed(1) + '" y2="' + volBase + '" stroke="#6b96f2" stroke-width="1"></line>');
+      }
+    });
+    const hover = Number(el.dataset.hover);
+    const hy = Number(el.dataset.hy);
+    if (visible[hover]) {
+      const x = padL + (hover + 0.5) * slot;
+      parts.push('<line x1="' + x.toFixed(1) + '" y1="' + priceTop + '" x2="' + x.toFixed(1) + '" y2="' + volBase + '" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"></line>');
+      if (hy >= priceTop && hy <= priceBottom) {
+        parts.push('<line x1="' + padL + '" y1="' + hy.toFixed(1) + '" x2="' + (padL + plotW) + '" y2="' + hy.toFixed(1) + '" stroke="#9aa6b2" stroke-width="1" stroke-dasharray="3 3"></line>');
+      }
+    }
+    const old = el.querySelector("svg");
+    if (old) old.remove();
+    el.insertAdjacentHTML("beforeend", '<svg viewBox="0 0 ' + width + " " + height + '" width="' + width + '" height="' + height + '">' + parts.join("") + "</svg>");
+    let shown = visible[hover] ? hover : -1;
+    if (shown < 0 && cursor) {
+      visible.forEach((bar, i) => {
+        if (bar && dates[start + i] === cursor) shown = i;
+      });
+    }
+    if (shown < 0) {
+      for (let i = visible.length - 1; i >= 0; i--) {
+        if (visible[i]) { shown = i; break; }
+      }
+    }
+    const bar = shown >= 0 ? visible[shown] : null;
+    if (!bar) {
+      read.textContent = "";
+      return;
+    }
+    const date = dates[start + shown];
+    const played = cursor && date <= cursor;
+    const tone = !played ? "mu" : (bar.c >= bar.o ? "up" : "dn");
+    read.innerHTML = '<span class="' + tone + '">' + simDay(date) + "</span>  O " + bar.o.toFixed(2) + "  H " + bar.h.toFixed(2) + "  L " + bar.l.toFixed(2) + "  C " + bar.c.toFixed(2) + "  Vol " + simVol(bar.v);
+  }
+  function bootSim() {
+    const node = document.getElementById("sim-data");
+    if (!node) return;
+    if (document.querySelector(".sim-idle")) {
+      setInterval(() => {
+        fetch("/api/simulation").then((res) => res.json()).then((next) => {
+          if (next.status === "downloading" || next.status === "active" || next.status === "halted") location.reload();
+        }).catch(() => {});
+      }, 5000);
+      return;
+    }
+    const data = JSON.parse(node.textContent);
+    paintSimText(data);
+    const dates = data.dates || [];
+    let pinned = true;
+    let origin = simWindow(dates.length, data.cursor ? dates.indexOf(data.cursor) : -1);
+    let space = false;
+    let drag = null;
+    function paint() {
+      const cursor = data.cursor || "";
+      const at = cursor ? dates.indexOf(cursor) : -1;
+      if (pinned) origin = simWindow(dates.length, at);
+      document.querySelectorAll(".sim-plot").forEach((el) => {
+        const symbol = el.getAttribute("data-symbol");
+        paintSimPlot(el, dates, (data.series || {})[symbol] || [], cursor, origin);
+      });
+    }
+    function endDrag() {
+      drag = null;
+      document.querySelectorAll(".sim-plot").forEach((el) => el.classList.remove("dragging"));
+    }
+    paint();
+    document.querySelectorAll(".sim-plot").forEach((el) => {
+      el.addEventListener("mousemove", (event) => {
+        if (space) return;
+        const rect = el.getBoundingClientRect();
+        const slotW = Math.max((rect.width - 66) / 60, 1);
+        const index = Math.floor((event.clientX - rect.left - 8) / slotW);
+        el.dataset.hover = String(index);
+        el.dataset.hy = String(event.clientY - rect.top);
+        paint();
+      });
+      el.addEventListener("mouseleave", () => {
+        delete el.dataset.hover;
+        delete el.dataset.hy;
+        paint();
+      });
+    });
+    window.addEventListener("resize", paint);
+    document.addEventListener("keydown", (event) => {
+      if (event.code !== "Space") return;
+      const tag = (event.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea") return;
+      event.preventDefault();
+      if (event.repeat) return;
+      space = true;
+      document.querySelectorAll(".sim-plot").forEach((el) => el.classList.add("space"));
+    });
+    document.addEventListener("keyup", (event) => {
+      if (event.code !== "Space") return;
+      space = false;
+      document.querySelectorAll(".sim-plot").forEach((el) => el.classList.remove("space"));
+    });
+    window.addEventListener("blur", () => {
+      space = false;
+      endDrag();
+      document.querySelectorAll(".sim-plot").forEach((el) => el.classList.remove("space"));
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!space || !event.target.closest(".sim-plot")) return;
+      event.preventDefault();
+      drag = { x: event.clientX, start: origin };
+      document.querySelectorAll(".sim-plot").forEach((el) => el.classList.add("dragging"));
+    });
+    document.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      const plot = document.querySelector(".sim-plot");
+      const width = plot ? plot.clientWidth : 1;
+      const slot = Math.max((width - 64) / 60, 1);
+      const shift = Math.round((drag.x - event.clientX) / slot);
+      const max = Math.max(0, dates.length - 60);
+      origin = Math.min(max, Math.max(0, drag.start + shift));
+      pinned = false;
+      paint();
+    });
+    document.addEventListener("pointerup", endDrag);
+    document.addEventListener("pointercancel", endDrag);
+    setInterval(() => {
+      fetch("/api/simulation").then((res) => res.json()).then((next) => {
+        if (next.run_id !== data.run_id || next.bars !== data.bars || next.status !== data.status) {
+          location.reload();
+          return;
+        }
+        if (next.cursor !== data.cursor) {
+          data.cursor = next.cursor;
+          data.day = next.day;
+          data.left = next.left;
+          data.total = next.total;
+          data.cursor_label = next.cursor_label;
+          pinned = true;
+          paint();
+          paintSimText(next);
+        }
+      }).catch(() => {});
+    }, 5000);
+  }
+  bootSim();
   pollTasks();
   setInterval(pollTasks, 1000);
   pollCycle();

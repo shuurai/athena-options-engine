@@ -6,6 +6,8 @@ import csv
 import io
 import json
 import os
+import re
+import secrets
 import threading
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -21,7 +23,17 @@ from .cockpit import DASH, sleeve
 from .money import CURRENCIES, cash_rows, convert, ledger, marked, report_currency, show
 from .control import _amend_fields, _amend_from_form
 from athena_settings import load_active
-from athena_settings.model import AccountEntry, AccountSwitches, RiskLimits, SettingsPayload, TacticFlags
+from athena_settings.model import (
+    CREDENTIAL_ENV,
+    CREDENTIAL_FIELD,
+    MODELS,
+    AccountEntry,
+    AccountSwitches,
+    RiskLimits,
+    SettingsPayload,
+    TacticFlags,
+    normalize_provider,
+)
 from athena_settings.prompts import AGENT_ORDER, AGENT_ROLES, resolved_agents
 from athena_settings.repository import save_settings
 from athena_settings.resolve import (
@@ -81,6 +93,7 @@ PRIVILEGES = {
 def build(conn, path: str, query: dict) -> dict | None:
     account = _account()
     pages = {
+        "/simulation": _simulation,
         "/drafts": _drafts,
         "/phase": _phase,
         "/strategy": _strategy,
@@ -93,6 +106,7 @@ def build(conn, path: str, query: dict) -> dict | None:
         "/accounts": _accounts,
         "/risk": _risk,
         "/settings": _settings,
+        "/skill": _skill,
     }
     page = pages.get(path)
     if page is None:
@@ -126,7 +140,8 @@ def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
         pending = conn.execute(
             """
             SELECT id, symbol, tactic, phase, reason, created_at, contracts,
-                   expiry, put_strike, call_strike, put_limit, call_limit, limit_price, multiplier
+                   expiry, put_strike, call_strike, put_limit, call_limit, limit_price, multiplier,
+                   simulated
             FROM drafts
             WHERE account_id = %s AND status = 'pending'
             ORDER BY created_at
@@ -185,11 +200,13 @@ def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
 
 
 def _draft_card(conn, account: str, row, hot: bool) -> str:
-    draft_id, symbol, tactic, phase, reason, created, contracts, expiry, put_strike, call_strike, put_limit, call_limit, limit_price, multiplier = row
+    draft_id, symbol, tactic, phase, reason, created, contracts, expiry, put_strike, call_strike, put_limit, call_limit, limit_price, multiplier, simulated = row
     settings = load_active(conn, account)
     left = _minutes_left(created, settings.notify.draft_ttl_minutes)
     tags = _symbol_tags(conn, account, symbol)
     badges = _tactic_tag(tactic)
+    if simulated:
+        badges += '<span class="tag amber">SIM</span>'
     if tactic in {"ROLL", "CLOSE"}:
         badges += '<span class="tag green">MGMT</span>'
     badges += _phase_badge(phase)
@@ -726,16 +743,16 @@ def _position_rows(conn, account: str) -> list[dict]:
         SELECT DISTINCT ON (symbol, sec_type, expiry, contract_right, strike)
                symbol, quantity, avg_price, sec_type, expiry, contract_right, strike,
                market_price, currency, multiplier, market_value, unrealized_pnl,
-               realized_pnl, snapshot_at
+               realized_pnl, snapshot_at, simulated
         FROM positions
-        WHERE account_id = %s
+        WHERE account_id = %s AND (simulated = false OR %s)
         ORDER BY symbol, sec_type, expiry, contract_right, strike, snapshot_at DESC, id DESC
         """,
-        (account,),
+        (account, _replaying(conn, account)),
     ).fetchall()
     today = datetime.now(HKT).date()
     rows = []
-    for symbol, quantity, avg_price, sec_type, expiry, right, strike, mark, currency, multiplier, value, unrealized, realized, snapshot_at in found:
+    for symbol, quantity, avg_price, sec_type, expiry, right, strike, mark, currency, multiplier, value, unrealized, realized, snapshot_at, simulated in found:
         qty = Decimal(quantity)
         if qty == 0:
             continue
@@ -765,6 +782,7 @@ def _position_rows(conn, account: str) -> list[dict]:
             "multiplier": "" if sec_type != "OPT" else _plain_number(mult),
             "realized": "" if realized is None else f"{Decimal(realized):,.2f}",
             "synced": "" if snapshot_at is None else snapshot_at.astimezone(HKT).strftime("%Y-%m-%d %H:%M"),
+            "simulated": bool(simulated),
         })
     rows.sort(key=lambda row: (row["symbol"], 0 if row["sec_type"] == "STK" else 1, row["expiry"], row["strike"]))
     return rows
@@ -845,6 +863,7 @@ def _position_tr(row: dict) -> str:
     return (
         f'<tr data-cmd="position-row" {attrs} style="cursor:pointer">'
         f'<td><b>{escape(row["symbol"])}</b>'
+        + (' <span class="tag amber">SIM</span>' if row.get("simulated") else "")
         + (f'<div class="sym-name">{escape(row["currency"])}</div>' if row["currency"] else "")
         + "</td>"
         f'<td><span class="tag {type_tag}">{escape(kind)}</span></td>'
@@ -1067,62 +1086,67 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         '<form id="settings-form" method="post" action="/settings" class="fill">'
         '<button type="submit" hidden></button>'
         '<div class="settings-cols"><div class="settings-col">'
+        f"{_book_card()}"
         '<div class="card"><h2>Global currency</h2>'
-        '<p class="card-lead">NLV, premium, and account cash use this. Prices and strikes stay in the ticker currency.</p>'
-        f'<label>Currency<select class="input" name="global_currency">{_currency_options(current.global_currency)}</select></label>'
+        f"{_field('Currency', 'Display currency for net liquidation, premium, and cash. Ticker prices stay in the market currency.', f'<select class=\"input\" name=\"global_currency\">{_currency_options(current.global_currency)}</select>')}"
         "</div>"
         '<div class="card"><h2>IB</h2><div class="scroll-y">'
-        f"{_row('Gateway host', _tag(_env('IB_GATEWAY_HOST', '127.0.0.1')))}"
-        f"{_row('Gateway port', _tag(_env('IB_GATEWAY_PORT', '4002')))}"
-        f"{_row('Client id', _tag(_env('IB_CLIENT_ID', '1')))}"
-        f"{_row('Trading mode', _tag(mode, 'amber'))}"
+        f"{_row('Gateway host', _tag(_env('IB_GATEWAY_HOST', '127.0.0.1')), 'Address of the logged-in Gateway. It stays in the environment.')}"
+        f"{_row('Gateway port', _tag(_env('IB_GATEWAY_PORT', '4002')), '4002 is paper. 4001 is live. Athena does not switch the port.')}"
+        f"{_row('Client id', _tag(_env('IB_CLIENT_ID', '1')), 'The Athena session uses this id. Probes and history use another id.')}"
+        f"{_row('Trading mode', _tag(mode, 'amber'), 'Paper or live, from the environment. The other book stays stored and hidden.')}"
         f"{_limit('Cycle minutes', 'cycle_minutes', current.cycle_minutes, 'Minutes between cycles. A wait already running keeps its clock. The next wait uses this.')}"
         '<p class="slot-note">Host, port, and client id stay on the logged-in Gateway. Slot windows are on the cockpit.</p></div></div>'
         '<div class="card fill"><h2>AI</h2><div class="scroll-y">'
-        '<p class="card-lead">Scores news sentiment. Does not place orders. DIRECT calls DeepSeek. DSH runs the binary.</p>'
-        f'<label>Provider<select class="input" name="ai_provider">{_ai_provider_options(current.ai.provider)}</select></label>'
-        f'<label>Model<input class="input" name="model" required value="{escape(scoring_model(current))}"></label>'
-        f"{_row('DSH binary', _tag('SET', 'green') if dsh_ready else _tag('EMPTY'))}"
-        f"{_row('DeepSeek token', _tag('SET', 'green') if deepseek_ready else _tag('EMPTY'))}"
-        '<label>DeepSeek token<input class="input" name="deepseek_token" type="password" autocomplete="off" placeholder="Leave blank to keep"></label>'
-        '<button class="btn" type="submit" name="action" value="clear-deepseek" data-explicit>Clear token</button>'
-        "</div></div></div>"
+        '<p class="card-lead">Scores news sentiment. Does not place orders.</p>'
+        f"{_field('Provider', 'DSH runs the local binary. The others call that provider.', f'<select class=\"input\" name=\"ai_provider\">{_ai_provider_options(current.ai.provider)}</select>')}"
+        f"{_field('Model', 'The model sent with each AI call. The list follows the provider.', f'<select class=\"input\" name=\"model\">{_model_options(current)}</select>')}"
+        f'<script type="application/json" id="ai-models">{json.dumps({key: list(names) for key, names in MODELS.items()})}</script>'
+        f"{_row('DSH binary', _tag('SET', 'green') if dsh_ready else _tag('EMPTY'), 'Whether DSH_BIN is set on this machine.')}"
+        f'<div id="credential-block"{"" if current.ai.provider != "DSH" else " hidden"}>'
+        f"{_row('Credential token', _tag('SET', 'green') if deepseek_ready else _tag('EMPTY'), 'Whether this provider has a stored token or an inherited environment value.')}"
+        f"{_field('Credential token', 'Leave blank to keep the saved token.', '<input class=\"input\" name=\"credential_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
+        f'<p class="slot-note" id="credential-help">{escape(_credential_help(current.ai.provider))}</p>'
+        '<button class="btn" type="submit" name="action" value="clear-credential" data-explicit>Clear token</button>'
+        f'<script type="application/json" id="credential-ready">{json.dumps(_credential_ready(current))}</script>'
+        "</div></div></div></div>"
         '<div class="settings-col">'
+        f"{_sim_card(conn, current)}"
         '<div class="card"><h2>Market data</h2><div class="scroll-y">'
         '<p class="card-lead">iTick for live quotes. IB is used for history and orders inside Athena slots.</p>'
-        f'<label>iTick URL<input class="input" name="itick_url" required value="{escape(current.itick.base_url)}"></label>'
-        f"{_row('API token', _tag('SET', 'green') if key_ready else _tag('EMPTY'))}"
-        '<label>Token<input class="input" name="itick_key" type="password" autocomplete="off" placeholder="Leave blank to keep"></label>'
+        f"{_field('iTick URL', 'Base URL for live quotes.', f'<input class=\"input\" name=\"itick_url\" required value=\"{escape(current.itick.base_url)}\">')}"
+        f"{_row('API token', _tag('SET', 'green') if key_ready else _tag('EMPTY'), 'Whether an iTick token is stored.')}"
+        f"{_field('Token', 'Leave blank to keep the current iTick token. Clear token removes it.', '<input class=\"input\" name=\"itick_key\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
         '<button class="btn" type="submit" name="action" value="clear-itick" data-explicit>Clear token</button>'
-        f"{_row('Watchlist', _tag(str(len(current.watchlist))))}</div></div>"
+        f"{_row('Watchlist', _tag(str(len(current.watchlist))), 'How many symbols the universe is watching.')}</div></div>"
         '<div class="card fill"><h2>Notify</h2><div class="scroll-y">'
-        f"{_limit('Draft TTL minutes', 'draft_ttl', current.notify.draft_ttl_minutes)}"
+        f"{_limit('Draft TTL minutes', 'draft_ttl', current.notify.draft_ttl_minutes, 'How long a pending draft and its control link stay open.')}"
         f"{_telegram_block(current, token_ready)}"
-        f"{_row('Bot token', _tag('SET', 'green') if token_ready else _tag('EMPTY'))}"
-        '<label>Bot username<input class="input" name="bot_username" value="'
-        f'{escape(bot_username(current))}" placeholder="athena_hk_bot"></label>'
-        '<label>Bot token<input class="input" name="bot_token" type="password" autocomplete="off" placeholder="Leave blank to keep"></label>'
+        f"{_row('Bot token', _tag('SET', 'green') if token_ready else _tag('EMPTY'), 'Whether a Telegram bot token is stored or inherited.')}"
+        f"{_field('Bot username', 'Telegram bot name without the @. Used to build the link.', f'<input class=\"input\" name=\"bot_username\" value=\"{escape(bot_username(current))}\" placeholder=\"athena_hk_bot\">')}"
+        f"{_field('Bot token', 'Leave blank to keep the current bot token. Clear bot token removes it.', '<input class=\"input\" name=\"bot_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
         '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div></div>'
         '<div class="settings-col">'
+        f"{_developer_card(current)}"
         '<div class="card"><h2>News</h2><div class="scroll-y">'
-        f"{_switch('Yahoo', 'yahoo', news.yahoo)}"
-        f"{_switch('Finviz', 'finviz', news.finviz)}"
-        f"{_switch('Fed calendar', 'fed_calendar', news.fed_calendar)}"
-        f"{_switch('MSN', 'msn', news.msn)}"
-        f"{_switch('Manual forward', 'manual_forward', news.manual_forward)}"
-        f"{_limit('Poll seconds', 'poll_seconds', news.poll_seconds)}"
-        f"{_limit('Wash count', 'wash_min_negative', news.wash_min_negative)}"
-        f"{_limit('Wash window days', 'wash_window_days', news.wash_window_days)}</div></div>"
+        f"{_switch('Yahoo', 'yahoo', news.yahoo, 'Pull Yahoo headlines for the watchlist.')}"
+        f"{_switch('Finviz', 'finviz', news.finviz, 'Pull Finviz headlines for the watchlist.')}"
+        f"{_switch('Fed calendar', 'fed_calendar', news.fed_calendar, 'Watch the Fed calendar for nearby events.')}"
+        f"{_switch('MSN', 'msn', news.msn, 'Pull MSN headlines. Off unless you turn it on.')}"
+        f"{_switch('Manual forward', 'manual_forward', news.manual_forward, 'Accept a page you paste in.')}"
+        f"{_limit('Poll seconds', 'poll_seconds', news.poll_seconds, 'How often the news sources are checked.')}"
+        f"{_limit('Wash count', 'wash_min_negative', news.wash_min_negative, 'How many negative headlines count as a wash.')}"
+        f"{_limit('Wash window days', 'wash_window_days', news.wash_window_days, 'Those headlines must fall inside this many days.')}</div></div>"
         '<div class="card fill"><h2>Strategy</h2><div class="scroll-y">'
         '<p class="card-lead">NFR tactic shape. Size and halt limits are not here.</p>'
         '<div class="form-grid">'
-        f"{_limit('IVR high', 'ivr_high', strategy.ivr_high)}"
-        f"{_limit('Strangle distance %', 'strangle_otm_pct', strategy.strangle_otm_pct)}"
-        f"{_limit('DTE min', 'dte_min', strategy.dte_min)}"
-        f"{_limit('DTE target', 'dte_target', strategy.dte_target)}"
-        f"{_limit('DTE max', 'dte_max', strategy.dte_max)}"
-        f"{_limit('Profit take %', 'profit_take_pct', strategy.profit_take_pct)}"
-        f"{_limit('Roll DTE', 'roll_dte', strategy.roll_dte)}"
+        f"{_limit('IVR high', 'ivr_high', strategy.ivr_high, 'IV rank at or above this is tagged high.')}"
+        f"{_limit('Strangle distance %', 'strangle_otm_pct', strategy.strangle_otm_pct, 'How far out of the money a short strangle is placed.')}"
+        f"{_limit('DTE min', 'dte_min', strategy.dte_min, 'Shortest expiry the chain menu will offer.')}"
+        f"{_limit('DTE target', 'dte_target', strategy.dte_target, 'Expiry the chain menu prefers.')}"
+        f"{_limit('DTE max', 'dte_max', strategy.dte_max, 'Longest expiry the chain menu will offer.')}"
+        f"{_limit('Profit take %', 'profit_take_pct', strategy.profit_take_pct, 'Close a short when this percent of the credit is captured.')}"
+        f"{_limit('Roll DTE', 'roll_dte', strategy.roll_dte, 'Roll when days to expiry are at or below this.')}"
         "</div></div></div></div></div>"
         "</form>"
     )
@@ -1302,15 +1326,23 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     if action == "unlink":
         payload.notify = payload.notify.model_copy(update={"telegram_user_ids": ""})
         return _save_live(conn, account, payload, actor, "unlinked telegram")
-    if action == "clear-deepseek":
-        payload.ai = payload.ai.model_copy(update={"deepseek_token": ""})
-        return _save_live(conn, account, payload, actor, "cleared deepseek token")
+    if action in {"clear-deepseek", "clear-credential"}:
+        field = CREDENTIAL_FIELD.get(normalize_provider((form.get("ai_provider") or [payload.ai.provider])[0]))
+        if field:
+            payload.ai = payload.ai.model_copy(update={field: ""})
+        return _save_live(conn, account, payload, actor, "cleared credential token")
     if action == "clear-itick":
         payload.itick = payload.itick.model_copy(update={"api_key": ""})
         return _save_live(conn, account, payload, actor, "cleared itick token")
     if action == "clear-bot":
         payload.notify = payload.notify.model_copy(update={"bot_token": ""})
         return _save_live(conn, account, payload, actor, "cleared bot token")
+    if action == "generate-api-key":
+        payload.developer = payload.developer.model_copy(update={"api_key": secrets.token_urlsafe(24)})
+        return _save_live(conn, account, payload, actor, "generated api key")
+    if action == "clear-api-key":
+        payload.developer = payload.developer.model_copy(update={"api_key": ""})
+        return _save_live(conn, account, payload, actor, "cleared api key")
     ranges = {
         "wash_min_negative": (1, 20),
         "wash_window_days": (1, 14),
@@ -1354,14 +1386,17 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     posted_bot = (form.get("bot_token") or [""])[0].strip()
     if posted_bot:
         notify_update["bot_token"] = posted_bot
-    provider = (form.get("ai_provider") or ["DSH"])[0].strip().upper()
-    if provider not in {"DSH", "DIRECT"}:
-        return _settings(conn, account, {}, "Choose DSH or DIRECT.") | {"status": 400}
+    provider = normalize_provider((form.get("ai_provider") or ["DSH"])[0])
+    if provider not in MODELS:
+        return _settings(conn, account, {}, "Choose a provider from the list.") | {"status": 400}
+    if model not in MODELS[provider]:
+        model = MODELS[provider][0]
     payload.itick = payload.itick.model_copy(update=itick_update)
     ai_update = {"model": model, "provider": provider}
-    posted_deepseek = (form.get("deepseek_token") or [""])[0].strip()
-    if posted_deepseek:
-        ai_update["deepseek_token"] = posted_deepseek
+    posted_token = (form.get("credential_token") or form.get("deepseek_token") or [""])[0].strip()
+    field = CREDENTIAL_FIELD.get(provider)
+    if posted_token and field:
+        ai_update[field] = posted_token
     payload.ai = payload.ai.model_copy(update=ai_update)
     payload.news = payload.news.model_copy(
         update={
@@ -1390,6 +1425,11 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     payload.global_currency = posted_currency
     payload.cycle_minutes = numbers["cycle_minutes"]
     payload.privilege = current.privilege
+    payload.sim_symbols = sim_targets(
+        form.get("sim_symbol", []),
+        current.watchlist,
+        current.sim_symbols,
+    )
     return _save_live(conn, account, payload, actor, "saved settings")
 
 
@@ -1438,6 +1478,11 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
             f'<textarea class="prompt" name="system">{escape(prompt.system)}</textarea></label>'
             '<label class="prompt">Execution prompt'
             f'<textarea class="prompt" name="execution">{escape(prompt.execution)}</textarea></label>'
+            '<div class="toggle-row"><div>Reasoning</div><div class="toggle-end">'
+            '<input type="hidden" name="reasoning" value="0">'
+            f'<input type="checkbox" name="reasoning" value="1"{" checked" if prompt.reasoning else ""}>'
+            "</div></div>"
+            '<p class="slot-note">When on, the provider uses its medium reasoning setting.</p>'
             '<button class="btn primary" type="submit">Save prompts</button>'
             "</div></form>"
         )
@@ -1465,7 +1510,7 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         "Strategy",
         "Edit the system prompt and the execution prompt for each agent. Income or Accumulate, and Long, are set per symbol on Universe.",
         body,
-        [("info", "7 AGENTS"), ("", "THINKING ON")],
+        [("info", "7 AGENTS")],
     )
 
 
@@ -1482,7 +1527,9 @@ def _post_strategy(conn, account: str, form: dict, actor: str) -> dict:
     current = load_active(conn, account)
     payload = SettingsPayload.model_validate(current.model_dump())
     prompts = resolved_agents(payload)
-    prompts[name] = prompts[name].model_copy(update={"system": system, "execution": execution})
+    prompts[name] = prompts[name].model_copy(
+        update={"system": system, "execution": execution, "reasoning": _checked(form, "reasoning")}
+    )
     payload.agents = prompts
     try:
         save_settings(conn, account, payload, f"console:{actor}", f"strategy {name}")
@@ -1498,7 +1545,7 @@ def _audit(conn, account: str, query: dict) -> dict:
     rows, more, nxt = _audit_page(conn, account, offset)
     rendered = "".join(_audit_tr(row) for row in rows)
     if not rendered and offset == 0:
-        rendered = '<tr><td colspan="6">No audit rows yet.</td></tr>'
+        rendered = '<tr><td colspan="9">No audit rows yet.</td></tr>'
     if _wants_rows(query):
         return _fragment(rendered, more, nxt)
     calls, decisions, failed = _audit_counts(conn, account)
@@ -1514,7 +1561,8 @@ def _audit(conn, account: str, query: dict) -> dict:
         chips.append(("warn", f"{failed} FAILED"))
     table = (
         '<table class="data" id="audit-table"><thead><tr>'
-        "<th>Time</th><th>Agent</th><th>Symbol</th><th>Latency</th><th>Tokens</th><th>Result</th>"
+        "<th>Time</th><th>Agent</th><th>Symbol</th><th>Status</th><th>Thinking</th>"
+        "<th>Model</th><th>Latency</th><th>Tokens</th><th>Result</th>"
         f"</tr></thead><tbody>{rendered}</tbody></table>"
     )
     body = (
@@ -1535,20 +1583,88 @@ def _audit(conn, account: str, query: dict) -> dict:
 
 def _audit_tr(row: dict) -> str:
     blob = escape(json.dumps(row), quote=True)
-    if row.get("kind") == "decision":
-        tone = "err" if row["status"] == "dropped" else ""
-    else:
-        tone = "err" if row["status"] != "ok" else ("think" if row["thinking"] == "on" else "")
+    model = escape(row["model"]) if row.get("model") else DASH
     return (
         f'<tr class="hit" data-cmd="audit-row" data-json="{blob}">'
         f'<td class="mono">{escape(row["time"])}</td>'
-        f'<td>{escape(row["agent"])}</td>'
-        f'<td><b>{escape(row["symbol"])}</b></td>'
+        f'<td>{_audit_agent_tag(row["agent"])}</td>'
+        f'<td><b>{escape(row["symbol"])}</b>'
+        + (' <span class="tag amber">SIM</span>' if row.get("simulated") else "")
+        + "</td>"
+        f'<td>{_audit_status_tag(row["status"])}</td>'
+        f'<td>{_audit_thinking_tag(row.get("thinking") or "", row.get("thinking_text") or "")}</td>'
+        f'<td class="mono">{model}</td>'
         f'<td class="mono">{escape(row["latency"])}</td>'
         f'<td class="mono">{escape(row["tokens"])}</td>'
-        f'<td class="{tone}">{escape(row["result"])}</td>'
+        f'<td>{_audit_result_tag(row["result"], row["status"])}</td>'
         "</tr>"
     )
+
+
+def _audit_shown(text: str) -> str:
+    """Quiet is a status word. The table and the stored line use the same spelling."""
+    if (text or "").strip().lower() == "quiet":
+        return "QUIET"
+    return text or ""
+
+
+_AUDIT_AGENTS = {
+    "Location": "blue",
+    "News": "teal",
+    "CSP": "green",
+    "Call": "amber",
+    "Purchase": "violet",
+    "Strangle": "red",
+    "Consolidator": "blue",
+    "Universe": "teal",
+    "Decision": "amber",
+}
+_AUDIT_STATUS = {
+    "ok": ("OK", "green"),
+    "error": ("ERROR", "red"),
+    "quiet": ("QUIET", ""),
+    "drafted": ("DRAFTED", "green"),
+    "dropped": ("DROPPED", "red"),
+}
+
+
+def _audit_agent_tag(agent: str) -> str:
+    return _tag(agent, _AUDIT_AGENTS.get(agent, ""))
+
+
+def _audit_status_label(status: str) -> str:
+    label, _kind = _AUDIT_STATUS.get((status or "").lower(), ((status or "").upper(), ""))
+    return label
+
+
+def _audit_status_tag(status: str) -> str:
+    label, kind = _AUDIT_STATUS.get((status or "").lower(), ((status or "").upper(), ""))
+    return _tag(label, kind)
+
+
+def _audit_thinking_tag(thinking: str, note: str) -> str:
+    if thinking == "on" or note:
+        return _tag("ON", "violet")
+    if thinking == "off":
+        return _tag("OFF")
+    return DASH
+
+
+def _audit_result_tag(result: str, status: str) -> str:
+    shown = _audit_shown(result)
+    state = (status or "").lower()
+    key = shown.strip().lower()
+    if key == "quiet":
+        kind = ""
+    elif state in {"error", "dropped"}:
+        kind = "red"
+    elif "wash" in key:
+        kind = "amber"
+    elif state in {"ok", "drafted"}:
+        kind = "green"
+    else:
+        kind = "blue"
+    return _tag(shown, kind)
 
 
 def _audit_counts(conn, account: str) -> tuple[int, int, int]:
@@ -1580,7 +1696,7 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
     stored = conn.execute(
         """
         SELECT called_at, agent, symbol, model, provider, thinking,
-               latency_ms, tokens, status, result, response
+               latency_ms, tokens, status, result, response, request, simulated
         FROM ai_calls
         WHERE account_id = %s
         ORDER BY called_at DESC
@@ -1588,7 +1704,7 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
         """,
         (account, limit),
     ).fetchall()
-    for called, agent, symbol, model, provider, thinking, latency_ms, tokens, status, result, response in stored:
+    for called, agent, symbol, model, provider, thinking, latency_ms, tokens, status, result, response, request, simulated in stored:
         when = called.astimezone(HKT) if called.tzinfo else called
         payload = response if isinstance(response, dict) else {}
         rows.append({
@@ -1602,13 +1718,15 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
             "thinking": thinking,
             "latency": f"{(latency_ms or 0) / 1000:.1f}s",
             "tokens": f"{tokens or 0:,}",
-            "status": status,
-            "result": result,
+            "status": _audit_status_label(status),
+            "result": _audit_shown(result),
             "json": payload,
+            "prompt": request if isinstance(request, dict) else {},
+            "simulated": bool(simulated),
         })
     decisions = conn.execute(
         """
-        SELECT logged_at, symbol, source, outcome, summary, steps
+        SELECT logged_at, symbol, source, outcome, summary, steps, simulated
         FROM decision_trails
         WHERE account_id = %s
         ORDER BY logged_at DESC
@@ -1616,7 +1734,7 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
         """,
         (account, limit),
     ).fetchall()
-    for logged, symbol, source, outcome, summary, steps in decisions:
+    for logged, symbol, source, outcome, summary, steps, simulated in decisions:
         when = logged.astimezone(HKT) if logged.tzinfo else logged
         payload = steps if isinstance(steps, dict) else {}
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
@@ -1627,10 +1745,12 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
             "agent": "Decision",
             "symbol": symbol,
             "source": source,
+            "model": "",
+            "thinking": "on" if (payload.get("thinking") or "") else "",
             "latency": "—",
             "tokens": "—",
-            "status": outcome,
-            "result": summary,
+            "status": _audit_status_label(outcome),
+            "result": _audit_shown(summary),
             "phase": payload.get("phase") or "",
             "intent": payload.get("intent") or "",
             "long": payload.get("long") or "",
@@ -1638,6 +1758,7 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
             "tags": payload.get("tags") or "",
             "thinking_text": payload.get("thinking") or "",
             "steps": items,
+            "simulated": bool(simulated),
         })
     rows.sort(key=lambda item: item["_at"], reverse=True)
     for item in rows:
@@ -1979,7 +2100,111 @@ def _news_rows(conn, offset: int) -> tuple[str, bool, int]:
     return inner, more, offset + len(shown)
 
 
+_SIM_IDLE = """<svg viewBox="0 0 96 96" fill="none" aria-hidden="true">
+<path d="M58 18a26 26 0 1 0 6 51 18 18 0 1 1-6-51z" fill="#8eb0f5"/>
+<circle cx="24" cy="28" r="1.5" fill="#6b96f2"/>
+<circle cx="18" cy="40" r="1" fill="#6b96f2" opacity=".65"/>
+<path d="M72 26h8M76 22v8" stroke="#e7eefc" stroke-width="1.4" stroke-linecap="round"/>
+<path d="M28 58h9l-9 8h9" stroke="#9aa6b2" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M42 48h7l-7 6h7" stroke="#b7c2d0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M54 40h5l-5 5h5" stroke="#d5dee8" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M16 80h64" stroke="#2a3340" stroke-width="1.5" stroke-linecap="round"/>
+<path d="M46 72v16M41 76h10M41 84h10" stroke="#7d8794" stroke-width="1.4" stroke-linecap="round"/>
+</svg>"""
+
+
+def _simulation(conn, account: str, _query: dict) -> dict:
+    from athena_orchestrator.sim import progress
+
+    if trading_mode() != "paper":
+        body = '<div class="card"><p>Simulation runs in paper mode.</p></div>'
+        return _html("Simulation", "", body, [])
+    info = progress(conn, account, series=True)
+    playing = info["status"] in {"downloading", "active", "halted"}
+    day = escape(info["cursor_label"]) if info["cursor_label"] else DASH
+    window = f'{escape(info["start_label"])} – {escape(info["end_label"])}' if info["start_label"] else DASH
+    step = f'Day {info["day"]} of {info["total"]}' if info["run_id"] else DASH
+    left = f'{info["left"]} cycles left' if info["run_id"] else DASH
+    status = escape(info["label"]) if info["run_id"] else "Idle"
+    note = f'<p class="sim-note" id="sim-note">{escape(info["note"])}</p>' if info["note"] else ""
+    buttons = []
+    if info["status"] in {"downloading", "active"}:
+        buttons.append('<button class="btn danger" type="button" data-cmd="sim-halt">Halt</button>')
+    elif info["status"] == "halted":
+        disabled = "" if info["resume"] else " disabled"
+        buttons.append(f'<button class="btn primary" type="button" data-cmd="sim-resume"{disabled}>Resume</button>')
+    else:
+        buttons.append('<button class="btn primary" type="button" data-cmd="simulate">Simulate</button>')
+    if info["run_id"]:
+        buttons.append('<button class="btn danger" type="button" data-cmd="sim-reset">Reset</button>')
+    if playing:
+        rows = []
+        for symbol in info["symbols"]:
+            rows.append(
+                '<div class="card sim-row">'
+                f'<h2><span>{escape(symbol)}</span><span class="sim-window"><span class="tag">Daily</span><span class="tag">60 days</span></span></h2>'
+                f'<div class="chart-box sim-box"><div class="sim-plot" data-symbol="{escape(symbol, quote=True)}"></div></div>'
+                "</div>"
+            )
+        stage = f'<div class="sim-charts scroll-y">{"".join(rows)}</div>'
+        lead = "Played days are green or red. Days not played yet are grey."
+    else:
+        stage = f'<div class="sim-idle">{_SIM_IDLE}<p>Nothing is playing.</p></div>'
+        lead = "Start a paper replay from here."
+    blob = json.dumps(info).replace("<", "\\u003c")
+    body = (
+        '<div class="sim-page">'
+        '<div class="card sim-progress"><h2>Progress</h2>'
+        '<div class="sim-facts">'
+        f'<div><div class="k">Status</div><div class="v" id="sim-status">{status}</div></div>'
+        f'<div><div class="k">Day</div><div class="v" id="sim-day">{day}</div></div>'
+        f'<div><div class="k">Window</div><div class="v" id="sim-window">{window}</div></div>'
+        f'<div><div class="k">Progress</div><div class="v" id="sim-step">{step}</div></div>'
+        f'<div><div class="k">Left</div><div class="v" id="sim-left">{left}</div></div>'
+        "</div>"
+        f"{note}"
+        f'<div class="row-actions">{"".join(buttons)}</div></div>'
+        f"{stage}"
+        "</div>"
+        f'<script type="application/json" id="sim-data">{blob}</script>'
+    )
+    return _html("Simulation", lead, body, [])
+
+
+def _replaying(conn, account: str) -> bool:
+    if not account:
+        return False
+    found = conn.execute(
+        """
+        SELECT 1 FROM sim_runs
+        WHERE account_id = %s AND status IN ('downloading', 'active', 'halted')
+        LIMIT 1
+        """,
+        (account,),
+    ).fetchone()
+    return found is not None
+
+
 def _closes(conn, symbol: str) -> tuple[str, str, str]:
+    from athena_strategy.simbars import in_replay, load_daily
+
+    if in_replay(conn, symbol):
+        daily = load_daily(conn, symbol)
+        if not daily:
+            return DASH, DASH, ""
+        last = Decimal(daily[-1][2])
+        previous = None
+        for row in reversed(daily[:-1]):
+            close = Decimal(row[2])
+            if close == 0 or close == last:
+                continue
+            previous = close
+            break
+        if previous is None or previous == 0:
+            return f"{last:.2f}", DASH, ""
+        change = (last - previous) / previous * Decimal(100)
+        tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
+        return f"{last:.2f}", f"{change:+.2f}%", tone
     rows = conn.execute(
         """
         SELECT ts, close, source FROM market_bars WHERE symbol = %s
@@ -2163,9 +2388,9 @@ def _history_rows(conn, account: str) -> list[dict]:
             ORDER BY id DESC
             LIMIT 1
         ) a ON true
-        WHERE f.account_id = %s
+        WHERE f.account_id = %s AND (f.simulated = false OR %s)
         """,
-        (account,),
+        (account, _replaying(conn, account)),
     ).fetchall()
     filled_drafts = set()
     rows = []
@@ -2399,7 +2624,7 @@ def _account_card(name: str, mode: str, book_id: str, active: bool, facts: dict,
         f'<div class="acct{" active" if active else ""}"><div class="a-head"><div>'
         f'<div class="a-name">{escape(name)}</div>'
         f'<div class="a-id">{escape(book_id)}'
-        f'<button class="copy-btn" type="button" data-copy="{escape(book_id, quote=True)}" title="Copy">{_COPY_SVG}</button>'
+        f'<button class="copy-plain" type="button" data-copy="{escape(book_id, quote=True)}" title="Copy">{_COPY_SVG}</button>'
         f"</div></div>{badge}</div>"
         '<div class="a-stats">'
         f'<div class="a-stat"><div class="l">NLV</div><div class="v">{escape(facts["nlv"])}</div></div>'
@@ -2549,7 +2774,7 @@ def _book_panel(book_id: str, mode: str, facts: dict, panel_id: str, conn) -> st
     return (
         f'<template id="{panel_id}">'
         f'<div class="field"><div class="k">Account</div><div class="v mono">{escape(book_id)}'
-        f'<button class="copy-btn" type="button" data-copy="{escape(book_id, quote=True)}" title="Copy">{_COPY_SVG}</button></div></div>'
+        f'<button class="copy-plain" type="button" data-copy="{escape(book_id, quote=True)}" title="Copy">{_COPY_SVG}</button></div></div>'
         f'<div class="field"><div class="k">NLV</div><div class="v mono">{escape(facts["nlv"])}</div></div>'
         f"{_cash_fields(facts)}"
         f'<div class="field"><div class="k">Positions</div><div class="v">{facts["positions"]}</div></div>'
@@ -2573,11 +2798,43 @@ def _cash_fields(facts: dict) -> str:
 
 
 def _ai_provider_options(current: str) -> str:
-    options = []
-    for name in ("DSH", "DIRECT"):
-        selected = " selected" if name == current else ""
-        options.append(f'<option value="{name}"{selected}>{name}</option>')
-    return "".join(options)
+    labels = (
+        ("DSH", "DSH"),
+        ("DEEPSEEK", "DEEPSEEK"),
+        ("OPENROUTER", "OPENROUTER"),
+        ("CLAUDE", "CLAUDE"),
+        ("KIMI", "KIMI API"),
+    )
+    return "".join(
+        f'<option value="{name}"{" selected" if name == current else ""}>{label}</option>'
+        for name, label in labels
+    )
+
+
+def _model_options(current) -> str:
+    names = MODELS.get(current.ai.provider, MODELS["DSH"])
+    selected = scoring_model(current)
+    if selected not in names:
+        selected = names[0]
+    return "".join(
+        f'<option value="{escape(name, quote=True)}"{" selected" if name == selected else ""}>{escape(name)}</option>'
+        for name in names
+    )
+
+
+def _credential_help(provider: str) -> str:
+    env = CREDENTIAL_ENV.get(provider, "")
+    if not env:
+        return ""
+    return f"Leave blank to keep the saved token. An empty stored value uses {env}."
+
+
+def _credential_ready(current) -> dict[str, bool]:
+    ready = {}
+    for provider in CREDENTIAL_FIELD:
+        probe = current.model_copy(update={"ai": current.ai.model_copy(update={"provider": provider})})
+        ready[provider] = bool(deepseek_token(probe))
+    return ready
 
 
 def _currency_options(current: str) -> str:
@@ -2624,16 +2881,26 @@ def _version_rows(conn, account: str) -> str:
     )
 
 
-def _limit(label: str, name: str, value: int, note: str = "") -> str:
-    help_btn = ""
-    if note:
-        help_btn = (
-            '<button class="help-q" type="button" data-cmd="help-q" '
-            f'aria-label="About {escape(label, quote=True)}" '
-            f'data-help="{escape(note, quote=True)}">?</button>'
-        )
+def _q_btn(label: str, note: str) -> str:
     return (
-        f"<div><label>{escape(label)}{help_btn}</label>"
+        '<button class="help-q" type="button" data-cmd="help-q" '
+        f'aria-label="About {escape(label, quote=True)}" '
+        f'data-help="{escape(note, quote=True)}">?</button>'
+    )
+
+
+def _q(label: str, note: str) -> str:
+    return f"{escape(label)}{_q_btn(label, note)}"
+
+
+def _field(label: str, note: str, control: str) -> str:
+    return f'<div class="settings-field"><label>{_q(label, note)}</label>{control}</div>'
+
+
+def _limit(label: str, name: str, value: int, note: str = "") -> str:
+    title = _q(label, note) if note else escape(label)
+    return (
+        f'<div class="settings-field"><label>{title}</label>'
         f'<input class="input" name="{name}" type="number" min="0" step="1" required value="{value}">'
         "</div>"
     )
@@ -2644,19 +2911,293 @@ def _secret(name: str) -> str:
 
 
 def _tag(text: str, kind: str = "") -> str:
-    classes = "tag green" if kind == "green" else "tag amber" if kind == "amber" else "tag"
+    classes = "tag"
+    if kind in {"green", "amber", "blue", "teal", "red", "violet"}:
+        classes = f"tag {kind}"
     return f'<span class="{classes}">{escape(text)}</span>'
 
 
-def _row(label: str, value: str) -> str:
-    return f'<div class="toggle-row"><div>{escape(label)}</div>{value}</div>'
+def _row(label: str, value: str, note: str = "") -> str:
+    title = _q(label, note) if note else escape(label)
+    return f'<div class="toggle-row"><div>{title}</div>{value}</div>'
 
 
-def _switch(label: str, name: str, on: bool) -> str:
+_EYE_SVG = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/>'
+    '<circle cx="12" cy="12" r="3"/></svg>'
+)
+
+
+def _developer_card(current) -> str:
+    key = (current.developer.api_key or "").strip()
+    if key:
+        shown = (
+            '<div class="key-row">'
+            f'<input class="input" name="developer_api_key" type="password" readonly autocomplete="off" value="{escape(key, quote=True)}">'
+            f'<button class="key-plain" type="button" data-cmd="reveal-key" aria-label="Reveal key">{_EYE_SVG}</button>'
+            f'<button class="key-plain" type="button" data-copy="{escape(key, quote=True)}" title="Copy">{_COPY_SVG}</button>'
+            "</div>"
+            '<button class="btn" type="submit" name="action" value="generate-api-key" data-explicit>Regenerate key</button>'
+            '<button class="btn ghost" type="submit" name="action" value="clear-api-key" data-explicit>Clear key</button>'
+        )
+    else:
+        shown = '<p class="slot-note">No key yet.</p>'
+    button = "" if key else '<button class="btn" type="submit" name="action" value="generate-api-key" data-explicit>Generate key</button>'
+    return (
+        '<div class="card"><h2>Developer</h2><div class="scroll-y">'
+        '<p class="card-lead">A key lets another app on this machine read prices. It does not place orders. '
+        '<a class="more" href="/skill">How to call it</a></p>'
+        f"{_field('API key', 'Secret for the local price API. Reveal shows it. Copy puts it on the clipboard.', shown)}"
+        f"{button}"
+        "</div></div>"
+    )
+
+
+def _mask_center(value: str) -> str:
+    count = len(value)
+    if count < 2:
+        return value
+    hidden = count // 2
+    front = (count - hidden) // 2
+    back = count - hidden - front
+    return value[:front] + ("•" * hidden) + value[-back:]
+
+
+def _skill(conn, account: str, query: dict, note: str = "") -> dict:
+    key = ""
+    if account:
+        try:
+            key = (load_active(conn, account).developer.api_key or "").strip()
+        except RuntimeError:
+            key = ""
+    if key:
+        secret = (
+            '<div class="key-row">'
+            f'<span class="mono" data-secret="{escape(key, quote=True)}" data-mask="{escape(_mask_center(key), quote=True)}" data-hidden="1">{escape(_mask_center(key))}</span>'
+            f'<button class="key-plain" type="button" data-cmd="reveal-key" aria-label="Reveal key">{_EYE_SVG}</button>'
+            f'<button class="key-plain" type="button" data-copy="{escape(key, quote=True)}" title="Copy">{_COPY_SVG}</button>'
+            "</div>"
+        )
+    else:
+        secret = '<p>No key yet. Generate one on <a href="/settings">Settings</a>.</p>'
+    body = (
+        '<div class="card fill"><h2>Developer API</h2><div class="scroll-y skill-doc">'
+        "<p>This page is the contract for another program, such as fanit-cli, running on this machine. "
+        "The console is local. Send the Developer key. A call returns a task id. Poll that id until it is done or failed. "
+        "These calls read IB. They do not place orders.</p>"
+        f"<h3>Key</h3>{secret}"
+        "<h3>Base</h3><p class=\"mono\">http://127.0.0.1:8788</p>"
+        "<h3>Auth</h3><p>Header <span class=\"mono\">Authorization: Bearer &lt;key&gt;</span> "
+        "or <span class=\"mono\">X-Api-Key: &lt;key&gt;</span>. A missing or wrong key returns status failed.</p>"
+        + _skill_rest()
+        + "</div></div>"
+    )
+    chips = [("ok", "KEY SET")] if key else [("warn", "NO KEY")]
+    return _html("Skill", "How another app reads prices from Athena.", body, chips)
+
+
+_JSON_TOKEN = re.compile(
+    r'"(?:\\.|[^"\\])*"'
+    r"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+    r"|\b(?:true|false|null)\b"
+    r"|[{}\[\],:]"
+)
+
+
+def _paint_json(text: str) -> str:
+    try:
+        json.loads(text)
+    except json.JSONDecodeError:
+        return escape(text)
+    parts = []
+    pos = 0
+    for match in _JSON_TOKEN.finditer(text):
+        parts.append(escape(text[pos : match.start()]))
+        token = match.group()
+        pos = match.end()
+        if token.startswith('"'):
+            kind = "jk" if text[pos:].lstrip().startswith(":") else "js"
+        elif token in "{}[],:":
+            kind = "jp"
+        elif token in {"true", "false", "null"}:
+            kind = "jb"
+        else:
+            kind = "jn"
+        parts.append(f'<span class="{kind}">{escape(token)}</span>')
+    parts.append(escape(text[pos:]))
+    return "".join(parts)
+
+
+def _skill_call(method: str, path: str) -> str:
+    kind = "amber" if method == "POST" else "green"
+    return f'<div class="skill-call">{_tag(method, kind)}<span class="mono">http://127.0.0.1:8788{path}</span></div>'
+
+
+def _skill_rest() -> str:
+    posts = [
+        (
+            "Bars",
+            "/api/v1/bars",
+            "Stock and ETF candles for a window. A string is a US stock or ETF. A numeric symbol such as 700 is a Hong Kong stock. bar and duration are optional.",
+            """{
+  "symbols": ["NVDA", "IGV", "700"],
+  "bar": "1 day",
+  "duration": "30 D"
+}""",
+        ),
+        (
+            "Day",
+            "/api/v1/day",
+            "One session for the same symbols as Bars. day is required, YYYY-MM-DD. A missing session is failed on that symbol.",
+            """{
+  "symbols": ["NVDA"],
+  "day": "2026-10-09"
+}""",
+        ),
+        (
+            "Option",
+            "/api/v1/option",
+            "Option candles. Each symbol is an object with expiry YYYYMMDD, strike, and right C or P. US history is the CBOE print. A 1 day request is folded from hourly prints.",
+            """{
+  "symbols": [{
+    "symbol": "NVDA",
+    "expiry": "20261120",
+    "strike": 180,
+    "right": "P"
+  }],
+  "bar": "1 day",
+  "duration": "5 D"
+}""",
+        ),
+        (
+            "Company",
+            "/api/v1/company",
+            "Name, exchange, currency, and market cap when Athena has it. Same symbol strings as Bars.",
+            """{
+  "symbols": ["NVDA", "700"]
+}""",
+        ),
+    ]
+    parts = ["<p>Each call has its own URL. A POST returns a task id. Poll that id until it is done or failed.</p>"]
+    for title, path, note, sample in posts:
+        parts.append(
+            f"<h3>{escape(title)}</h3>"
+            f"{_skill_call('POST', path)}"
+            f"<p>{escape(note)}</p>"
+            f"<pre class=\"json\">{_paint_json(sample)}</pre>"
+        )
+    parts.append(
+        "<h3>Task</h3>"
+        + _skill_call("GET", "/api/v1/tasks/{task_id}")
+        + "<p>Every POST above answers with this at once. It is not the prices.</p>"
+        + f"<pre class=\"json\">{_paint_json('''{\n  \"ok\": true,\n  \"task_id\": \"ab12cd34ef56\",\n  \"status\": \"running\"\n}''')}</pre>"
+        + "<p>Poll the same URL. Bars, Day, and Option put latest and bars on each symbol. latest is the close of the newest bar.</p>"
+        + f"<pre class=\"json\">{_paint_json('''{\n  \"ok\": true,\n  \"task_id\": \"ab12cd34ef56\",\n  \"status\": \"done\",\n  \"result\": {\n    \"symbols\": [{\n      \"symbol\": \"NVDA\",\n      \"sec_type\": \"STK\",\n      \"status\": \"done\",\n      \"latest\": 181.0,\n      \"bars\": [{\"date\": \"2026-10-09\", \"time\": \"2026-10-09\", \"open\": 180.1, \"high\": 182.4, \"low\": 179.2, \"close\": 181.0, \"volume\": 1000}],\n      \"error\": \"\"\n    }]\n  },\n  \"error\": \"\"\n}''')}</pre>"
+        + "<p>Company uses the same GET. The symbol object looks like this instead.</p>"
+        + f"<pre class=\"json\">{_paint_json('''{\n  \"symbol\": \"NVDA\",\n  \"sec_type\": \"STK\",\n  \"status\": \"done\",\n  \"name\": \"NVIDIA Corp\",\n  \"market_cap\": 5530000000000,\n  \"exchange\": \"SMART\",\n  \"primary_exchange\": \"NASDAQ\",\n  \"currency\": \"USD\",\n  \"error\": \"\"\n}''')}</pre>"
+        + "<h3>Rules</h3><ul>"
+        "<li>bar is 1 min, 5 mins, 15 mins, 30 mins, 1 hour, or 1 day. duration is an IB span such as 30 D or 1 Y.</li>"
+        "<li>Up to 20 symbols. Gateway down makes the whole task failed.</li>"
+        "<li>A symbol IB cannot find is status failed inside a done task, with error set.</li>"
+        "</ul>"
+        "<h3>Try</h3><pre class=\"json\">"
+        + escape(
+            "curl -s -X POST http://127.0.0.1:8788/api/v1/bars \\\n"
+            "  -H 'Authorization: Bearer <key>' \\\n"
+            "  -H 'Content-Type: application/json' \\\n"
+            "  -d '{\"symbols\":[\"NVDA\"],\"bar\":\"1 day\",\"duration\":\"5 D\"}'\n\n"
+            "curl -s -X POST http://127.0.0.1:8788/api/v1/day \\\n"
+            "  -H 'Authorization: Bearer <key>' \\\n"
+            "  -H 'Content-Type: application/json' \\\n"
+            "  -d '{\"symbols\":[\"NVDA\"],\"day\":\"2026-10-09\"}'\n\n"
+            "curl -s http://127.0.0.1:8788/api/v1/tasks/<task_id> \\\n"
+            "  -H 'Authorization: Bearer <key>'"
+        )
+        + "</pre>"
+    )
+    return "".join(parts)
+
+
+def _book_card() -> str:
+    return (
+        '<div class="card danger"><h2><span>Book'
+        + _q_btn("Book", "Liquidate deletes simulated positions and sends one limit close for each real position. Flush wipes this account after you type I CONFIRM and wait out the countdown.")
+        + "</span></h2>"
+        '<div class="row-actions">'
+        '<button class="btn danger" type="button" data-cmd="liquidate">Liquidate All</button>'
+        '<button class="btn danger" type="button" data-cmd="flush">Flush All</button>'
+        "</div></div>"
+    )
+
+
+_SIM_SYMBOL = re.compile(r"^[A-Z0-9.]{1,16}$")
+
+
+def sim_targets(posted: list[str], watchlist: list[str], kept: list[str]) -> list[str]:
+    """Replay names from the form. A new name must already be in the universe."""
+    allowed = {item.strip().upper() for item in watchlist if item.strip()}
+    allowed.update(item.strip().upper() for item in kept if item.strip())
+    picked: list[str] = []
+    for raw in posted:
+        symbol = raw.strip().upper()
+        if not symbol or symbol in picked or symbol not in allowed or _SIM_SYMBOL.fullmatch(symbol) is None:
+            continue
+        picked.append(symbol)
+    return picked
+
+
+def _sim_card(conn, current) -> str:
+    watchlist = [item.strip().upper() for item in current.watchlist if item.strip()]
+    names = _symbol_names(conn, watchlist)
+    universe = json.dumps(
+        [{"symbol": symbol, "name": names.get(symbol, "")} for symbol in watchlist],
+        ensure_ascii=True,
+    )
+    picks = []
+    for symbol in current.sim_symbols:
+        text = symbol.strip().upper()
+        if not text:
+            continue
+        picks.append(
+            f'<span class="sim-pick"><b>{escape(text)}</b>'
+            f'<button class="sim-x" type="button" aria-label="Remove {escape(text, quote=True)}">'
+            '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>'
+            "</button>"
+            f'<input type="hidden" name="sim_symbol" value="{escape(text, quote=True)}"></span>'
+        )
+    empty = "" if picks else '<p class="sim-empty">None selected.</p>'
+    return (
+        '<div class="card"><h2><span>Simulation'
+        + _q_btn(
+            "Simulation",
+            "These names start as the replay defaults. Find a symbol from the universe to add it. The delete icon removes it.",
+        )
+        + "</span></h2>"
+        '<div class="sim-find">'
+        '<input class="input" id="sim-find" type="search" placeholder="Find a universe symbol" autocomplete="off" spellcheck="false">'
+        '<div class="sim-menu" hidden></div></div>'
+        f'<div class="sim-picks" id="sim-picks">{"".join(picks)}{empty}</div>'
+        f'<script type="application/json" id="sim-universe">{universe}</script></div>'
+    )
+
+
+def _symbol_names(conn, symbols: list[str]) -> dict[str, str]:
+    if not symbols:
+        return {}
+    rows = conn.execute(
+        "SELECT symbol, name FROM symbol_facts WHERE symbol = ANY(%s)",
+        (symbols,),
+    ).fetchall()
+    return {row[0]: row[1] or "" for row in rows}
+
+
+def _switch(label: str, name: str, on: bool, note: str = "") -> str:
     checked = " checked" if on else ""
     badge = _tag("ON", "green") if on else _tag("OFF")
+    title = _q(label, note) if note else escape(label)
     return (
-        f'<div class="toggle-row"><div>{escape(label)}</div><div class="toggle-end">'
+        f'<div class="toggle-row"><div>{title}</div><div class="toggle-end">'
         f'<input type="hidden" name="{name}" value="0">'
         f'<input type="checkbox" name="{name}" value="1"{checked}>'
         f"{badge}</div></div>"
@@ -2677,9 +3218,9 @@ def _telegram_block(current, token_ready: bool) -> str:
         bot = f"@{name}" if name else "bot name not set"
         poll = _tag("ON", "green") if token_ready and live else _tag("OFF")
         return (
-            f"{_row('Bot', _tag(bot))}"
-            f"{_row('Linked id', _tag(', '.join(users)))}"
-            f"{_row('Polling', poll)}"
+            f"{_row('Bot', _tag(bot), 'Telegram bot that receives drafts and fill notices.')}"
+            f"{_row('Linked id', _tag(', '.join(users)), 'Telegram user ids allowed to approve.')}"
+            f"{_row('Polling', poll, 'Whether the bot is waiting for replies.')}"
             '<button class="btn" type="submit" name="action" value="unlink" data-explicit>Unlink</button>'
         )
     link = ""
@@ -2690,7 +3231,7 @@ def _telegram_block(current, token_ready: bool) -> str:
             link = f'<p class="slot-note"><a href="{escape(href)}">{escape(href)}</a></p>'
         else:
             link = '<p class="slot-note">Set the bot username, then use Link again.</p>'
-    return f"{_row('Telegram', _tag('NOT LINKED'))}" + '<button class="btn" type="submit" name="action" value="link" data-explicit>Link</button>' + link
+    return f"{_row('Telegram', _tag('NOT LINKED'), 'No Telegram user is linked yet. Link sends a one-time code.')}" + '<button class="btn" type="submit" name="action" value="link" data-explicit>Link</button>' + link
 
 
 def _save_live(conn, account: str, payload, actor: str, note: str) -> dict:

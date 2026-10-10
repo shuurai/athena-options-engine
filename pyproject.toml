@@ -37,5 +37,10 @@ members = [
     "packages/strategy-nfr",
 ]
 
+[dependency-groups]
+dev = [
+    "coverage>=7.16.2",
+]
+
 [tool.uv]
 package = false

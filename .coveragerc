@@ -1,0 +1,26 @@
+[run]
+relative_files = True
+
+[report]
+fail_under = 75
+show_missing = True
+skip_empty = True
+include =
+    apps/exec-ib/src/athena_exec/gate.py
+    apps/exec-ib/src/athena_exec/options.py
+    apps/exec-ib/src/athena_exec/slots.py
+    apps/exec-ib/src/athena_exec/accounts.py
+    packages/risk/src/athena_risk/__init__.py
+    apps/orchestrator/src/athena_orchestrator/money.py
+    apps/orchestrator/src/athena_orchestrator/runtime.py
+    apps/orchestrator/src/athena_orchestrator/developer.py
+    apps/orchestrator/src/athena_orchestrator/sim.py
+    packages/strategy-nfr/src/athena_strategy/price.py
+    packages/strategy-nfr/src/athena_strategy/iv.py
+    packages/strategy-nfr/src/athena_strategy/phases.py
+    packages/strategy-nfr/src/athena_strategy/manage.py
+    packages/strategy-nfr/src/athena_strategy/agents.py
+    packages/strategy-nfr/src/athena_strategy/classifiers.py
+    packages/strategy-nfr/src/athena_strategy/pool.py
+    packages/settings/src/athena_settings/model.py
+    packages/settings/src/athena_settings/resolve.py

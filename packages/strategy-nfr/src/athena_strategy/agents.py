@@ -79,7 +79,7 @@ def _run_symbol(conn, settings: SettingsPayload, account_id: str, symbol: str) -
         if name == "Consolidator":
             context["proposals"] = _proposal_block(answers)
         prompt = prompts[name]
-        thinking = name == "Consolidator"
+        thinking = bool(prompt.reasoning)
         result = chat(
             prompt.system,
             fill_prompt(prompt.execution, context),
@@ -97,7 +97,7 @@ def _run_symbol(conn, settings: SettingsPayload, account_id: str, symbol: str) -
             symbol,
             model,
             provider,
-            "on" if thinking and provider == "DIRECT" else "off",
+            "on" if thinking and provider != "DSH" else "off",
             result,
             payload,
         )
@@ -117,7 +117,7 @@ def _drafts(conn, settings, account_id, symbol, flags: TacticFlags, answers: dic
     items = choice.get("drafts") or []
     if not isinstance(items, list) or not items:
         trail["items"] = [_step("", "dropped", "no drafts")]
-        write_decision(conn, account_id, symbol, "consolidator", "quiet", "Quiet", trail)
+        write_decision(conn, account_id, symbol, "consolidator", "quiet", "QUIET", trail)
         return []
     steps = []
     for item in items:
@@ -225,12 +225,13 @@ def _propose_one(conn, settings, account_id, symbol, phase, tactic, limit, reaso
 
 def write_decision(conn, account_id: str, symbol: str, source: str, outcome: str, summary: str, steps: dict) -> None:
     """One decision row. steps holds the context and the ordered reasons."""
+    name = symbol.upper() if symbol else "—"
     conn.execute(
         """
-        INSERT INTO decision_trails (account_id, symbol, source, outcome, summary, steps)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO decision_trails (account_id, symbol, source, outcome, summary, steps, simulated)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (account_id, symbol.upper() if symbol else "—", source, outcome, summary, Jsonb(steps)),
+        (account_id, name, source, outcome, summary, Jsonb(steps), _simulated(conn, name)),
     )
     conn.commit()
 
@@ -274,7 +275,7 @@ def _trail_outcome(steps: list[dict]) -> tuple[str, str]:
         outcome = "dropped"
     summary = ", ".join(
         f"{step.get('tactic') or 'draft'} {step.get('outcome')}" for step in steps
-    ) or "Quiet"
+    ) or "QUIET"
     return outcome, summary
 
 
@@ -283,21 +284,33 @@ def record_call(conn, account_id, agent, symbol, model, provider, thinking, resu
     _record(conn, account_id, agent, symbol, model, provider, thinking, result, payload)
 
 
+def _simulated(conn, symbol: str) -> bool:
+    """True while this symbol is inside a paper replay. Live calls stay untagged."""
+    if not symbol or symbol == "—":
+        return False
+    from athena_strategy.simbars import in_replay
+
+    return in_replay(conn, symbol)
+
+
 def _record(conn, account_id, agent, symbol, model, provider, thinking, result, payload) -> None:
     status = "error" if result["error"] else "ok"
+    name = symbol.upper()
     conn.execute(
         """
         INSERT INTO ai_calls (
             account_id, agent, symbol, model, provider, thinking,
-            latency_ms, tokens, status, result, response
+            latency_ms, tokens, status, result, response, request, simulated
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            account_id, agent, symbol.upper(), model, provider, thinking,
+            account_id, agent, name, model, provider, thinking,
             result["latency_ms"], result["tokens"], status,
             _result_line(agent, payload, result["error"]),
             Jsonb(payload or {"error": result["error"] or "empty"}),
+            Jsonb(result["request"]) if isinstance(result.get("request"), dict) else None,
+            _simulated(conn, name),
         ),
     )
     conn.commit()
@@ -308,29 +321,29 @@ def _result_line(agent: str, payload: dict, error: str) -> str:
         return error
     if agent == "Location":
         tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
-        return ", ".join(str(tag) for tag in tags) or "Quiet"
+        return ", ".join(str(tag) for tag in tags) or "QUIET"
     if agent == "News":
         if payload.get("news_wash"):
             return "News wash"
-        return str(payload.get("event_type") or "Quiet")
+        return str(payload.get("event_type") or "QUIET")
     if agent in {"CSP", "Call"}:
         if payload.get("quiet") is not False:
-            return "Quiet"
+            return "QUIET"
         return f"{payload.get('strike')} limit {payload.get('limit')}"
     if agent == "Purchase":
         if payload.get("quiet") is not False:
-            return "Quiet"
+            return "QUIET"
         return f"Buy {payload.get('limit')}"
     if agent == "Strangle":
         if payload.get("quiet") is not False:
-            return "Quiet"
+            return "QUIET"
         return f"Put {payload.get('put_strike')} call {payload.get('call_strike')}"
     if agent == "Universe":
         codes = str(payload.get("classifiers") or "")
-        return codes.replace(",", ", ") or "Quiet"
+        return codes.replace(",", ", ") or "QUIET"
     drafts = payload.get("drafts") if isinstance(payload.get("drafts"), list) else []
     if not drafts:
-        return "Quiet"
+        return "QUIET"
     return ", ".join(
         f"{item.get('id') or item.get('tactic')}" for item in drafts if isinstance(item, dict)
     )
@@ -344,9 +357,45 @@ def _tag_set(context: dict[str, str], answers: dict[str, dict]) -> list[str]:
         if text and text not in tags:
             tags.append(text)
     news = answers.get("News") or {}
-    if news.get("news_wash") and "NEWS_WASH" not in tags:
-        tags.append("NEWS_WASH")
+    if not news.get("error"):
+        tags = [tag for tag in tags if tag != "NEWS_WASH"]
+        if news.get("news_wash") and "NEWS_WASH" not in tags:
+            tags.append("NEWS_WASH")
+    tags = [tag for tag in tags if tag != "PULLBACK"]
+    if _pullback(context, tags):
+        tags.append("PULLBACK")
     return tags
+
+
+def _pullback(context: dict[str, str], tags: list[str]) -> bool:
+    """A mega-cap dip in the bottom 35% of a rising 63-session channel."""
+    if "CHANNEL_RISING" not in tags:
+        return False
+    codes = {part.strip() for part in (context.get("classifiers") or "").split(",") if part.strip()}
+    if not codes & {"MAG7", "MEGA_CAP"}:
+        return False
+    last = _decimal(context.get("last"))
+    high = _decimal(context.get("high_63"))
+    low = _decimal(context.get("low_63"))
+    if last is None or high is None or low is None or high <= low:
+        return False
+    return (last - low) / (high - low) <= Decimal("0.35")
+
+
+def _decimal(value: str | None) -> Decimal | None:
+    if not value or value == "unknown":
+        return None
+    try:
+        return Decimal(value)
+    except Exception:
+        return None
+
+
+def _position_cap(value: int) -> str:
+    """Zero is the switch for no money cap. The model must not read it as a ban."""
+    if value <= 0:
+        return "off"
+    return str(value)
 
 
 def _proposal_text(payload: dict) -> str:
@@ -370,7 +419,8 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
     _current, stored = _load(conn, account_id, symbol)
     iv_tags = tags_from_iv(conn, symbol, settings)
     base = sorted((stored or set()) | iv_tags)
-    puts, calls = _listed(plan)
+    puts, calls = _priced_lines(conn, symbol, plan)
+    risk = settings.risk
     return {
         "symbol": symbol.upper(),
         "last": _show(last),
@@ -389,14 +439,22 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
         "puts": puts,
         "calls": calls,
         "purchase": "none",
-        "position_cap": str(settings.risk.max_position_per_symbol),
-        "contract_cap": str(settings.risk.max_contracts_per_symbol),
+        "classifiers": _classifiers(conn, account_id, symbol),
+        "position_cap": _position_cap(risk.max_position_per_symbol),
+        "contract_cap": str(risk.max_contracts_per_symbol),
+        "min_dte": str(risk.min_dte_new),
+        "earnings_blackout": str(risk.earnings_blackout_days),
+        "cash_reserve": str(risk.cash_reserve_pct),
         "flags": f"csp={'on' if flags.csp else 'off'} cc={'on' if flags.cc else 'off'} strangle={'on' if flags.strangle else 'off'}",
         "proposals": "none",
     }
 
 
 def _bars(conn, symbol: str) -> list[tuple]:
+    from athena_strategy.simbars import in_replay, load_daily
+
+    if in_replay(conn, symbol):
+        return [(row[0], row[1], row[2]) for row in load_daily(conn, symbol)[-273:]]
     rows = conn.execute(
         """
         SELECT high, low, close FROM market_bars
@@ -430,6 +488,10 @@ def _prior_rail(bars: list[tuple], index: int, high: bool = True):
 
 
 def _last_close(conn, symbol: str):
+    from athena_strategy.simbars import in_replay, last_close
+
+    if in_replay(conn, symbol):
+        return last_close(conn, symbol)
     row = conn.execute(
         "SELECT close FROM market_bars WHERE symbol = %s ORDER BY ts DESC LIMIT 1",
         (symbol.upper(),),
@@ -438,14 +500,16 @@ def _last_close(conn, symbol: str):
 
 
 def _shares(conn, account_id: str, symbol: str):
+    from athena_strategy.simbars import in_replay
+
     row = conn.execute(
         """
         SELECT quantity FROM positions
-        WHERE account_id = %s AND symbol = %s AND sec_type = 'STK'
+        WHERE account_id = %s AND symbol = %s AND sec_type = 'STK' AND simulated = %s
         ORDER BY snapshot_at DESC, id DESC
         LIMIT 1
         """,
-        (account_id, symbol.upper()),
+        (account_id, symbol.upper(), in_replay(conn, symbol)),
     ).fetchone()
     if row is None or row[0] is None:
         return 0
@@ -487,6 +551,40 @@ def _plan(conn, symbol: str) -> dict | None:
         "option_exchange": row[6] or "",
         "multiplier": row[7] or "100",
     }
+
+
+def _classifiers(conn, account_id: str, symbol: str) -> str:
+    row = conn.execute(
+        "SELECT classifiers FROM symbol_phases WHERE account_id = %s AND symbol = %s",
+        (account_id, symbol.upper()),
+    ).fetchone()
+    if row is None or not row[0]:
+        return ""
+    return row[0]
+
+
+def _priced_lines(conn, symbol: str, plan: dict | None) -> tuple[str, str]:
+    """Listed contracts that have an ask. The single plan is the fallback."""
+    rows = conn.execute(
+        """
+        SELECT expiry, contract_right, strike, limit_price
+        FROM option_choices
+        WHERE symbol = %s AND limit_price > 0
+        ORDER BY expiry, contract_right, strike
+        """,
+        (symbol.upper(),),
+    ).fetchall()
+    puts: list[str] = []
+    calls: list[str] = []
+    for expiry, right, strike, limit_price in rows:
+        line = f"{expiry} {'put' if right == 'P' else 'call'} {_show(strike)} limit {_show(limit_price)}"
+        if right == "P":
+            puts.append(line)
+        else:
+            calls.append(line)
+    if puts or calls:
+        return "\n".join(puts) or "none", "\n".join(calls) or "none"
+    return _listed(plan)
 
 
 def _listed(plan: dict | None) -> tuple[str, str]:

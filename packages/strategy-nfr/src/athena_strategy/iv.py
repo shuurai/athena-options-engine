@@ -50,15 +50,21 @@ def record_iv_marks(conn: psycopg.Connection, symbols: list[str], today: date) -
         ).fetchone()
         if plan is None:
             continue
-        price = conn.execute(
-            """
-            SELECT close FROM market_bars
-            WHERE symbol = %s
-            ORDER BY ts DESC
-            LIMIT 1
-            """,
-            (symbol,),
-        ).fetchone()
+        from athena_strategy.simbars import in_replay, last_close
+
+        if in_replay(conn, symbol):
+            close = last_close(conn, symbol)
+            price = None if close is None else (close,)
+        else:
+            price = conn.execute(
+                """
+                SELECT close FROM market_bars
+                WHERE symbol = %s
+                ORDER BY ts DESC
+                LIMIT 1
+                """,
+                (symbol,),
+            ).fetchone()
         if price is None or price[0] is None or price[0] <= 0:
             continue
         credit = plan[0] + plan[1]
