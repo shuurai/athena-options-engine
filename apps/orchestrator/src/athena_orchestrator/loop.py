@@ -11,6 +11,7 @@ from athena_bots import start_telegram_polling
 from athena_exec.accounts import active_accounts, stamp_legacy_accounts, trading_mode
 from athena_exec.session import refresh_display_rates
 from athena_exec.ops import consume_restart
+from athena_orchestrator.backfill import start_history_backfill
 from athena_orchestrator.console import start_console_server
 from athena_orchestrator.control import allowlist_from_env, start_control_server
 from athena_orchestrator.paper import run_paper_cycle
@@ -85,6 +86,7 @@ async def run_loop() -> None:
     console = start_console_server(database_url, console_port, allowlist_from_env())
     threading.Thread(target=console.serve_forever, daemon=True).start()
     log.info("console_port=%s", console_port)
+    start_history_backfill(database_url)
     threading.Thread(
         target=refresh_display_rates, args=(database_url,), daemon=True, name="fx-rates"
     ).start()

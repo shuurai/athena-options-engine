@@ -1,7 +1,7 @@
 # Athena Options Engine — Proposal Index
 
 **Status:** Paper and live use the same order path. `paper` trades `ATHENA_IB_PAPER_ACCOUNT_ID`. `live` trades each id in `ATHENA_IB_ACCOUNT_IDS`. Each account keeps its own book.  
-**Last updated:** 2026-10-09  
+**Last updated:** 2026-10-11  
 **Supersedes for implementation intent:** [../athena_options_engine_prd.md](../athena_options_engine_prd.md) (historical input)  
 **Next:** One small approved live order once Gateway and `ATHENA_IB_ACCOUNT_ID` are set. Task list: [10-implementation-tracker.md](10-implementation-tracker.md). Roadmap: [09-roadmap.md](09-roadmap.md).
 
@@ -23,7 +23,7 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 | IB account | **Any account you configure** (`ATHENA_IB_ACCOUNT_ID` / Settings) — no hard-coded IBKR id |
 | fanit sync | Later (after stable live fills) |
 | Codebase | Greenfield monorepo in this repo; reuse fanit **concepts**, not as live SoR |
-| Realtime data | iTick |
+| Realtime data | IB delayed print for the draft price. Daily indicators use IB daily bars. iTick is outside that window |
 | IB role | Historical pulls, trade execution, scheduled sync slots (Mobile IB App windows) |
 | Control UX | Feishu bot + Telegram bot + ephemeral one-time web control pages |
 | Backup | Local first → AWS-compatible S3 API |
@@ -67,7 +67,7 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 |-------|--------|
 | 0 Proposal docs (`docs/athena/*`) | **Done** |
 | 1 Monorepo skeleton (orchestrator, settings, store) | **Done** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
-| 2 Paper HITL + iTick seed bars + slot clock + one-time Approve | **Done** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
+| 2 Paper HITL + slot clock + one-time Approve | **Done** — see [10-implementation-tracker.md](10-implementation-tracker.md). Daily bars are IB. Seed bars are not written. |
 | 3 Live approve-gated exec | **Gate done.** No live order until Gateway and the account id are set. |
 | 4 NFR + news depth | **In progress** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
 | Console web | **Local pages are up** on port 8788. Vercel waits on Tailscale. See [10-implementation-tracker.md](10-implementation-tracker.md). |

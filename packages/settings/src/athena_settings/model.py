@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 Privilege = Literal["all_orders", "opens_only", "auto_within_risk", "paper_only"]
 GlobalCurrency = Literal["HKD", "USD", "AUD", "CNY", "JPY", "CAD"]
-RiskProfile = Literal["defensive", "standard", "income", "aggressive", "test", "custom"]
+RiskProfile = Literal["defensive", "standard", "income", "aggressive", "test", "paper", "custom"]
 
 
 class RiskLimits(BaseModel):
@@ -16,17 +16,27 @@ class RiskLimits(BaseModel):
     daily_loss_halt_pct: int
     max_contracts_per_symbol: int
     max_position_per_symbol: int = 0
-    min_iv_rank_new_short: int
+    min_rv_pctl_new_short: int
     min_dte_new: int
     max_short_opt_margin_pct: int
     earnings_blackout_days: int
     max_orders_per_day: int = 10
+    margin_rate: int = 20
+    strict_conflict: bool = False
+    max_bucket_pct_nav: int = 35
+    max_assign_pct_nav: int = 40
+    min_cash_after_assign_pct: int = 10
+    assign_delta: float = 0.30
 
 
 class IBSlots(BaseModel):
-    """Hong Kong windows. The clock applies them Monday through Friday."""
+    """Hong Kong clock. Athena holds the HK cash sessions and the US cash session.
 
-    athena_slots: str = "HKT 09:30-12:00, 13:00-16:00, 21:30-23:55"
+    US regular hours are 21:30–04:00 while the US is on daylight time. The
+    morning half belongs to the previous evening, including Saturday.
+    """
+
+    athena_slots: str = "HKT 09:30-12:00, 13:00-16:00, 21:30-04:00"
     mobile_slots: str = "HKT 19:00-21:30"
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 4001
@@ -134,13 +144,19 @@ class TacticFlags(BaseModel):
     """Per-symbol tactic switches. Missing symbols stay on.
 
     Intent and Long are per symbol. Income does not buy shares.
+    Both prefers income and may also buy shares. Accumulate may buy shares.
     """
 
     csp: bool = True
     cc: bool = True
     strangle: bool = True
-    intent: Literal["income", "accumulate"] = "income"
+    intent: Literal["income", "both", "accumulate"] = "income"
     long: bool = False
+    may_buy: bool | None = None
+
+    def options_on(self) -> bool:
+        """A chain is useful only when one option tactic is still on."""
+        return self.csp or self.cc or self.strangle
 
 
 class AgentPrompt(BaseModel):
@@ -192,10 +208,44 @@ class StrategySettings(BaseModel):
     p4_to: int = 3
     p5_from: int = 5
     p5_to: int = 10
-    strangle_otm_pct: int = 10
+    chain_band_pct: int = 25
+    screener_top_n: int = 3
+    csp_delta_lo: float = 0.10
+    csp_delta_target: float = 0.25
+    csp_delta_hi: float = 0.40
+    cc_delta_target: float = 0.30
+    strangle_delta_target: float = 0.28
+    otm_floor_pct: int = 3
+    otm_ceiling_pct: int = 20
+    iv_rv_multiple_hi: float = 1.05
+    iv_rv_multiple_mid: float = 1.35
+    iv_rv_multiple_lo: float = 1.80
     dte_min: int = 21
     dte_target: int = 35
     dte_max: int = 60
+    trend_slope_min_pct: float = 2
+    dip_window_sessions: int = 5
+    dip_deep_pos: float = 0.35
+    dip_reclaim_pos: float = 0.45
+    cc_rail_pos: float = 0.80
+    drawdown_band_high_pct: int = 15
+    drawdown_band_low_pct: int = 5
+    volume_dry_multiple: float = 0.7
+    atr_window: int = 14
+    atr_wide_ratio_pct: int = 4
+    rv_window: int = 20
+    rv_high_pctl: int = 80
+    rv_low_pctl: int = 20
+    regime_index: str = "SPY"
+    regime_lookback: int = 63
+    reclaim_window: int = 5
+    rail_lookback: int = 63
+    trend_lag_sessions: int = 21
+    volume_avg_sessions: int = 20
+    range_min_sessions: int = 252
+    trading_days_per_year: int = 252
+    observe_slots: Literal["always", "athena", "athena+mobile"] = "always"
+    draft_slots: Literal["athena", "always"] = "athena"
 
 
 SIM_SYMBOLS = ["NVDA", "MSFT", "NOK", "AAPL", "IGV", "NIO", "AMZN", "AVGO"]
@@ -233,9 +283,31 @@ def standard_payload() -> SettingsPayload:
             cash_reserve_pct=30,
             daily_loss_halt_pct=5,
             max_contracts_per_symbol=3,
-            min_iv_rank_new_short=50,
+            min_rv_pctl_new_short=50,
             min_dte_new=7,
             max_short_opt_margin_pct=50,
             earnings_blackout_days=7,
         ),
+    )
+
+
+def paper_payload() -> SettingsPayload:
+    """Acceptance profile. It does not replace the live book until someone selects it."""
+    base = standard_payload()
+    return base.model_copy(
+        update={
+            "risk": RiskLimits(
+                profile="paper",
+                max_symbol_pct_nav=25,
+                cash_reserve_pct=20,
+                daily_loss_halt_pct=8,
+                max_contracts_per_symbol=5,
+                max_position_per_symbol=20000,
+                min_rv_pctl_new_short=40,
+                min_dte_new=21,
+                max_short_opt_margin_pct=35,
+                earnings_blackout_days=7,
+                max_orders_per_day=6,
+            )
+        }
     )

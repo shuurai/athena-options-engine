@@ -2,6 +2,7 @@
 
 import os
 import unittest
+from pathlib import Path
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -10,14 +11,15 @@ from zoneinfo import ZoneInfo
 from athena_exec.accounts import active_accounts, stamp_legacy_accounts, trading_mode
 from athena_exec.gate import live_block_reason
 from athena_exec.options import choose_expiry, choose_strikes, expiry_band, strike_shortlist
-from athena_exec.slots import slot_state
+from athena_exec.slots import draft_allowed, observe_allowed, slot_state
+from athena_marketdata.pricing import Bar
 from athena_orchestrator.money import DASH, cash_rows, convert, ledger, marked, report_currency, show
-from athena_orchestrator.pages import _audit_result_tag, _audit_status_tag, _audit_tr, sim_targets
+from athena_orchestrator.pages import PROFILES, _audit_result_tag, _audit_status_tag, _audit_tr, _position_nlv_stat, sim_targets
 from athena_orchestrator.runtime import begin, cycle_view, finish, mark, note_cycle, note_loop, wait
 from athena_orchestrator.sim import _add_months, duration_for
-from athena_risk import allowed_open, block_reason
+from athena_risk import allowed_open, block_reason, block_ticket_reason
 from athena_settings.model import AISettings, AgentPrompt, IBSlots, RiskLimits, SettingsPayload, TacticFlags, standard_payload
-from athena_settings.prompts import default_agents, resolved_agents
+from athena_settings.prompts import default_agents, range_names, resolved_agents
 from athena_settings.repository import SettingsVersion, format_settings, save_settings, set_knob
 from athena_settings.resolve import (
     allowlist_ids,
@@ -31,6 +33,8 @@ from athena_settings.resolve import (
     scoring_model,
 )
 from athena_strategy.dsh import request_body
+from athena_strategy.schemas import parse_response
+from athena_strategy.screener import _listed
 from athena_strategy.agents import (
     _bars,
     _context,
@@ -38,7 +42,6 @@ from athena_strategy.agents import (
     _headlines,
     _label,
     _last_close,
-    _listed,
     _number,
     _plan,
     _position_cap,
@@ -54,19 +57,29 @@ from athena_strategy.agents import (
     _show,
     _staged_step,
     _tag_set,
+    _trail_context,
     _trail_outcome,
     fill_prompt,
     parse_json,
     run_signaled,
 )
 from athena_strategy.classifiers import clean_classifiers
-from athena_strategy.iv import iv_rank, iv_tags
+from athena_strategy.indicators import compute, realized_vol
+from athena_strategy.iv import estimated_iv, iv_rank
 from athena_strategy.manage import management_tactic
-from athena_strategy.phases import choose_phase, choose_tactic, evaluate_symbol
+from athena_strategy.legacy_tactics import choose_tactic
+from athena_strategy.phases import choose_phase, evaluate_symbol
 from athena_strategy.pool import clean_symbol, lookup_company, parse_chart, parse_finviz
 from athena_strategy.price import price_tags, rsi
+from athena_strategy.tags import DIP_BOUGHT, LOWER_RAIL, NEWS_WASH, PRICE_WEAK, PULLBACK, TAG_REGISTRY, VOLUME_SPIKE
 
 
+def _legacy(prefix: str) -> str:
+    return next(
+        spec.name
+        for spec in TAG_REGISTRY.values()
+        if spec.status == "legacy_price_proxy" and spec.name.startswith(prefix)
+    )
 HKT = ZoneInfo("Asia/Hong_Kong")
 TODAY = date(2026, 10, 10)
 
@@ -79,7 +92,7 @@ def _limits(**updates) -> RiskLimits:
         daily_loss_halt_pct=5,
         max_contracts_per_symbol=12,
         max_position_per_symbol=0,
-        min_iv_rank_new_short=50,
+        min_rv_pctl_new_short=50,
         min_dte_new=7,
         max_short_opt_margin_pct=50,
         earnings_blackout_days=7,
@@ -173,11 +186,56 @@ class RiskTest(unittest.TestCase):
             block_reason(1, limits, nav=Decimal("100"), margin=Decimal("60")),
             "margin exceeds max_short_opt_margin_pct",
         )
-        self.assertEqual(block_reason(1, limits, iv_rank=10), "iv rank is below min_iv_rank_new_short")
+        self.assertEqual(block_reason(1, limits, rv_pctl=10), "rv percentile is below min_rv_pctl_new_short")
         self.assertEqual(block_reason(1, limits, dte=3), "dte is below min_dte_new")
         self.assertEqual(block_reason(1, limits, earnings_in_days=2), "earnings blackout")
-        self.assertIsNone(block_reason(1, limits, iv_rank=None, dte=None, nav=None))
-        self.assertIsNone(block_reason(1, limits, opening=False, iv_rank=1, dte=1))
+        self.assertIsNone(block_reason(1, limits, rv_pctl=None, dte=None, nav=None))
+        self.assertIsNone(block_reason(1, limits, opening=False, rv_pctl=1, dte=1))
+
+    def test_ticket_margin_records_the_estimate(self) -> None:
+        leg = {
+            "tactic": "OPEN_CSP",
+            "contracts": 1,
+            "limit": Decimal("1"),
+            "put_strike": Decimal("100"),
+            "call_strike": None,
+            "multiplier": Decimal("100"),
+            "orders": 1,
+        }
+        marks = {
+            "nav": Decimal("10000"),
+            "cash": Decimal("10000"),
+            "margin": Decimal("0"),
+            "base": "USD",
+            "rates": {},
+            "orders_today": 0,
+            "price": Decimal("100"),
+            "currency": "USD",
+        }
+        reason = block_ticket_reason(
+            [leg],
+            _limits(max_short_opt_margin_pct=10, margin_rate=20, cash_reserve_pct=0, max_symbol_pct_nav=100),
+            marks,
+            Decimal(0),
+        )
+        self.assertIn("I2: ticket breaches max_short_opt_margin_pct", reason)
+        self.assertIn("estimate 2000.00", reason)
+        self.assertIn("cap 1000.00", reason)
+        wide = _limits(max_orders_per_day=10, cash_reserve_pct=0, max_symbol_pct_nav=100, max_short_opt_margin_pct=100)
+        strangle = {
+            "tactic": "OPEN_STRANGLE",
+            "contracts": 1,
+            "limit": Decimal("1"),
+            "put_strike": Decimal("1"),
+            "call_strike": Decimal("1"),
+            "multiplier": Decimal("100"),
+            "orders": 2,
+        }
+        booked = dict(marks, nav=Decimal("1000000"), cash=Decimal("1000000"), orders_today=9, price=Decimal("1"))
+        self.assertEqual(
+            block_ticket_reason([strangle], wide, booked, Decimal(0)),
+            "I2: ticket breaches max_orders_per_day",
+        )
 
     def test_position_cap_blocks_when_the_open_does_not_fit(self) -> None:
         limits = _limits(max_position_per_symbol=1000)
@@ -202,11 +260,14 @@ class OptionsAndSlotsTest(unittest.TestCase):
     def test_puts_are_at_or_below_and_calls_at_or_above(self) -> None:
         strikes = [150, 160, 170, 180, 190, 200, 210, 220]
         underlying = Decimal("180")
-        puts = strike_shortlist(strikes, underlying, "P")
-        calls = strike_shortlist(strikes, underlying, "C")
+        puts = strike_shortlist(strikes, underlying, "P", width=4, otm_pct=10, inside=False)
+        calls = strike_shortlist(strikes, underlying, "C", width=4, otm_pct=10, inside=False)
         self.assertTrue(puts)
         self.assertTrue(all(strike <= underlying * Decimal("0.9") for strike in puts))
         self.assertTrue(all(strike >= underlying * Decimal("1.1") for strike in calls))
+        near = strike_shortlist(strikes, underlying, "P", width=4, otm_pct=25)
+        self.assertIn(Decimal("170"), near)
+        self.assertNotIn(Decimal("100"), near)
         pair = choose_strikes(strikes, underlying)
         self.assertIsNotNone(pair)
         self.assertLessEqual(pair[0], underlying * Decimal("0.9"))
@@ -220,6 +281,20 @@ class OptionsAndSlotsTest(unittest.TestCase):
         self.assertEqual(slot_state(datetime(2026, 10, 5, 20, 0, tzinfo=HKT), slots), "mobile")
         self.assertEqual(slot_state(datetime(2026, 10, 5, 12, 30, tzinfo=HKT), slots), "idle")
         self.assertEqual(slot_state(datetime(2026, 10, 10, 10, 0, tzinfo=HKT), slots), "idle")
+        self.assertEqual(slot_state(datetime(2026, 10, 5, 22, 0, tzinfo=HKT), slots), "athena")
+        self.assertEqual(slot_state(datetime(2026, 10, 6, 2, 0, tzinfo=HKT), slots), "athena")
+        self.assertEqual(slot_state(datetime(2026, 10, 5, 2, 0, tzinfo=HKT), slots), "idle")
+        self.assertEqual(slot_state(datetime(2026, 10, 10, 2, 0, tzinfo=HKT), slots), "athena")
+        self.assertEqual(slot_state(datetime(2026, 10, 11, 2, 0, tzinfo=HKT), slots), "idle")
+        afternoon = datetime(2026, 10, 5, 17, 0, tzinfo=HKT)
+        self.assertTrue(observe_allowed(afternoon, slots, "always"))
+        self.assertFalse(draft_allowed(afternoon, slots, "athena"))
+        self.assertFalse(observe_allowed(datetime(2026, 10, 10, 12, 0, tzinfo=HKT), slots, "always"))
+        paper = PROFILES["paper"]
+        self.assertEqual(paper, (25, 20, 8, 5, 40, 21, 20000, 6, 35, 7))
+        self.assertEqual(next(name for name, preset in PROFILES.items() if preset == paper), "paper")
+        changed = paper[:7] + (50,) + paper[8:]
+        self.assertIsNone(next((name for name, preset in PROFILES.items() if preset == changed), None))
 
 
 class PricePhaseTest(unittest.TestCase):
@@ -255,27 +330,28 @@ class PricePhaseTest(unittest.TestCase):
         settings = standard_payload()
         self.assertEqual(choose_phase("P1", set(), 0, settings), "P3")
         self.assertEqual(choose_phase("P1", set(), -5, settings), "P1")
-        self.assertEqual(choose_phase("P1", {"NEWS_WASH", "HIGH_IV"}, -2, settings), "P2")
-        self.assertEqual(choose_phase("P1", {"LOW_IV"}, 2, settings), "P4")
+        self.assertEqual(choose_phase("P1", {NEWS_WASH, _legacy("H")}, -2, settings), "P1")
+        self.assertEqual(choose_phase("P1", {_legacy("L")}, 2, settings), "P1")
         self.assertEqual(choose_phase("P4", {"OVERBOUGHT"}, 7, settings), "P5")
         self.assertEqual(choose_phase("P5", set(), -20, settings), "P1")
         self.assertEqual(choose_phase("P2", set(), None, settings), "P1")
-        self.assertEqual(choose_phase("P1", {"PRICE_WEAK", "VOLUME_SPIKE"}, None, settings), "P2")
-        self.assertEqual(choose_tactic("P2", {"HIGH_IV", "NEWS_WASH"}, False, False), "OPEN_STRANGLE")
+        self.assertEqual(choose_phase("P1", {PRICE_WEAK, VOLUME_SPIKE}, None, settings), "P2")
+        self.assertEqual(choose_tactic("P2", {_legacy("H"), NEWS_WASH}, False, False), "HOLD")
         self.assertEqual(choose_tactic("P4", {"OVERSOLD", "SUPPORT_TOUCH"}, False, False), "OPEN_CSP")
         self.assertEqual(choose_tactic("P5", {"OVERBOUGHT"}, True, False), "OPEN_CC")
         self.assertEqual(choose_tactic("P1", set(), False, False), "HOLD")
 
     def test_evaluate_symbol_stores_open_as_hold(self) -> None:
         conn = _Conn()
-        evaluate_symbol(
-            conn,
-            standard_payload(),
-            "ZZT",
-            "ZZTEST",
-            tags={"LOW_IV", "OVERSOLD", "SUPPORT_TOUCH"},
-            event_offset=2,
-        )
+        with patch("athena_strategy.phases._load", return_value=("P4", set())):
+            evaluate_symbol(
+                conn,
+                standard_payload(),
+                "ZZT",
+                "ZZTEST",
+                tags={"OVERSOLD", "SUPPORT_TOUCH"},
+                event_offset=2,
+            )
         _sql, params = conn.calls[-1]
         self.assertEqual(params[2], "P4")
         self.assertEqual(params[4], "HOLD")
@@ -345,12 +421,36 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(parse_json("[1, 2]"), {})
 
     def test_rails_use_63_sessions_and_the_prior_window(self) -> None:
-        bars = [(Decimal(index + 10), Decimal(index), Decimal(index + 5)) for index in range(80)]
-        self.assertEqual(_rail(bars, 0, 63), Decimal(89))
-        self.assertEqual(_rail(bars, 1, 63, high=False), Decimal(17))
-        self.assertEqual(_prior_rail(bars, 0), max(row[0] for row in bars[:-21][-63:]))
-        self.assertIsNone(_prior_rail(bars[:10], 0))
-        self.assertIsNone(_rail([], 0, 63))
+        bars = [
+            Bar(
+                day=date.min,
+                open=Decimal(index + 5),
+                high=Decimal(index + 10),
+                low=Decimal(index),
+                close=Decimal(index + 5),
+                volume=Decimal(0),
+            )
+            for index in range(80)
+        ]
+        self.assertEqual(_rail(bars, "high", 63), Decimal(89))
+        self.assertEqual(_rail(bars, "low", 63, high=False), Decimal(17))
+        self.assertEqual(_prior_rail(bars, "high"), max(row.high for row in bars[:-21][-63:]))
+        self.assertIsNone(_prior_rail(bars[:10], "high"))
+        self.assertIsNone(_rail([], "high", 63))
+
+    def test_short_history_renames_the_range(self) -> None:
+        short = range_names(40)
+        self.assertEqual(short["range_high_tag"], "HIGH_RANGE")
+        self.assertEqual(short["range_low_tag"], "LOW_RANGE")
+        self.assertEqual(short["range_sessions"], "40")
+        location = default_agents()["Location"]
+        text = fill_prompt(location.system + "\n" + location.execution, short)
+        self.assertNotIn("52-week", text)
+        self.assertNotIn("252-session", text)
+        self.assertIn("HIGH_RANGE", text)
+        long = fill_prompt(location.system, range_names(300))
+        self.assertIn("52-week", long)
+        self.assertIn("HIGH_52W", long)
 
     def test_helpers_and_result_lines(self) -> None:
         self.assertEqual(_show(Decimal("2.50")), "2.5")
@@ -403,8 +503,8 @@ class AgentsTest(unittest.TestCase):
         self.assertIn(">QUIET<", _audit_result_tag("Quiet", "ok"))
         self.assertIn("tag red", _audit_status_tag("error"))
         self.assertIn(">OK<", _audit_status_tag("ok"))
-        tags = _tag_set({"base_tags": "LOW_IV"}, {"Location": {"tags": ["LOWER_RAIL"]}, "News": {"news_wash": True}})
-        self.assertEqual(tags, ["LOW_IV", "LOWER_RAIL", "NEWS_WASH"])
+        tags = _tag_set({"base_tags": _legacy("L")}, {"Location": {"tags": ["LOWER_RAIL"]}, "News": {"news_wash": True}})
+        self.assertEqual(tags, ["LOWER_RAIL", "NEWS_WASH"])
         self.assertEqual(_position_cap(0), "off")
         self.assertEqual(_position_cap(12), "12")
         kept = _staged_step("CSP", {"status": "pending", "detail": "ok", "id": "d1"})
@@ -417,6 +517,11 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(outcome, "drafted")
         quiet, _summary = _trail_outcome([{"tactic": "", "outcome": "dropped", "detail": "no drafts"}])
         self.assertEqual(quiet, "quiet")
+        blocked_leg, blocked_summary = _trail_outcome(
+            [{"tactic": "CC", "outcome": "blocked", "detail": "I1: cc needs 100 covered shares, held 0"}]
+        )
+        self.assertEqual(blocked_leg, "quiet")
+        self.assertIn("I1:", blocked_summary)
         self.assertIn("CSP kept", summary)
 
     def test_draft_drops_and_a_kept_buy(self) -> None:
@@ -453,17 +558,79 @@ class AgentsTest(unittest.TestCase):
             ],
         )
 
+    def test_both_keeps_a_long_and_a_strangle(self) -> None:
+        settings = standard_payload()
+        answers = {
+            "Consolidator": {
+                "drafts": [
+                    {"tactic": "BUY", "limit": 10, "reason": "rail"},
+                    {"tactic": "STRANGLE", "limit": 1.2, "reason": "wash"},
+                ]
+            }
+        }
+
+        def propose(*args, **_kwargs):
+            tactic = args[5]
+            return {"tactic": tactic, "outcome": "kept", "detail": "ok", "draft_id": tactic}
+
+        with patch("athena_strategy.agents._load", return_value=("P1", set())), patch(
+            "athena_strategy.agents.write_decision"
+        ), patch("athena_strategy.agents.has_open_draft", return_value=False), patch(
+            "athena_strategy.agents._propose_one", side_effect=propose
+        ), patch("athena_strategy.agents.apply_ticket_block", return_value=None):
+            both = _drafts(
+                None, settings, "ZZTEST", "ZZT", TacticFlags(long=True, intent="both"), answers, {"tags": "none"}
+            )
+            income = _drafts(
+                None, settings, "ZZTEST", "ZZT", TacticFlags(long=True, intent="income"), answers, {"tags": "none"}
+            )
+            accumulate = _drafts(
+                None,
+                settings,
+                "ZZTEST",
+                "ZZT",
+                TacticFlags(long=True, intent="accumulate"),
+                answers,
+                {"tags": "none"},
+            )
+        self.assertEqual(both, ["BUY", "OPEN_STRANGLE"])
+        self.assertEqual(income, ["OPEN_STRANGLE"])
+        self.assertEqual(accumulate, ["BUY", "OPEN_STRANGLE"])
+        purchase = default_agents()["Purchase"].system
+        consolidator = default_agents()["Consolidator"].system
+        self.assertIn("may_buy is on", purchase)
+        self.assertIn("Stay quiet when may_buy is off", purchase)
+        self.assertIn("A short strangle may be drafted", consolidator)
+        self.assertIn("a share purchase may be drafted in the same pass", consolidator)
+
     def test_signaled_pass_does_not_call_the_model_when_patched(self) -> None:
+        os.environ["ATHENA_STATE_MACHINE"] = "off"
+        self.addCleanup(os.environ.pop, "ATHENA_STATE_MACHINE", None)
         settings = standard_payload().model_copy(update={"watchlist": ["ZZT", "BLOCK"], "blocked_symbols": ["BLOCK"]})
         with patch("athena_strategy.agents.write_decision") as written, patch(
             "athena_strategy.agents._run_symbol", side_effect=RuntimeError("boom")
-        ):
+        ), patch("athena_strategy.agents.eligible", return_value=("full", "")):
             created = run_signaled(None, settings, "ZZTEST")
         self.assertEqual(created, [])
         self.assertEqual(written.call_count, 2)
-        chat = {"text": '{"tags":[]}', "error": "", "latency_ms": 1, "tokens": 0, "request": {}}
+        texts = [
+            '{"tags":[]}',
+            '{"news_wash":false}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"thinking":"","drafts":[]}',
+        ]
+        cursor = {"n": 0}
+
+        def reply(*_args, **_kwargs):
+            text = texts[cursor["n"]]
+            cursor["n"] += 1
+            return {"text": text, "error": "", "latency_ms": 1, "tokens": 0, "request": {}}
+
         with patch("athena_strategy.agents._context", return_value={"base_tags": "", "tags": "none"}), patch(
-            "athena_strategy.agents.chat", return_value=chat
+            "athena_strategy.agents.chat", side_effect=reply
         ) as called, patch("athena_strategy.agents._record"), patch(
             "athena_strategy.agents._drafts", return_value=["draft_z"]
         ):
@@ -471,20 +638,45 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(ids, ["draft_z"])
         self.assertGreaterEqual(called.call_count, 7)
 
+    def test_reply_schema_splits_parse_and_shape(self) -> None:
+        payload, status, stage = parse_response("Location", '{"tags":["LOWER_RAIL"]}')
+        self.assertEqual(status, "ok")
+        self.assertEqual(stage, "")
+        self.assertEqual(payload["tags"], ["LOWER_RAIL"])
+        _payload, status, stage = parse_response("Location", "not json")
+        self.assertEqual((status, stage), ("invalid", "parse"))
+        _payload, status, stage = parse_response("CSP", '{"quiet": true, "strike": 9}')
+        self.assertEqual((status, stage), ("invalid", "schema"))
+        payload, status, _stage = parse_response("Consolidator", '{"thinking":"","drafts":[]}')
+        self.assertEqual(status, "ok")
+        self.assertEqual(payload["drafts"], [])
+        _payload, status, stage = parse_response("News", '{"news_wash":false,"sentiment":2}')
+        self.assertEqual((status, stage), ("invalid", "schema"))
+
     def test_context_reads_rails_from_bars(self) -> None:
-        bars = [(Decimal("11"), Decimal("9"), Decimal("10"))] * 30
+        bars = [
+            Bar(
+                day=date.min,
+                open=Decimal("10"),
+                high=Decimal("11"),
+                low=Decimal("9"),
+                close=Decimal("10"),
+                volume=Decimal(0),
+            )
+        ] * 30
         conn = _Conn(rows=[(Decimal("11"), Decimal("9"), Decimal("10"))])
         with patch("athena_strategy.simbars.in_replay", return_value=False), patch(
             "athena_strategy.agents._bars", return_value=bars
         ), patch("athena_strategy.agents._last_close", return_value=Decimal("10")), patch(
             "athena_strategy.agents._shares", return_value=0
         ), patch("athena_strategy.agents._plan", return_value=None), patch(
-            "athena_strategy.agents._load", return_value=("P1", {"LOW_IV"})
-        ), patch("athena_strategy.agents._priced_lines", return_value=("none", "none")), patch(
+            "athena_strategy.agents._load", return_value=("P1", {_legacy("L")})
+        ), patch("athena_strategy.screener.prompt_sides", return_value=("none", "none", None, None, None)), patch(
             "athena_strategy.agents._classifiers", return_value=""
         ), patch("athena_strategy.agents.tags_from_iv", return_value=set()), patch(
-            "athena_strategy.agents._headlines", return_value="none"
-        ):
+            "athena_strategy.agents._reading", return_value=None
+        ), patch("athena_strategy.agents._headlines", return_value="none"
+        ), patch("athena_marketdata.pricing.ib_daily_count", return_value=30):
             context = _context(conn, standard_payload(), "ZZTEST", "zzt", TacticFlags())
         self.assertEqual(context["symbol"], "ZZT")
         self.assertEqual(context["last"], "10")
@@ -495,11 +687,24 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(context["contract_cap"], "3")
         self.assertEqual(context["min_dte"], "7")
         self.assertEqual(context["cash_reserve"], "30")
+        self.assertEqual(context["range_high_tag"], "HIGH_RANGE")
+        day = datetime(2026, 1, 5)
         with patch("athena_strategy.simbars.in_replay", return_value=False):
-            rows = _bars(_Conn(rows=[(Decimal("3"), Decimal("1"), Decimal("2"))]), "ZZT")
-            self.assertEqual(_last_close(_Conn(rows=[(Decimal("4"),)]), "ZZT"), Decimal("4"))
+            rows = _bars(
+                _Conn(rows=[(day, Decimal("2"), Decimal("3"), Decimal("1"), Decimal("2"), Decimal("8"), "ib-daily")]),
+                "ZZT",
+            )
+            self.assertEqual(
+                _last_close(
+                    _Conn(rows=[(day, Decimal("4"), Decimal("4"), Decimal("4"), Decimal("4"), Decimal("1"), "ib-daily")]),
+                    "ZZT",
+                ),
+                Decimal("4"),
+            )
             self.assertEqual(_shares(_Conn(rows=[(Decimal("2"),)]), "ZZTEST", "ZZT"), Decimal("2"))
-        self.assertEqual(rows, [(Decimal("3"), Decimal("1"), Decimal("2"))])
+        self.assertEqual(rows[0].high, Decimal("3"))
+        self.assertEqual(rows[0].low, Decimal("1"))
+        self.assertEqual(rows[0].close, Decimal("2"))
         self.assertEqual(_headlines(_Conn(rows=[]), "ZZT"), "none")
         self.assertEqual(_headlines(_Conn(rows=[("Headline",)]), "ZZT"), "- Headline")
         planned = _plan(
@@ -509,21 +714,23 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(planned["trading_class"], "NVDA")
 
     def test_news_reply_owns_the_wash_tag(self) -> None:
+        legacy = _legacy("L")
         kept = _tag_set(
-            {"base_tags": "NEWS_WASH,LOW_IV"},
+            {"base_tags": "NEWS_WASH," + legacy},
             {"News": {"error": "timeout"}},
         )
         self.assertIn("NEWS_WASH", kept)
+        self.assertNotIn(legacy, kept)
         cleared = _tag_set(
-            {"base_tags": "NEWS_WASH,LOW_IV"},
+            {"base_tags": "NEWS_WASH," + legacy},
             {"News": {"news_wash": False, "sentiment": 0, "event_type": "GENERIC"}},
         )
         self.assertNotIn("NEWS_WASH", cleared)
-        self.assertIn("LOW_IV", cleared)
+        self.assertNotIn(legacy, cleared)
 
     def test_pullback_is_only_a_mega_cap_dip(self) -> None:
         dip = {
-            "base_tags": "LOW_IV",
+            "base_tags": _legacy("L"),
             "classifiers": "MAG7,MEGA_CAP",
             "last": "100",
             "high_63": "130",
@@ -537,7 +744,7 @@ class AgentsTest(unittest.TestCase):
         self.assertNotIn("PULLBACK", _tag_set(blank, rising))
         high = {**dip, "last": "237", "high_63": "243", "low_63": "190"}
         self.assertNotIn("PULLBACK", _tag_set(high, rising))
-        stale = {**high, "base_tags": "PULLBACK,LOW_IV"}
+        stale = {**high, "base_tags": "PULLBACK," + _legacy("L")}
         self.assertNotIn("PULLBACK", _tag_set(stale, rising))
         self.assertFalse(_pullback(high, ["CHANNEL_RISING"]))
 
@@ -728,10 +935,138 @@ class PoolAndIvTest(unittest.TestCase):
         samples = [Decimal(index) for index in range(1, 21)]
         self.assertEqual(iv_rank(samples, Decimal("20"), 20), 100)
         self.assertIsNone(iv_rank([Decimal("2"), Decimal("2")], Decimal("2"), 2))
-        self.assertEqual(iv_tags(90, 80, 20), {"HIGH_IV"})
-        self.assertEqual(iv_tags(10, 80, 20), {"LOW_IV"})
-        self.assertEqual(iv_tags(None, 80, 20), set())
-        self.assertEqual(iv_tags(40, 80, 20), set())
+        self.assertIsNone(iv_rank([Decimal(index) for index in range(1, 20)], Decimal("19"), 1))
+        self.assertIsNone(estimated_iv(object(), "T", date.today()))
+
+
+class IndicatorTest(unittest.TestCase):
+    def _bars(self, closes: list[Decimal], volume: Decimal = Decimal(1000)) -> list[Bar]:
+        bars = []
+        for index, close in enumerate(closes):
+            bars.append(
+                Bar(
+                    day=date(2024, 1, 1) + timedelta(days=index),
+                    open=close,
+                    high=close + Decimal(1),
+                    low=close - Decimal(1),
+                    close=close,
+                    volume=volume,
+                )
+            )
+        return bars
+
+    def test_rv_is_unchanged_when_prices_scale(self) -> None:
+        strategy = standard_payload().strategy
+        closes = [Decimal(100) + Decimal(index) * Decimal("3") + Decimal(index % 4) for index in range(40)]
+        left = realized_vol(closes, strategy.rv_window, strategy.trading_days_per_year)
+        right = realized_vol([price * 2 for price in closes], strategy.rv_window, strategy.trading_days_per_year)
+        self.assertEqual(left, right)
+        fallen = []
+        price = Decimal(100)
+        for index in range(40):
+            price = price * (Decimal("82") / Decimal(100) if index == 30 else Decimal("1005") / Decimal(1000))
+            fallen.append(price)
+        other = [item * 2 for item in fallen]
+        self.assertEqual(
+            realized_vol(fallen, strategy.rv_window, strategy.trading_days_per_year),
+            realized_vol(other, strategy.rv_window, strategy.trading_days_per_year),
+        )
+        samples = [Decimal(index) for index in range(1, 21)]
+        base = compute(self._bars(closes), strategy, rv_samples=samples)
+        scaled = compute(self._bars([price * 2 for price in closes]), strategy, rv_samples=samples)
+        self.assertEqual(base.rv20, scaled.rv20)
+        self.assertEqual(base.rv_pctl, scaled.rv_pctl)
+        self.assertEqual(base.tags & {spec.name for spec in TAG_REGISTRY.values() if spec.name.startswith("RV_")}, scaled.tags & {spec.name for spec in TAG_REGISTRY.values() if spec.name.startswith("RV_")})
+
+    def test_june_dip_does_not_need_the_rail_tags(self) -> None:
+        strategy = standard_payload().strategy
+        closes = [Decimal(100) + Decimal(index) for index in range(100)]
+        bars = self._bars(closes)
+        window = bars[-strategy.rail_lookback:]
+        high = max(bar.high for bar in window)
+        low = min(bar.low for bar in window)
+        span = high - low
+        dip = bars[-3]
+        deep = low + span * Decimal(str(strategy.dip_deep_pos)) / Decimal(2)
+        bars[-3] = Bar(dip.day, deep, high - Decimal(1), low + Decimal(1), deep, dip.volume)
+        last = low + span * (Decimal(str(strategy.dip_reclaim_pos)) + Decimal("0.1"))
+        current = bars[-1]
+        bars[-1] = Bar(current.day, last, high, low + Decimal(1), last, current.volume)
+        reading = compute(bars, strategy)
+        self.assertIn(DIP_BOUGHT, reading.tags)
+        self.assertNotIn(PULLBACK, reading.tags)
+        self.assertNotIn(LOWER_RAIL, reading.tags)
+        self.assertGreater(reading.rail_pos, Decimal(str(strategy.dip_reclaim_pos)))
+
+    def test_zero_volume_is_unknown(self) -> None:
+        strategy = standard_payload().strategy
+        closes = [Decimal(100) + Decimal(index) for index in range(40)]
+        reading = compute(self._bars(closes, volume=Decimal(0)), strategy)
+        self.assertIsNone(reading.atr)
+        self.assertIsNone(reading.rv20)
+        self.assertIsNone(reading.volume_x)
+        self.assertNotIn("VOLUME_DRY", reading.tags)
+        self.assertIn("atr=unknown", reading.line())
+        self.assertIn("rv20=unknown", reading.line())
+        self.assertNotIn("iv=", reading.line())
+
+    def test_short_rv_history_has_no_vol_tag(self) -> None:
+        strategy = standard_payload().strategy
+        closes = [Decimal(100) + Decimal(index % 5) for index in range(40)]
+        reading = compute(self._bars(closes), strategy, rv_samples=[Decimal(10)] * 5)
+        self.assertIsNotNone(reading.rv20)
+        self.assertIsNone(reading.rv_pctl)
+        self.assertFalse(any(tag.startswith("RV_") for tag in reading.tags))
+
+    def test_numbers_match_the_stored_payload(self) -> None:
+        strategy = standard_payload().strategy
+        closes = [Decimal(80) + Decimal(index) for index in range(30)]
+        reading = compute(self._bars(closes), strategy)
+        trail = _trail_context(
+            {"tags": "none", "flags": "", "numbers": reading.line(), "indicators": reading.payload()},
+            TacticFlags(),
+            "P1",
+            {},
+        )
+        self.assertEqual(trail["indicators"]["rail_pos"], reading.payload()["rail_pos"])
+        self.assertEqual(trail["indicators"]["trend_slope_pct"], reading.payload()["trend_slope_pct"])
+        self.assertNotIn("iv=", trail["numbers"])
+        filled = fill_prompt("Tags: {{tags}}", {"tags": "DIP_BOUGHT", "numbers": reading.line()})
+        self.assertIn("Numbers: ", filled)
+        self.assertNotIn("iv=", filled)
+
+    def test_indicator_flag_can_turn_the_layer_off(self) -> None:
+        import os
+
+        from athena_strategy.indicators import indicators_enabled
+
+        with patch.dict(os.environ, {"ATHENA_INDICATORS": "off"}):
+            self.assertFalse(indicators_enabled())
+        with patch.dict(os.environ, {"ATHENA_INDICATORS": "on"}):
+            self.assertTrue(indicators_enabled())
+
+    def test_indicator_source_has_no_threshold_literals(self) -> None:
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[3]
+        text = (root / "packages/strategy-nfr/src/athena_strategy/indicators.py").read_text()
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        code = code.replace("rv20", "").replace("RV20", "")
+        self.assertIsNone(re.search(r"0\.35|0\.45|0\.7|252|63|80|20", code))
+
+    def test_legacy_names_are_not_quoted_outside_the_registry(self) -> None:
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[3]
+        hits = []
+        for path in list((root / "packages").rglob("*.py")) + list((root / "apps").rglob("*.py")):
+            if "tests" in path.parts or path.name == "tags.py":
+                continue
+            text = path.read_text()
+            if '"HIGH_IV"' in text or "'HIGH_IV'" in text or '"LOW_IV"' in text or "'LOW_IV'" in text:
+                hits.append(str(path))
+        self.assertEqual(hits, [])
 
 
 class SimMathAndRuntimeTest(unittest.TestCase):
@@ -774,3 +1109,49 @@ class PayloadTest(unittest.TestCase):
         self.assertIn("NVDA", payload.watchlist)
         with self.assertRaises(Exception):
             SettingsPayload.model_validate({"privilege": "nope", "risk": payload.risk.model_dump()})
+
+
+def _book_row(market, currency: str = "USD") -> dict:
+    return {"market": market, "currency": currency}
+
+
+class BudgetSourceTest(unittest.TestCase):
+    def test_the_decision_path_has_no_optimizer(self) -> None:
+        roots = [
+            Path("packages/risk/src"),
+            Path("packages/strategy-nfr/src/athena_strategy/budget.py"),
+            Path("packages/strategy-nfr/src/athena_strategy/wheel.py"),
+            Path("packages/strategy-nfr/src/athena_strategy/drafts.py"),
+        ]
+        banned = ("efficient_frontier", "tangency", "sharpe", "mean_variance", "optimize")
+        for root in roots:
+            files = [root] if root.is_file() else list(root.rglob("*.py"))
+            for path in files:
+                text = path.read_text(encoding="utf-8")
+                for word in banned:
+                    self.assertNotIn(word, text, path.name)
+
+
+class PositionNlvTest(unittest.TestCase):
+    def test_one_currency_sums_signed_market_values(self) -> None:
+        card = _position_nlv_stat([
+            _book_row(Decimal("22937")),
+            _book_row(Decimal("-310")),
+        ])
+        self.assertIn("$22,627.00", card)
+        self.assertIn("USD", card)
+
+    def test_mixed_currencies_stay_apart(self) -> None:
+        card = _position_nlv_stat([
+            _book_row(Decimal("22627"), "USD"),
+            _book_row(Decimal("-940"), "HKD"),
+        ])
+        self.assertIn(">mixed<", card)
+        self.assertIn("USD 22,627.00", card)
+        self.assertIn("HKD -940.00", card)
+
+    def test_a_flat_book_and_a_missing_mark_stay_blank(self) -> None:
+        self.assertIn(DASH, _position_nlv_stat([]))
+        card = _position_nlv_stat([_book_row(None), _book_row(Decimal("10"))])
+        self.assertIn("$10.00", card)
+        self.assertIn("1 unmarked", card)

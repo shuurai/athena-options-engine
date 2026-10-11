@@ -12,27 +12,20 @@ from zoneinfo import ZoneInfo
 
 from athena_exec.halt import halt, resume
 from athena_exec.ops import gateway_open, ops_action
-from athena_exec.slots import HKT
+from athena_exec.slots import HKT, covers, parse_windows
 from athena_settings import load_active
 from athena_settings.model import SettingsPayload
 from athena_settings.repository import save_settings
 from athena_store.backup import prune_snapshots, write_snapshot
 from athena_store.s3 import sync_snapshot
-from athena_strategy.iv import iv_rank
+from athena_strategy.iv import PREMIUM_METHOD, iv_rank
+from athena_strategy.tags import tag_color
 
 from . import runtime
 from .money import convert, ledger, marked, report_currency
 from .version import __version__
 
 DASH = "—"
-_TAG_CLASS = {
-    "NEWS_WASH": "amber",
-    "HIGH_IV": "teal",
-    "LOW_IV": "green",
-    "PRICE_WEAK": "red",
-    "VOLUME_SPIKE": "amber",
-    "EARNINGS_NEAR": "amber",
-}
 
 
 def sleeve(conn, account: str, now: datetime | None = None) -> dict:
@@ -96,17 +89,24 @@ def schedule(now: datetime, athena_slots: str, mobile_slots: str) -> list[dict]:
     local = now.astimezone(HKT)
     windows = [(start, end, "Athena") for start, end in _parse_slots(athena_slots)]
     windows += [(start, end, "Mobile") for start, end in _parse_slots(mobile_slots)]
-    windows.sort(key=lambda item: item[0])
+    windows.sort(key=lambda item: (item[0], item[1]))
     rows = []
-    cursor = windows[0][0] if windows else None
-    weekend = local.weekday() >= 5
+    cursor = None
+    weekday = local.weekday()
     clock_now = local.timetz().replace(tzinfo=None)
     for start, end, owner in windows:
-        if cursor is not None and start > cursor:
-            rows.append(_slot_row(cursor, start, "Idle", clock_now, weekend))
-        rows.append(_slot_row(start, end, owner, clock_now, weekend))
-        cursor = end
+        if start < end and cursor is not None and start > cursor:
+            rows.append(_slot_row(cursor, start, "Idle", clock_now, weekday))
+        rows.append(_slot_row(start, end, owner, clock_now, weekday))
+        if start < end:
+            cursor = end
     return rows
+
+
+def _year_band(conn, symbol: str) -> tuple[str, str, str]:
+    from athena_marketdata.pricing import year_view
+
+    return year_view(conn, symbol)
 
 
 def watchlist(conn, account: str, symbols: list[str], min_samples: int, today: date | None = None) -> list[dict]:
@@ -123,14 +123,15 @@ def watchlist(conn, account: str, symbols: list[str], min_samples: int, today: d
             (account, symbol),
         ).fetchone()
         price, change, tone = ib_move(conn, symbol)
+        band, high_pct, low_pct = _year_band(conn, symbol)
         proxies = conn.execute(
             """
             SELECT iv_proxy FROM iv_marks
-            WHERE symbol = %s
+            WHERE symbol = %s AND method = %s
             ORDER BY day DESC
             LIMIT 26
             """,
-            (symbol,),
+            (symbol, PREMIUM_METHOD),
         ).fetchall()
         samples = [Decimal(row[0]) for row in reversed(proxies)]
         rank = iv_rank(samples, samples[-1], min_samples) if samples else None
@@ -150,7 +151,10 @@ def watchlist(conn, account: str, symbols: list[str], min_samples: int, today: d
             """,
             (account, symbol),
         ).fetchone()
-        rows.append(_watch_row(symbol, phase, price, change, tone, samples, rank, positions, plan, draft is not None, day))
+        rows.append(_watch_row(
+            symbol, phase, price, change, tone, band, high_pct, low_pct,
+            samples, rank, positions, plan, draft is not None, day,
+        ))
     return rows
 
 
@@ -394,7 +398,7 @@ def _positions(conn, account: str, symbol: str) -> list[tuple]:
     return list(kept.values())
 
 
-def _watch_row(symbol, phase, price, change, tone, samples, rank, positions, plan, has_draft, today: date) -> dict:
+def _watch_row(symbol, phase, price, change, tone, band, high_pct, low_pct, samples, rank, positions, plan, has_draft, today: date) -> dict:
     phase_name = "" if phase is None else phase[0]
     tags = [] if phase is None else [part for part in (phase[1] or "").split(",") if part]
     side = []
@@ -438,12 +442,15 @@ def _watch_row(symbol, phase, price, change, tone, samples, rank, positions, pla
         "symbol": symbol,
         "price": price,
         "change": change,
+        "band": band,
+        "high_pct": high_pct,
+        "low_pct": low_pct,
         "tone": tone,
         "iv": [float(item) for item in samples],
         "rank": DASH if rank is None else str(rank),
         "phase": phase_name or DASH,
         "phase_class": "blue" if phase_name.startswith("P2") else "",
-        "tags": [{"t": tag, "cls": _TAG_CLASS.get(tag, "")} for tag in tags],
+        "tags": [{"t": tag, "cls": tag_color(tag)} for tag in tags],
         "side": side,
         "strikes": strikes,
         "dte": dte,
@@ -488,21 +495,19 @@ def _month_labels(weekly: list[tuple[date, float]]) -> list[str]:
     return seen
 
 
-def _slot_row(start: clock, end: clock, owner: str, now: clock, weekend: bool) -> dict:
+def _slot_row(start: clock, end: clock, owner: str, now: clock, weekday: int) -> dict:
     label = {"Athena": "athena", "Mobile": "mobile", "Idle": "idle"}.get(owner, owner.lower())
-    if weekend:
+    if owner == "Idle":
         status, tag = "idle", ""
-    elif end <= now:
-        status, tag = ("idle", "") if owner == "Idle" else ("done", "green")
-    elif start <= now < end:
+    elif covers(weekday, now, start, end):
         if owner == "Mobile":
             status, tag = "reserved", "amber"
-        elif owner == "Idle":
-            status, tag = "idle", ""
         else:
             status, tag = "active now", "blue"
+    elif weekday >= 5 or (start < end and end <= now):
+        status, tag = ("idle", "") if weekday >= 5 else ("done", "green")
     else:
-        status, tag = ("idle", "") if owner == "Idle" else ("later", "")
+        status, tag = "later", ""
     return {
         "window": f"{start.strftime('%H:%M')}–{end.strftime('%H:%M')}",
         "owner": label,
@@ -512,34 +517,31 @@ def _slot_row(start: clock, end: clock, owner: str, now: clock, weekend: bool) -
 
 
 def _overlap(athena_slots: str, mobile_slots: str) -> str:
-    windows = [(start, end, "Athena") for start, end in _parse_slots(athena_slots)]
-    windows += [(start, end, "Mobile") for start, end in _parse_slots(mobile_slots)]
-    windows.sort()
-    for index in range(1, len(windows)):
-        start, _end, owner = windows[index]
-        prev_end = windows[index - 1][1]
-        prev_owner = windows[index - 1][2]
+    pieces = []
+    for owner, spec in (("Athena", athena_slots), ("Mobile", mobile_slots)):
+        for start, end in _parse_slots(spec):
+            for span_start, span_end in _spans(start, end):
+                pieces.append((span_start, span_end, owner))
+    pieces.sort()
+    for index in range(1, len(pieces)):
+        start, _end, owner = pieces[index]
+        prev_end = pieces[index - 1][1]
+        prev_owner = pieces[index - 1][2]
         if start < prev_end:
             return f"{prev_owner} and {owner} overlap. Windows may meet, not cross."
     return ""
 
 
+def _spans(start: clock, end: clock) -> list[tuple[int, int]]:
+    start_m = start.hour * 60 + start.minute
+    end_m = end.hour * 60 + end.minute
+    if start_m < end_m:
+        return [(start_m, end_m)]
+    return [(start_m, 24 * 60), (0, end_m)]
+
+
 def _parse_slots(spec: str) -> list[tuple[clock, clock]]:
-    text = spec.replace("HKT", " ").strip()
-    found = []
-    for part in text.split(","):
-        piece = part.strip()
-        if "-" not in piece:
-            continue
-        start_s, end_s = piece.split("-", 1)
-        try:
-            start = clock.fromisoformat(start_s.strip())
-            end = clock.fromisoformat(end_s.strip())
-        except ValueError:
-            continue
-        if start < end:
-            found.append((start, end))
-    return found
+    return parse_windows(spec)
 
 
 def _orchestrator_check() -> dict:

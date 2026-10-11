@@ -222,6 +222,22 @@ class DeveloperApiTest(unittest.TestCase):
         self.assertIn('class="jk"', html)
         self.assertNotIn("POST /api/v1/bars", html)
 
+    def test_skill_try_has_curl_and_playground(self) -> None:
+        from athena_orchestrator.pages import _skill_try
+
+        html = _skill_try()
+        self.assertIn("Curl Sample", html)
+        self.assertIn("Playground", html)
+        self.assertIn("skill-play-kind", html)
+        self.assertIn("skill-play-send", html)
+        self.assertIn('id="skill-play-url" readonly', html)
+        self.assertIn("/api/v1/option", html)
+        self.assertIn("data-skill-panel=\"play\" hidden", html)
+        blob = html.split('id="skill-play-samples">', 1)[1].split("</script>", 1)[0]
+        samples = json.loads(blob)
+        self.assertEqual(samples["bars"]["path"], "/api/v1/bars")
+        self.assertNotIn("&quot;", blob)
+
     def test_too_many_symbols(self) -> None:
         code, body = self.post("/api/v1/bars", {"symbols": [f"S{index}" for index in range(21)]})
         self.assertEqual(code, 400)

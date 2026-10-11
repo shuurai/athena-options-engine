@@ -1,4 +1,4 @@
-"""iTick kline fetch. Seed bars are stored with source=seed, never as itick."""
+"""iTick kline fetch. A missing quote is left missing. Seed bars are not written."""
 
 from __future__ import annotations
 
@@ -11,13 +11,9 @@ from urllib.request import Request, urlopen
 
 import psycopg
 
-log = logging.getLogger("athena.marketdata")
+from athena_marketdata.pricing import has_intraday
 
-SEED_CLOSE = {
-    "NVDA": Decimal("218.42"),
-    "QCOM": Decimal("169.05"),
-    "T": Decimal("27.18"),
-}
+log = logging.getLogger("athena.marketdata")
 
 
 def write_watchlist_bars(
@@ -26,39 +22,27 @@ def write_watchlist_bars(
     base_url: str,
     api_key: str,
 ) -> int:
+    if not api_key:
+        log.info("itick key missing, wrote nothing")
     hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
     written = 0
     for symbol in symbols:
         bar = _from_itick(base_url, api_key, symbol) if api_key else None
-        if bar is None and symbol.isdigit():
-            cached = conn.execute(
-                "SELECT 1 FROM market_bars WHERE symbol = %s AND source = 'ib-delayed'",
-                (symbol,),
-            ).fetchone()
-            if cached is None:
+        if bar is None:
+            if symbol.isdigit() and not has_intraday(conn, symbol):
                 log.info("hk bar waits for the IB session symbol=%s", symbol)
             continue
-        if bar is None:
-            real = conn.execute(
-                "SELECT 1 FROM market_bars WHERE symbol = %s AND source <> 'seed' LIMIT 1",
-                (symbol,),
-            ).fetchone()
-            if real is not None:
-                continue
-        source = "itick" if bar else "seed"
-        close = bar if bar is not None else SEED_CLOSE.get(symbol, Decimal("100"))
         conn.execute(
             """
             INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'itick')
             ON CONFLICT (symbol, ts, source) DO UPDATE SET close = EXCLUDED.close
             """,
-            (symbol, hour, close, close, close, close, 0, source),
+            (symbol, hour, bar, bar, bar, bar, 0),
         )
         written += 1
-    conn.commit()
-    if not api_key:
-        log.info("itick key missing, wrote seed bars")
+    if written:
+        conn.commit()
     return written
 
 

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from athena_exec.broker import IbBroker
+from athena_marketdata.pricing import has_ib_daily
 from athena_orchestrator.tasks import _IB_LOCK
 from athena_store import connect
 
@@ -60,26 +61,13 @@ def ib_move(conn, symbol: str) -> tuple[str, str, str]:
         change = (last - previous) / previous * Decimal(100)
         tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
         return price, f"{change:+.2f}%", tone
-    rows = conn.execute(
-        """
-        SELECT ts, close FROM market_bars
-        WHERE symbol = %s AND source IN ('ib-delayed', 'ib-daily')
-        ORDER BY ts DESC
-        LIMIT 40
-        """,
-        (symbol,),
-    ).fetchall()
-    if not rows:
+    from athena_marketdata.pricing import quote_pair
+
+    last, previous = quote_pair(conn, symbol)
+    if last is None:
         return DASH, DASH, ""
-    last_ts, last = rows[0][0], Decimal(rows[0][1])
-    previous = None
-    for ts, close in rows[1:]:
-        if ts.date() == last_ts.date() or Decimal(close) == 0:
-            continue
-        previous = Decimal(close)
-        break
     price = f"{last:,.2f}"
-    if previous is None:
+    if previous is None or previous == 0:
         return price, DASH, ""
     change = (last - previous) / previous * Decimal(100)
     tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
@@ -142,11 +130,7 @@ def _refresh(symbols: list[str]) -> None:
         need_history = [
             symbol
             for symbol in symbols
-            if conn.execute(
-                "SELECT 1 FROM market_bars WHERE symbol = %s AND source = 'ib-daily' LIMIT 1",
-                (symbol,),
-            ).fetchone()
-            is None
+            if not has_ib_daily(conn, symbol)
         ]
     prices, history = _pull(symbols, need_history)
     if not prices and not history:

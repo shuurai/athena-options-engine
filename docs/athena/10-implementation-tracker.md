@@ -3,7 +3,17 @@
 Checklist for building Athena. Architecture stays in [02-architecture.md](02-architecture.md). This file only tracks work.
 
 **Status values:** `not_started` · `in_progress` · `done` · `blocked` · `deferred`  
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-11
+
+## Current product rules
+
+These are the live rules for price, safety, audit, indicators, and the strike menu. They are specified in [03](03-strategy-news-frontrun.md), [04](04-settings-and-risk.md), [05](05-human-control.md), and [06](06-data-and-ib.md). Older rows below keep the proof written on that day. Where a row disagrees with this list, this list wins.
+
+- One daily bar. A same-day delayed quote updates the close only. `seed` bars are not written. Short history uses `HIGH_RANGE`.
+- A covered call needs enough shares. A short put and a covered call may coexist unless `strict_conflict` is on. A ticket that breaks the cash reserve blocks every leg.
+- Audit outcomes are `drafted`, `quiet`, `no_data`, `invalid`, `observed`, and `dropped`. A bad model reply is retried once. Fewer than 63 daily bars is `no_data`.
+- `HIGH_IV` is not produced. The volatility tags are `RV_HIGH` and `RV_LOW`. `estimated_iv()` is empty. At-the-money mids are stored on `chain_marks` and not read.
+- The strike menu is ranked by a delta target. The fetch width is `chain_band_pct` (25). The old fixed distance cut is not read. The RV multiple is an assumption, not implied volatility.
 
 A row is `in_progress` before the code changes. The matching check in the test tracker starts as `pending`.  
 **Next:** Tailscale and the Vercel host stay deferred.
@@ -79,7 +89,7 @@ Exit: one full event cycle, paper or tiny live, with a settings change written t
 
 | ID | Task | Status | Exit proof |
 |----|------|--------|------------|
-| P4-01 | Full phase machine and CSP, CC, Strangle rules | `done` | One symbol walks P1 HOLD, P2 OPEN_STRANGLE, P3 HOLD, P4 CLOSE, P4 OPEN_CSP, P5 OPEN_CC. Each pair is stored on `symbol_phases`. |
+| P4-01 | Full phase machine and CSP, CC, Strangle rules | `done` | One symbol walks P1 through P5. `symbol_phases.tactic` stays `HOLD`. Opening is the wheel, not a stored tactic. |
 | P4-02 | Yahoo, Finviz, Fed, earnings intake. NEWS_WASH density | `done` | Yahoo and Finviz headlines are stored. NVDA and T are tagged `NEWS_WASH` from those headlines. FOMC dates are stored. Earnings dates are stored when Nasdaq lists a watchlist name. |
 | P4-03 | DSH sentiment enrichment | `done` | `DSH_BIN` runs `dsh --profile headless` on new headlines. A keyword −0.6 became −0.2, and a keyword 0.4 became 0.8. An empty `DSH_BIN` leaves the keyword score. |
 | P4-04 | Roll and profit-take drafts | `done` | A short option at or under 21 DTE drafts `ROLL`. A short that has captured 50% of premium drafts `CLOSE`. Both stay pending until Approve. |
@@ -147,13 +157,16 @@ These are in the Athena docs and are not built. They do not start before CW-01.
 |----|------|--------|------------|
 | P4-16 | Apply the stored risk limits | `done` | A draft is blocked for symbol NAV, cash reserve, margin, IV rank, DTE, earnings blackout, or the daily order cap. Nine contracts is still blocked. Missing marks are skipped. |
 | P4-17 | Strike distance and DTE band from settings | `done` | A 20% distance on a price of 100 picks put 80 and call 120. The open band still uses the settings DTE window. |
-| P4-18 | No conflicting directional shorts | `done` | Fixture `ZZCF` already had a short option. A new CSP was stored as blocked. A strangle is still one draft with both legs. Rows deleted. |
+| P4-18 | No second short put | `done` | An existing short put blocks a new cash-secured put (`I3: duplicate short put`). |
+| P4-18b | Wheel still allows a cash-secured put beside a short call | `done` | An existing short call still allows a new cash-secured put. A covered call still needs enough shares. |
 | P4-19 | Fills Athena did not draft | `done` | Fill `exec-zz` was stored as `EXTERNAL`, the position updated, and a second copy was ignored. Rows deleted. |
 | P4-20 | Cash and margin snapshot | `done` | A test mark stored cash 1000 and margin 100, then the row was deleted. An Athena slot writes the live values. |
 | P4-21 | Manual news forward | `done` | Three pasted `ZZNEWS` headlines tagged `NEWS_WASH`. Rows deleted. |
 | P4-22 | Phase tags on the draft card | `done` | Fixture `draft_zztag` listed `NEWS_WASH` and `HIGH_IV`. The row was deleted. |
 | P4-23 | Read settings by domain | `done` | `/settings get risk` prints the limits and `privilege all_orders`. |
 | P4-24 | Blocked symbols | `done` | `ZZBLK` on the deny list produced no draft. |
+| P4-25 | Strangle with shares | `done` | `NEWS_WASH` and `RV_HIGH` on a symbol that allows a strangle, with at least 100 shares, drafts `OPEN_CSP` then `OPEN_CC`. Under 100 shares it does not. |
+| P4-26 | Cycle budget | `done` | Two opens that together break the cash reserve are both blocked. A full `AI_NARRATIVE` bucket blocks the next ticket. A put that would leave cash under 10% of NAV is blocked. `/book` shows realized risk and prints `market_unknown`. |
 | P5-07 | Ops health and backup | `done` | `/ops health` checks Orchestrator, iTick, Store, backup, and Telegram. Backup writes a local snapshot. Halt and resume apply to the active account. |
 | P5-08 | Backup retention | `done` | A snapshot older than 14 days was removed. The newest file stayed. |
 | P5-09 | Reconnect only in an Athena slot | `done` | An Athena slot retries a failed Gateway login. A Mobile slot disconnects and does not retry. |

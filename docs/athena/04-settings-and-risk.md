@@ -45,16 +45,16 @@ Everything parametric: Settings.
 | `max_position_per_symbol` | 0 | Money cap per symbol, in the ticker currency. Zero is off. One option contract is the latest price times the multiplier. A total within 10% still fits. When one contract is already above the cap, the contract limit is used. |
 | `max_orders_per_day` | 10 | Activity cap |
 | `daily_loss_halt_pct` | 5% | Pause trading |
-| `min_iv_rank_new_short` | 20–50 | Block cheap premium sells |
+| `min_rv_pctl_new_short` | 40–50 | A new short needs this percentile of the symbol's own `RV20`. Fewer than 20 samples does not pass. |
+| `margin_rate` | 20 | Percent of notional used when a new short’s margin is estimated |
+| `strict_conflict` | off | On means any existing short blocks every new open. Off allows a short put and a covered call on the same name |
 | `min_dte_new` | 7 | Avoid gamma junk |
 | `earnings_blackout_days` | 7 | No new around earnings (unless NFR exception flag) |
 | `reject_streak_halt` | 3 | Pause after IB rejects |
 
-Risk Guard runs **always**, independent of privilege.
-
 Named profiles fill those limits. They do not change privilege.
 
-| Profile | Name size | Cash floor | Contracts | IV rank floor | DTE floor |
+| Profile | Name size | Cash floor | Contracts | Short floor | DTE floor |
 |---------|-----------|------------|-----------|---------------|-----------|
 | defensive | 10% | 40% | 1 | 60 | 21 |
 | standard | 20% | 30% | 3 | 50 | 7 |
@@ -62,7 +62,13 @@ Named profiles fill those limits. They do not change privilege.
 | aggressive | 35% | 15% | 4 | 30 | 7 |
 | test | 80% | 5% | 12 | 0 | 1 |
 
-**test** is for the paper account. It is the same Approve path and the same Athena slot. It does not send an order while the slot is idle. It also drops the IV rank sample minimum to 1, so a rank can exist before 20 marks. Switching back to standard restores the standard knobs and the sample minimum of 20. With no calendar event, names stay P1 HOLD.
+**test** is for the paper account. It is the same Approve path and the same Athena slot. It does not send an order while the slot is idle. It also drops the sample minimum to 1, so a rank can exist before 20 marks. Switching back to standard restores the standard knobs and the sample minimum of 20. With no calendar event, names stay P1 HOLD.
+
+Risk Guard runs on every draft, independent of privilege:
+
+- A covered call needs `floor(shares / 100)` contracts still free after short calls already held or submitted. The block text names the shares required and the shares held.
+- A second short put is blocked. A strangle is blocked when an option leg is already open. A short put beside a covered call is allowed unless `strict_conflict` is on.
+- A ticket’s cash need is the share buys plus each short put’s strike times its multiplier. If that need breaks `cash_reserve_pct`, every leg on the ticket is blocked. Missing marks are skipped.
 
 ### 2. Strategy (NFR params)
 
@@ -70,14 +76,27 @@ Named profiles fill those limits. They do not change privilege.
 |-----|------|
 | `phase_windows` | Days for P1–P5 relative to T |
 | `news_wash_count` / `news_wash_days` | Density trigger |
-| `ivr_high` / `ivr_low` | Tag thresholds |
-| `strangle_otm_pct` | Put/call distance |
-| `csp_buffer_pct` / `cc_buffer_pct` | Strike buffers |
-| `dte_open_band` | e.g. 30–45 |
-| `profit_take_pct` | e.g. 50% of max premium |
-| `roll_dte` | e.g. 21 |
-| `rsi_ob` / `rsi_os` | 70 / 30 |
-| `support_lookback_days` | 20 |
+| `ivr_high` / `ivr_low` | 80 / 20. Kept for old rows. They do not produce `HIGH_IV` or `LOW_IV` |
+| `ivr_min_samples` | 20. A rank stays off until this many samples exist |
+| `rv_window` | 20 sessions for `RV20` |
+| `rv_high_pctl` / `rv_low_pctl` | 80 / 20. These produce `RV_HIGH` and `RV_LOW` |
+| `chain_band_pct` | 25. How wide a strike menu to fetch, around the price |
+| `screener_top_n` | 3. Fewer rows are shown as they are. None are invented |
+| `csp_delta_target` / `csp_delta_lo` / `csp_delta_hi` | 0.25 / 0.10 / 0.40 |
+| `cc_delta_target` | 0.30. The call strike must also clear the share cost |
+| `strangle_delta_target` | 0.28 |
+| `otm_floor_pct` / `otm_ceiling_pct` | 3 / 20. The distance target is clamped here, and the clamp is audited |
+| `iv_rv_multiple_hi` / `_mid` / `_lo` | 1.05 / 1.35 / 1.80 by `RV20` band. An assumption for picking a strike. Not implied volatility |
+| `dte_min` / `dte_target` / `dte_max` | 21 / 35 / 60 |
+| `profit_take_pct` | 50. Percent of premium that drafts a close |
+| `roll_dte` | 21 |
+| `rsi_overbought` / `rsi_oversold` | 70 / 30 |
+| `level_lookback` | 20 sessions for support and resistance |
+| `drawdown_band_high_pct` / `drawdown_band_low_pct` | 15 / 5 |
+| `dip_deep_pos` / `dip_reclaim_pos` | 0.35 / 0.45 inside `dip_window_sessions` (5) |
+| `regime_index` | `SPY`, over `regime_lookback` sessions (63) |
+
+The old name `strangle_otm_pct` is not read. There is no separate strike-buffer percent.
 
 ### 3. Preference / UX
 

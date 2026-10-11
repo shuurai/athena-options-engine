@@ -8,17 +8,9 @@ from decimal import Decimal
 import psycopg
 
 from athena_settings.model import SettingsPayload
+from athena_strategy.tags import OVERBOUGHT, OVERSOLD, PRICE_WEAK, RESISTANCE_TOUCH, SUPPORT_TOUCH, VOLUME_SPIKE
 
 log = logging.getLogger("athena.strategy")
-
-PRICE_OWNED = {
-    "OVERBOUGHT",
-    "OVERSOLD",
-    "SUPPORT_TOUCH",
-    "RESISTANCE_TOUCH",
-    "PRICE_WEAK",
-    "VOLUME_SPIKE",
-}
 
 
 def rsi(closes: list[Decimal], period: int) -> Decimal | None:
@@ -60,25 +52,25 @@ def price_tags(
     value = rsi(closes, period)
     if value is not None:
         if value >= overbought:
-            tags.add("OVERBOUGHT")
+            tags.add(OVERBOUGHT)
         elif value <= oversold:
-            tags.add("OVERSOLD")
+            tags.add(OVERSOLD)
     if len(lows) >= lookback and len(highs) >= lookback and closes:
         window_low = min(lows[-lookback:])
         window_high = max(highs[-lookback:])
         close = closes[-1]
         band = Decimal(touch_pct) / Decimal(100)
         if window_low > 0 and abs(close - window_low) / window_low <= band:
-            tags.add("SUPPORT_TOUCH")
+            tags.add(SUPPORT_TOUCH)
         if window_high > 0 and abs(close - window_high) / window_high <= band:
-            tags.add("RESISTANCE_TOUCH")
+            tags.add(RESISTANCE_TOUCH)
     if len(closes) > lookback and closes[-1] < closes[-1 - lookback]:
-        tags.add("PRICE_WEAK")
+        tags.add(PRICE_WEAK)
     if volumes is not None and len(volumes) > lookback:
         prior = volumes[-(lookback + 1):-1]
         average = sum(prior) / Decimal(len(prior))
         if average > 0 and volumes[-1] >= average * Decimal(volume_multiple):
-            tags.add("VOLUME_SPIKE")
+            tags.add(VOLUME_SPIKE)
     return tags
 
 

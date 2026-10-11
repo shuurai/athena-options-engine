@@ -14,8 +14,18 @@ from athena_exec.broker import BrokerPosition, IbBroker
 from athena_exec.gate import SOFT_BLOCKS, live_block_reason
 from athena_exec.halt import active_reason, note_nav
 from athena_exec.slots import HKT, slot_state
-from athena_settings.model import SettingsPayload
-from athena_exec.options import choose_expiry, choose_strikes, expiry_band, strike_shortlist
+from athena_settings.model import SettingsPayload, TacticFlags
+from athena_exec.options import (
+    atm_strikes,
+    choose_expiry,
+    choose_strikes,
+    discovery_params,
+    expiry_band,
+    plan_otm_pct,
+    strike_shortlist,
+    wide_band,
+)
+from athena_marketdata.pricing import has_daily_on, last_tradeable_price
 
 log = logging.getLogger("athena.exec")
 
@@ -45,6 +55,7 @@ def run_session(
     _cache_quotes(conn, broker, settings.watchlist)
     _cache_history(conn, broker, settings.watchlist, moment.date())
     _cache_strangles(conn, broker, settings, moment.date())
+    _record_chain_marks(conn, broker, settings, moment.date())
     if sync:
         _refresh_account(conn, broker, settings, account, moment)
     for other in also_sync or []:
@@ -84,14 +95,7 @@ def _cache_quotes(conn, broker, symbols: list[str]) -> None:
 def _cache_history(conn, broker, symbols: list[str], today) -> None:
     wrote = False
     for symbol in symbols:
-        cached = conn.execute(
-            """
-            SELECT 1 FROM market_bars
-            WHERE symbol = %s AND source = 'ib-daily' AND ts::date = %s
-            """,
-            (symbol, today),
-        ).fetchone()
-        if cached is not None:
+        if has_daily_on(conn, symbol, today):
             continue
         bars = broker.daily_history(symbol)
         if not bars:
@@ -250,7 +254,8 @@ def cache_symbol_chain(conn, broker, settings: SettingsPayload, symbol: str, und
         log.info("strangle none symbol=%s", symbol)
         return
     strikes = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
-    picked = choose_strikes(strikes, underlying, strategy.strangle_otm_pct)
+    distance = plan_otm_pct(strategy, _stored_rv(conn, symbol), (expiry - today).days)
+    picked = choose_strikes(strikes, underlying, distance)
     if picked is None:
         log.info("strangle none symbol=%s", symbol)
         return
@@ -287,39 +292,102 @@ def cache_symbol_chain(conn, broker, settings: SettingsPayload, symbol: str, und
     )
 
 
-def _cache_strangles(conn, broker, settings: SettingsPayload, today) -> None:
+def chain_names(settings: SettingsPayload) -> list[str]:
+    """Watchlist names that still sell options. A missing flag row stays on."""
+    names = []
     for symbol in settings.watchlist:
-        price = conn.execute(
-            """
-            SELECT close FROM market_bars
-            WHERE symbol = %s AND source = 'ib-delayed'
-            ORDER BY ts DESC
-            LIMIT 1
-            """,
-            (symbol,),
-        ).fetchone()
+        flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+        if flags.options_on():
+            names.append(symbol)
+    return names
+
+
+def _cache_strangles(conn, broker, settings: SettingsPayload, today) -> None:
+    for symbol in chain_names(settings):
+        price = last_tradeable_price(conn, symbol)
         if price is None:
             continue
-        cache_symbol_chain(conn, broker, settings, symbol, price[0], today)
+        cache_symbol_chain(conn, broker, settings, symbol, price, today)
+
+
+def _record_chain_marks(conn, broker, settings: SettingsPayload, today) -> None:
+    """Append one ATM mid per name. A replay never calls this."""
+    for symbol in chain_names(settings):
+        price = last_tradeable_price(conn, symbol)
+        if price is None:
+            continue
+        record_chain_snapshot(conn, broker, settings, symbol, price, today)
+
+
+def record_chain_snapshot(conn, broker, settings: SettingsPayload, symbol: str, underlying: Decimal, today) -> bool:
+    """Append the closest listed call and put mids. Skip when either quote is one-sided."""
+    chain = broker.option_chain(symbol)
+    if chain is None:
+        return False
+    expiries, _strikes, trading_class, exchange, multiplier = chain
+    strategy = settings.strategy
+    expiry = choose_expiry(list(expiries), today, strategy.dte_min, strategy.dte_target)
+    if expiry is None:
+        return False
+    picked = atm_strikes(broker.expiry_strikes(symbol, expiry, trading_class, exchange), underlying)
+    if picked is None:
+        return False
+    put_strike, call_strike = picked
+    put_mid = broker.option_mid(symbol, expiry, put_strike, "P", trading_class, exchange, multiplier)
+    call_mid = broker.option_mid(symbol, expiry, call_strike, "C", trading_class, exchange, multiplier)
+    if put_mid is None or call_mid is None:
+        log.info("chain mid missing symbol=%s", symbol)
+        return False
+    distance = max(abs(put_strike - underlying), abs(call_strike - underlying)) / underlying * Decimal(100)
+    conn.execute(
+        """
+        INSERT INTO chain_marks (symbol, expiry, dte, k_call, k_put, moneyness_pct, mid_call, mid_put)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            symbol,
+            expiry,
+            (expiry - today).days,
+            call_strike,
+            put_strike,
+            distance,
+            call_mid,
+            put_mid,
+        ),
+    )
+    conn.commit()
+    log.info("chain mark symbol=%s expiry=%s put=%s call=%s", symbol, expiry, put_strike, call_strike)
+    return True
+
+
+def _stored_rv(conn, symbol: str) -> Decimal | None:
+    row = conn.execute(
+        "SELECT rv20 FROM rv_marks WHERE symbol = %s ORDER BY day DESC LIMIT 1",
+        (symbol.upper(),),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return Decimal(row[0])
 
 
 def _store_choices(
     conn, broker, symbol: str, expiries: list[str], today, underlying: Decimal,
     trading_class: str, exchange: str, multiplier: str, strategy, target,
 ) -> None:
-    """Keep a short listed band. The target expiry also stores each ask."""
+    """Keep a wide listed band and an ask on every expiry. option_choices writer; reads live in screener.py."""
+    del target
     band = expiry_band(expiries, today, strategy.dte_min, strategy.dte_max, strategy.dte_target)
+    width, distance = discovery_params(strategy)
+    inside = wide_band()
     conn.execute("DELETE FROM option_choices WHERE symbol = %s", (symbol,))
     for expiry in band:
         listed = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
-        rows = [("P", strike) for strike in strike_shortlist(listed, underlying, "P", otm_pct=strategy.strangle_otm_pct)]
-        rows.extend(("C", strike) for strike in strike_shortlist(listed, underlying, "C", otm_pct=strategy.strangle_otm_pct))
+        rows = [("P", strike) for strike in strike_shortlist(listed, underlying, "P", width=width, otm_pct=distance, inside=inside)]
+        rows.extend(("C", strike) for strike in strike_shortlist(listed, underlying, "C", width=width, otm_pct=distance, inside=inside))
         for right, strike in rows:
-            limit_price = None
-            if target is not None and expiry == target:
-                limit_price = broker.option_ask(
-                    symbol, expiry, strike, right, trading_class, exchange, multiplier,
-                )
+            limit_price = broker.option_ask(
+                symbol, expiry, strike, right, trading_class, exchange, multiplier,
+            )
             conn.execute(
                 """
                 INSERT INTO option_choices (symbol, expiry, contract_right, strike, limit_price)

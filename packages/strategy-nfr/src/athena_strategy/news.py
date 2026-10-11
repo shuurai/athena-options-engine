@@ -22,11 +22,10 @@ import psycopg
 from athena_settings.model import SettingsPayload
 from athena_settings.resolve import deepseek_token, scoring_model
 from athena_strategy.dsh import enrich_sentiment, read_article
+from athena_strategy.tags import EARNINGS_NEAR, FED_EVENT, NEWS_WASH
 from athena_strategy.types import NEWS_TYPE_CODES
 
 log = logging.getLogger("athena.news")
-
-NEWS_OWNED = {"NEWS_WASH", "FED_EVENT", "EARNINGS_NEAR"}
 ET = ZoneInfo("America/New_York")
 _UA = "Mozilla/5.0 (compatible; AthenaNews/0.1)"
 _PAGE_UA = (
@@ -225,12 +224,12 @@ def tags_from_events(
         (symbol, news.wash_sentiment_below, start),
     ).fetchone()[0]
     if count >= news.wash_min_negative:
-        tags.add("NEWS_WASH")
+        tags.add(NEWS_WASH)
     fed = conn.execute(
         "SELECT event_date FROM calendar_marks WHERE kind = 'FED' AND symbol = ''"
     ).fetchall()
     if any(abs((row[0] - day).days) <= news.fed_window_days for row in fed):
-        tags.add("FED_EVENT")
+        tags.add(FED_EVENT)
     earnings = conn.execute(
         """
         SELECT event_date FROM calendar_marks
@@ -239,7 +238,7 @@ def tags_from_events(
         (symbol,),
     ).fetchall()
     if any(abs((row[0] - day).days) <= news.earnings_near_days for row in earnings):
-        tags.add("EARNINGS_NEAR")
+        tags.add(EARNINGS_NEAR)
     return tags
 
 

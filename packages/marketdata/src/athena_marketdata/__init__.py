@@ -1,4 +1,4 @@
-"""Write watchlist bars from iTick, or a labeled seed when the key is missing."""
+"""Write watchlist bars from iTick. A missing quote stays missing."""
 
 from athena_marketdata.bars import write_watchlist_bars
 

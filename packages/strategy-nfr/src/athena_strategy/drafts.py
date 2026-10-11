@@ -9,7 +9,7 @@ from decimal import Decimal
 import psycopg
 
 from athena_exec.halt import active_reason, note_reject_streak
-from athena_risk import allowed_open, block_reason
+from athena_risk import allowed_open, block_reason, block_ticket_reason
 from athena_settings import load_active
 from athena_settings.model import SettingsPayload
 
@@ -37,7 +37,7 @@ def ensure_paper_draft(conn: psycopg.Connection, settings: SettingsPayload, acco
     conn.execute(
         """
         INSERT INTO symbol_phases (account_id, symbol, phase, tags, tactic)
-        VALUES (%s, %s, 'P2', 'NEWS_WASH,HIGH_IV', 'OPEN_STRANGLE')
+        VALUES (%s, %s, 'P2', 'NEWS_WASH', 'OPEN_STRANGLE')
         ON CONFLICT (account_id, symbol) DO UPDATE
         SET phase = EXCLUDED.phase, tags = EXCLUDED.tags, tactic = EXCLUDED.tactic
         """,
@@ -177,6 +177,267 @@ def _has_short(conn: psycopg.Connection, account_id: str, symbol: str) -> bool:
     return row is not None and row[0] < 0
 
 
+def _opening_block(
+    conn,
+    settings: SettingsPayload,
+    account_id: str,
+    symbol: str,
+    tactic: str,
+    contracts: int,
+    multiplier: str,
+    simulated: bool,
+) -> str | None:
+    if settings.risk.strict_conflict and _has_short(conn, account_id, symbol):
+        return "conflicting short on this symbol"
+    if tactic == "OPEN_CC":
+        cover = _cover_reason(conn, account_id, symbol, contracts, multiplier, simulated)
+        if cover:
+            return cover
+    return _conflict_reason(conn, account_id, symbol, tactic, simulated)
+
+
+def _cover_reason(
+    conn, account_id: str, symbol: str, contracts: int, multiplier: str, simulated: bool,
+) -> str | None:
+    mult = _chain_multiplier(multiplier)
+    shares = _share_quantity(conn, account_id, symbol, simulated)
+    used = _held_call_contracts(conn, account_id, symbol, simulated)
+    remaining = int(shares // mult) - used
+    if contracts > remaining:
+        need = (used + contracts) * mult
+        return f"I1: cc needs {_whole(need)} covered shares, held {_whole(shares)}"
+    return None
+
+
+def _conflict_reason(conn, account_id: str, symbol: str, tactic: str, simulated: bool) -> str | None:
+    short_put, _short_call, any_leg = _option_flags(conn, account_id, symbol, simulated)
+    if tactic == "OPEN_CSP" and short_put:
+        return "I3: duplicate short put"
+    if tactic == "OPEN_STRANGLE" and any_leg:
+        return "I3: option leg already open on this symbol"
+    return None
+
+
+def _share_quantity(conn, account_id: str, symbol: str, simulated: bool) -> Decimal:
+    row = conn.execute(
+        """
+        SELECT quantity FROM positions
+        WHERE account_id = %s AND symbol = %s AND sec_type = 'STK' AND simulated = %s
+        ORDER BY snapshot_at DESC, id DESC
+        LIMIT 1
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchone()
+    if row is None or row[0] is None or row[0] <= 0:
+        return Decimal(0)
+    return Decimal(row[0])
+
+
+def _held_call_contracts(conn, account_id: str, symbol: str, simulated: bool) -> int:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (expiry, contract_right, strike) quantity, contract_right
+        FROM positions
+        WHERE account_id = %s AND symbol = %s AND sec_type = 'OPT' AND simulated = %s
+        ORDER BY expiry, contract_right, strike, snapshot_at DESC
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchall()
+    held = 0
+    for quantity, right in rows:
+        if right == "C" and quantity is not None and quantity < 0:
+            held += int(abs(quantity))
+    working = conn.execute(
+        """
+        SELECT coalesce(sum(contracts), 0) FROM orders
+        WHERE account_id = %s AND symbol = %s AND simulated = %s
+          AND status IN ('submitted', 'queued') AND action = 'SELL' AND contract_right = 'C'
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchone()[0]
+    pending = conn.execute(
+        """
+        SELECT coalesce(sum(contracts), 0) FROM drafts
+        WHERE account_id = %s AND symbol = %s AND simulated = %s
+          AND status = 'pending' AND tactic = 'OPEN_CC'
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchone()[0]
+    return held + int(working) + int(pending)
+
+
+def _option_flags(conn, account_id: str, symbol: str, simulated: bool) -> tuple[bool, bool, bool]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (expiry, contract_right, strike) quantity, contract_right
+        FROM positions
+        WHERE account_id = %s AND symbol = %s AND sec_type = 'OPT' AND simulated = %s
+        ORDER BY expiry, contract_right, strike, snapshot_at DESC
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchall()
+    short_put = False
+    short_call = False
+    any_leg = False
+    for quantity, right in rows:
+        if quantity is None or quantity == 0:
+            continue
+        any_leg = True
+        if quantity < 0 and right == "P":
+            short_put = True
+        if quantity < 0 and right == "C":
+            short_call = True
+    orders = conn.execute(
+        """
+        SELECT contract_right FROM orders
+        WHERE account_id = %s AND symbol = %s AND simulated = %s
+          AND status IN ('submitted', 'queued') AND action = 'SELL'
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchall()
+    for (right,) in orders:
+        any_leg = True
+        if right == "P":
+            short_put = True
+        if right == "C":
+            short_call = True
+    drafts = conn.execute(
+        """
+        SELECT tactic FROM drafts
+        WHERE account_id = %s AND symbol = %s AND simulated = %s
+          AND status IN ('pending', 'approved')
+          AND tactic IN ('OPEN_CSP', 'OPEN_CC', 'OPEN_STRANGLE')
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchall()
+    for (tactic,) in drafts:
+        any_leg = True
+        if tactic in {"OPEN_CSP", "OPEN_STRANGLE"}:
+            short_put = True
+        if tactic in {"OPEN_CC", "OPEN_STRANGLE"}:
+            short_call = True
+    return short_put, short_call, any_leg
+
+
+def _chain_multiplier(multiplier: str) -> Decimal:
+    try:
+        mult = Decimal(multiplier or "100")
+    except Exception:
+        return Decimal(100)
+    if mult <= 0:
+        return Decimal(100)
+    return mult
+
+
+def _whole(value: Decimal) -> str:
+    if value == value.to_integral_value():
+        return str(int(value))
+    return format(value, "f")
+
+
+def apply_ticket_block(
+    conn, settings: SettingsPayload, account_id: str, symbol: str, draft_ids: list[str],
+) -> str | None:
+    """Block every still-pending leg when the ticket together breaches a cap."""
+    if not draft_ids:
+        return None
+    rows = conn.execute(
+        """
+        SELECT id, tactic, contracts, limit_price, put_strike, call_strike, multiplier
+        FROM drafts
+        WHERE id = ANY(%s) AND status = 'pending'
+        """,
+        (draft_ids,),
+    ).fetchall()
+    if not rows:
+        return None
+    from athena_exec.broker import stock_venue
+
+    simulated = _symbol_in_replay(conn, account_id, symbol)
+    price = last_tradeable_price(conn, symbol)
+    nav = conn.execute(
+        "SELECT last_nav FROM nav_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
+        (account_id,),
+    ).fetchone()
+    mark = conn.execute(
+        """
+        SELECT cash, margin, base_currency, fx_rates
+        FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
+        """,
+        (account_id,),
+    ).fetchone()
+    orders = conn.execute(
+        """
+        SELECT count(*) FROM orders
+        WHERE account_id = %s AND status <> 'blocked' AND created_at::date = CURRENT_DATE
+        """,
+        (account_id,),
+    ).fetchone()[0]
+    rates = {}
+    if mark is not None and mark[3]:
+        rates = {str(key): Decimal(str(value)) for key, value in mark[3].items()}
+    reason = block_ticket_reason(
+        [_ticket_leg(row) for row in rows],
+        settings.risk,
+        {
+            "nav": None if nav is None else nav[0],
+            "cash": None if mark is None else mark[0],
+            "margin": None if mark is None else mark[1],
+            "base": "" if mark is None or not mark[2] else mark[2],
+            "rates": rates,
+            "orders_today": int(orders),
+            "price": price,
+            "currency": stock_venue(symbol)[1],
+        },
+        _namespaced_exposure(conn, account_id, symbol, price, simulated) if price is not None else Decimal(0),
+    )
+    if reason is None:
+        return None
+    conn.execute(
+        """
+        UPDATE drafts SET status = 'blocked', reason = %s
+        WHERE id = ANY(%s) AND status = 'pending'
+        """,
+        (reason, [row[0] for row in rows]),
+    )
+    conn.commit()
+    return reason
+
+
+def _ticket_leg(row) -> dict:
+    _draft_id, tactic, contracts, limit_price, put_strike, call_strike, multiplier = row
+    return {
+        "tactic": tactic,
+        "contracts": int(contracts),
+        "limit": None if limit_price is None else Decimal(limit_price),
+        "put_strike": None if put_strike is None else Decimal(put_strike),
+        "call_strike": None if call_strike is None else Decimal(call_strike),
+        "multiplier": _chain_multiplier(multiplier),
+        "orders": 2 if tactic == "OPEN_STRANGLE" else 1,
+    }
+
+
+def _namespaced_exposure(conn, account_id: str, symbol: str, price: Decimal, simulated: bool) -> Decimal:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (sec_type, expiry, contract_right, strike)
+            quantity, sec_type, multiplier
+        FROM positions
+        WHERE account_id = %s AND symbol = %s AND simulated = %s
+        ORDER BY sec_type, expiry, contract_right, strike, snapshot_at DESC
+        """,
+        (account_id, symbol.upper(), simulated),
+    ).fetchall()
+    total = Decimal(0)
+    for quantity, sec_type, multiplier in rows:
+        qty = abs(Decimal(quantity))
+        if sec_type == "OPT":
+            total += qty * Decimal(multiplier or 100) * price
+        else:
+            total += qty * price
+    return total
+
+
 def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> dict:
     orders = conn.execute(
         """
@@ -207,6 +468,11 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
     from athena_strategy.simbars import replay_cursor
 
     today = replay_cursor(conn, symbol) or date.today()
+    if isinstance(expiry, str) and expiry:
+        try:
+            expiry = date.fromisoformat(expiry[:10])
+        except ValueError:
+            expiry = None
     nearest = None
     if earnings:
         offsets = [(row[0] - today).days for row in earnings]
@@ -218,7 +484,6 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
             "symbol_value": _symbol_value(conn, account_id, symbol),
             "cash": None if mark is None else mark[0],
             "margin": None if mark is None else mark[1],
-            "iv_rank": _stored_iv_rank(conn, account_id, symbol),
             "dte": dte,
             "earnings_in_days": nearest,
         }
@@ -242,15 +507,12 @@ def _symbol_value(conn, account_id: str, symbol: str):
 
 
 def _stored_iv_rank(conn, account_id: str, symbol: str) -> int | None:
-    from athena_strategy.iv import iv_rank
+    """Premium-ratio rank only. Not passed into the order gate."""
+    from athena_strategy.iv import PREMIUM_METHOD, iv_rank, iv_samples
 
-    rows = conn.execute(
-        "SELECT iv_proxy FROM iv_marks WHERE symbol = %s ORDER BY day",
-        (symbol,),
-    ).fetchall()
-    if not rows:
+    samples = iv_samples(conn, symbol, PREMIUM_METHOD)
+    if not samples:
         return None
-    samples = [row[0] for row in rows]
     minimum = load_active(conn, account_id).strategy.ivr_min_samples
     return iv_rank(samples, samples[-1], minimum)
 
@@ -276,7 +538,7 @@ def open_quantity(
     limits = settings.risk
     if limits.max_position_per_symbol <= 0:
         return 1
-    price = _latest_price(conn, symbol)
+    price = last_tradeable_price(conn, symbol)
     if price is None:
         return 1
     mult = Decimal(multiplier or "100")
@@ -298,7 +560,12 @@ def _symbol_in_replay(conn: psycopg.Connection, account_id: str, symbol: str) ->
     return row is not None
 
 
-def _latest_price(conn: psycopg.Connection, symbol: str) -> Decimal | None:
+def last_tradeable_price(conn: psycopg.Connection, symbol: str) -> Decimal | None:
+    """Replay close, otherwise the live intraday print or the daily close.
+
+    Live rails and IV marks do not use this. They use the merged daily series.
+    """
+    from athena_marketdata.pricing import last_tradeable_price as market_price
     from athena_strategy.simbars import in_replay, last_close
 
     if in_replay(conn, symbol):
@@ -306,18 +573,7 @@ def _latest_price(conn: psycopg.Connection, symbol: str) -> Decimal | None:
         if close is None or close <= 0:
             return None
         return Decimal(close)
-    row = conn.execute(
-        """
-        SELECT close FROM market_bars
-        WHERE symbol = %s AND source IN ('ib-delayed', 'ib-daily') AND close > 0
-        ORDER BY ts DESC
-        LIMIT 1
-        """,
-        (symbol,),
-    ).fetchone()
-    if row is None:
-        return None
-    return Decimal(row[0])
+    return market_price(conn, symbol)
 
 
 def _exposure(conn: psycopg.Connection, account_id: str, symbol: str, price: Decimal) -> Decimal:
@@ -343,7 +599,7 @@ def _exposure(conn: psycopg.Connection, account_id: str, symbol: str, price: Dec
 
 
 def _position_inputs(conn, account_id: str, symbol: str, multiplier: str) -> dict:
-    price = _latest_price(conn, symbol)
+    price = last_tradeable_price(conn, symbol)
     if price is None:
         return {}
     mult = Decimal(multiplier or "100")
@@ -431,52 +687,85 @@ def stage_draft(
     option_exchange: str = "",
     multiplier: str = "100",
     order_action: str = "",
+    ticket_id: str | None = None,
+    leg_index: int | None = None,
+    forced_block: str | None = None,
+    enforce_contract_cap: bool = True,
 ) -> dict:
     """Insert a draft and report why. status is pending, blocked, or skipped."""
+    if forced_block:
+        return _insert_draft(
+            conn, symbol, tactic, contracts, "blocked", forced_block, phase, account_id,
+            instrument, limit_price, expiry, put_strike, call_strike, put_limit, call_limit,
+            trading_class, option_exchange, multiplier, order_action,
+            _symbol_in_replay(conn, account_id, symbol), ticket_id, leg_index,
+        )
     if symbol.upper() in {item.upper() for item in settings.blocked_symbols}:
-        return {"id": None, "status": "skipped", "detail": "symbol blocked", "contracts": contracts}
+        return {"id": None, "status": "skipped", "detail": "symbol blocked", "contracts": contracts, "tactic": tactic}
     if not _tactic_on(settings, symbol, tactic):
         flag = _TACTIC_FLAG.get(tactic, "tactic")
         return {"id": None, "status": "skipped", "detail": f"{flag} is off", "contracts": contracts}
+    from athena_strategy.screener import outside_table
+
+    off_table = outside_table(
+        conn, settings, account_id, symbol, tactic, expiry, put_strike, call_strike, None, date.today(),
+    )
+    if off_table:
+        return {"id": None, "status": "skipped", "detail": off_table, "contracts": contracts}
     opening = tactic in {"OPEN_STRANGLE", "OPEN_CSP", "OPEN_CC", "BUY"}
-    if opening and _has_short(conn, account_id, symbol):
-        blocked = "conflicting short on this symbol"
-    else:
+    simulated = _symbol_in_replay(conn, account_id, symbol)
+    blocked = (
+        _opening_block(conn, settings, account_id, symbol, tactic, contracts, multiplier, simulated) if opening else None
+    )
+    if blocked is None:
         extra = _position_inputs(conn, account_id, symbol, multiplier) if opening else {}
         blocked = block_reason(
             contracts,
             settings.risk,
             opening=opening,
             needs_cash=tactic in {"OPEN_CSP", "BUY"},
+            enforce_contract_cap=enforce_contract_cap,
             **_guard_inputs(conn, account_id, symbol, expiry, opening),
             **extra,
         )
     status = "blocked" if blocked else "pending"
+    return _insert_draft(
+        conn, symbol, tactic, contracts, status, blocked or reason, phase, account_id,
+        instrument, limit_price, expiry, put_strike, call_strike, put_limit, call_limit,
+        trading_class, option_exchange, multiplier, order_action, simulated, ticket_id, leg_index,
+    )
+
+
+def _insert_draft(
+    conn, symbol, tactic, contracts, status, reason, phase, account_id,
+    instrument, limit_price, expiry, put_strike, call_strike, put_limit, call_limit,
+    trading_class, option_exchange, multiplier, order_action, simulated, ticket_id, leg_index,
+) -> dict:
     draft_id = "draft_" + secrets.token_hex(3)
-    simulated = _symbol_in_replay(conn, account_id, symbol)
     conn.execute(
         """
         INSERT INTO drafts (
             id, symbol, tactic, contracts, status, reason, phase, account_id,
             instrument, limit_price, expiry, put_strike, call_strike,
             put_limit, call_limit, trading_class, option_exchange, multiplier, order_action,
-            simulated
+            simulated, ticket_id, leg_index
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            draft_id, symbol, tactic, contracts, status, blocked or reason, phase, account_id,
+            draft_id, symbol, tactic, contracts, status, reason, phase, account_id,
             instrument, limit_price, expiry, put_strike, call_strike,
             put_limit, call_limit, trading_class, option_exchange, multiplier, order_action,
-            simulated,
+            simulated, ticket_id, leg_index,
         ),
     )
     conn.commit()
     return {
         "id": draft_id,
         "status": status,
-        "detail": blocked or f"pending, size {contracts}",
+        "detail": reason if status != "pending" else f"pending, size {contracts}",
         "contracts": contracts,
+        "tactic": tactic,
     }
 
 
@@ -539,7 +828,7 @@ def apply_amend(conn: psycopg.Connection, draft_id: str, fields: dict) -> None:
         if limit_price is None:
             raise AmendError("this draft has no limit")
         updates["limit_price"] = value
-    _apply_listed(conn, symbol, tactic, expiry, put_strike, call_strike, fields, updates)
+    _apply_listed(conn, settings, account_id, symbol, tactic, expiry, put_strike, call_strike, fields, updates)
     if not updates:
         return
     assignments = ", ".join(f"{key} = %s" for key in updates)
@@ -549,7 +838,7 @@ def apply_amend(conn: psycopg.Connection, draft_id: str, fields: dict) -> None:
     )
 
 
-def _apply_listed(conn, symbol: str, tactic: str, expiry, put_strike, call_strike, fields: dict, updates: dict) -> None:
+def _apply_listed(conn, settings: SettingsPayload, account_id: str, symbol: str, tactic: str, expiry, put_strike, call_strike, fields: dict, updates: dict) -> None:
     moving = any(fields.get(key) is not None for key in ("expiry", "put_strike", "call_strike"))
     if not moving:
         return
@@ -558,9 +847,9 @@ def _apply_listed(conn, symbol: str, tactic: str, expiry, put_strike, call_strik
     final_expiry = fields["expiry"] if fields.get("expiry") is not None else expiry
     final_put = fields["put_strike"] if fields.get("put_strike") is not None else put_strike
     final_call = fields["call_strike"] if fields.get("call_strike") is not None else call_strike
-    if final_put is not None and not _listed(conn, symbol, final_expiry, "P", final_put):
+    if final_put is not None and not _listed(conn, settings, account_id, symbol, tactic, final_expiry, "P", final_put):
         raise AmendError("that put is not listed for this expiry")
-    if final_call is not None and not _listed(conn, symbol, final_expiry, "C", final_call):
+    if final_call is not None and not _listed(conn, settings, account_id, symbol, tactic, final_expiry, "C", final_call):
         raise AmendError("that call is not listed for this expiry")
     if final_expiry != expiry:
         updates["expiry"] = final_expiry
@@ -574,7 +863,7 @@ def _amend_cap(conn, settings: SettingsPayload, account_id: str, symbol: str, ta
     cap = settings.risk.max_contracts_per_symbol
     if tactic not in {"OPEN_STRANGLE", "OPEN_CSP", "OPEN_CC"} or settings.risk.max_position_per_symbol <= 0:
         return cap
-    price = _latest_price(conn, symbol)
+    price = last_tradeable_price(conn, symbol)
     if price is None:
         return cap
     mult = Decimal(multiplier or "100")
@@ -583,17 +872,30 @@ def _amend_cap(conn, settings: SettingsPayload, account_id: str, symbol: str, ta
     return allowed_open(settings.risk, price, mult, _exposure(conn, account_id, symbol, price))
 
 
-def _listed(conn, symbol: str, expiry, right: str, strike) -> bool:
+def _listed(conn, settings: SettingsPayload, account_id: str, symbol: str, tactic: str, expiry, right: str, strike) -> bool:
     if expiry is None or strike is None:
         return False
-    row = conn.execute(
-        """
-        SELECT 1 FROM option_choices
-        WHERE symbol = %s AND expiry = %s AND contract_right = %s AND strike = %s
-        """,
-        (symbol, expiry, right, strike),
-    ).fetchone()
-    return row is not None
+    from athena_strategy.screener import outside_table
+
+    put_strike = strike if right == "P" else None
+    call_strike = strike if right == "C" else None
+    reason = outside_table(
+        conn, settings, account_id, symbol, tactic, expiry, put_strike, call_strike, None, date.today(),
+    )
+    if reason:
+        return False
+    from athena_strategy.screener import has_choices, screener_enabled
+
+    if screener_enabled() and has_choices(conn, symbol):
+        return True
+    from athena_strategy.screener import load_choices
+
+    wanted = strike if isinstance(strike, Decimal) else Decimal(str(strike))
+    wanted_day = expiry if isinstance(expiry, date) else date.fromisoformat(str(expiry)[:10])
+    return any(
+        choice.expiry == wanted_day and choice.right == right and choice.strike == wanted
+        for choice in load_choices(conn, symbol)
+    )
 
 
 def amend_view(conn: psycopg.Connection, draft_id: str) -> dict | None:
@@ -618,21 +920,13 @@ def amend_view(conn: psycopg.Connection, draft_id: str) -> dict | None:
     puts: list[tuple[date, Decimal]] = []
     calls: list[tuple[date, Decimal]] = []
     if tactic in {"OPEN_STRANGLE", "OPEN_CSP", "OPEN_CC"}:
-        choice_rows = conn.execute(
-            """
-            SELECT expiry, contract_right, strike FROM option_choices
-            WHERE symbol = %s
-            ORDER BY expiry, contract_right, strike
-            """,
-            (symbol,),
-        ).fetchall()
-        for choice_expiry, right, strike in choice_rows:
+        from athena_marketdata.pricing import last_tradeable_price
+        from athena_strategy.screener import menu_rows
+
+        puts, calls = menu_rows(conn, settings, account_id, symbol, tactic, last_tradeable_price(conn, symbol), date.today())
+        for choice_expiry, _strike in puts + calls:
             if choice_expiry not in expiries:
                 expiries.append(choice_expiry)
-            if right == "P" and tactic != "OPEN_CC":
-                puts.append((choice_expiry, strike))
-            if right == "C" and tactic != "OPEN_CSP":
-                calls.append((choice_expiry, strike))
     return {
         "heading": facts[0],
         "facts": facts[1:],

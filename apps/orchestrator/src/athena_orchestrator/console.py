@@ -42,21 +42,33 @@ _MARK = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidd
 </svg>"""
 _MARK_HREF = " ".join(_MARK.split()).replace("#", "%23").replace('"', "'")
 
-NAV = (
-    ("/", "Cockpit"),
-    ("/simulation", "Simulation"),
-    ("/drafts", "Drafts"),
-    ("/phase", "NFR board"),
-    ("/strategy", "Strategy"),
-    ("/audit", "Audit"),
-    ("/news", "News"),
-    ("/universe", "Universe"),
-    ("/history", "History"),
-    ("/positions", "Positions"),
-    ("/accounts", "Accounts"),
-    ("/risk", "Risk control"),
-    ("/settings", "Settings"),
-    ("/skill", "Skill"),
+NAV_GROUPS = (
+    (
+        "Core logic",
+        (
+            ("/", "Cockpit"),
+            ("/simulation", "Simulation"),
+            ("/drafts", "Drafts"),
+            ("/phase", "NFR board"),
+            ("/audit", "Audit"),
+            ("/news", "News"),
+            ("/universe", "Universe"),
+            ("/history", "History"),
+            ("/positions", "Positions"),
+            ("/book", "Book"),
+            ("/accounts", "Accounts"),
+        ),
+    ),
+    (
+        "Configs",
+        (
+            ("/orchestration", "Orchestration"),
+            ("/risk", "Risk & Strategy"),
+            ("/volatility", "Volatility"),
+            ("/settings", "Settings"),
+            ("/skill", "Skill"),
+        ),
+    ),
 )
 
 _EXTRA_CSS = """
@@ -74,11 +86,20 @@ html, body.console { height: 100%; overflow: hidden; }
   gap: 14px; overflow: hidden;
 }
 .stage > .note, .stage > .profiles { flex: none; }
+.stage > .book-stack { flex: 1 1 auto; min-height: 0; }
+.book-stack > .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.book-heat { flex: 1 1 auto; width: 100%; min-height: 0; height: 100%; display: block; }
 .stage > .fill, .stage > form.fill, .stage > .split, .stage > .sim-page { flex: 1 1 auto; min-height: 0; }
 .sim-page { display: flex; flex-direction: column; gap: 14px; }
 .sim-facts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 16px; margin: 4px 0 14px; }
 .sim-facts .k { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
-.sim-facts .v { margin-top: 4px; font-family: var(--font-mono); font-size: 13px; color: var(--site-text); }
+.sim-facts .v { margin-top: 4px; font-family: var(--font-mono); font-size: 13px; color: var(--site-text); display: flex; align-items: center; gap: 8px; }
+.sim-spin {
+  width: 12px; height: 12px; flex: none; border-radius: 50%;
+  border: 2px solid #2a3340; border-top-color: #6b96f2;
+  animation: sim-spin .7s linear infinite;
+}
+@keyframes sim-spin { to { transform: rotate(360deg); } }
 .sim-note { margin: 0 0 12px; color: var(--site-text-3); font-size: 12.5px; }
 .sim-charts { flex: 1 1 auto; min-height: 0; }
 .sim-progress { flex: none; }
@@ -93,8 +114,19 @@ html, body.console { height: 100%; overflow: hidden; }
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
 }
+.sim-now {
+  position: absolute; top: 26px; bottom: 2px; width: 1px; margin-left: -0.5px;
+  background: #6b96f2; pointer-events: none;
+  box-shadow: 0 0 8px rgba(107, 150, 242, .55);
+  animation: sim-now 2.8s ease-in-out infinite;
+}
+@keyframes sim-now {
+  0%, 100% { opacity: .28; }
+  50% { opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .sim-idle svg { animation: none; }
+  .sim-idle svg, .sim-spin, .sim-now { animation: none; }
+  .sim-now { opacity: 1; }
 }
 .sim-row { margin-bottom: 12px; }
 .sim-row h2 { justify-content: flex-start; }
@@ -125,6 +157,8 @@ html, body.console { height: 100%; overflow: hidden; }
 }
 .draft-stack { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
 .draft-stack > .card { flex: none; }
+.draft-empty { min-height: 420px; display: flex; flex-direction: column; }
+.draft-empty .sim-idle { flex: 1 1 auto; min-height: 420px; }
 .draft-cols > .card.fill { min-height: 0; }
 .card.fill, form.fill { display: flex; flex-direction: column; overflow: hidden; }
 .card.fill > h2, .card.fill > .filters, .card.fill > form, form.fill > .row-actions { flex: none; }
@@ -173,6 +207,7 @@ form.fill > .settings-cols {
 .sim-x svg { width: 10px; height: 10px; }
 .sim-empty { margin: 0; color: var(--site-text-3); font-size: 12px; }
 .settings-field { position: relative; display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.settings-field > .tag { align-self: flex-start; white-space: nowrap; }
 .settings-field > label, .toggle-row > div:first-child { display: inline-flex; align-items: center; gap: 6px; }
 .toggle-row { position: relative; }
 .toggle-row .help-pop, .settings-field .help-pop { top: calc(100% - 4px); left: 0; right: auto; width: min(280px, 100%); }
@@ -336,8 +371,12 @@ table.data tbody tr.phase-pick { cursor: pointer; }
 table.data tbody tr.phase-pick.selected { background: #101c33; box-shadow: inset 3px 0 0 #6b96f2; }
 table.data tbody tr.phase-pick.selected td { color: #f2f4f7; }
 table.data tbody tr.phase-pick.selected b { color: #93c5fd; }
-table.data tbody tr.phase-pick.selected:hover { background: #15243d; }
-.pulse-px .px-chg { display: block; font-size: 11px; font-weight: 600; }
+table.data tbody tr.phase-pick.selected:hover {
+  background: color-mix(in srgb, var(--site-primary) 14%, transparent);
+}
+.pulse-px .px-chg, .band .px-chg { display: block; font-size: 11px; font-weight: 600; }
+.news-when { white-space: nowrap; color: var(--site-text-3); }
+.news-title { color: var(--site-primary); }
 .px-tick { animation: px-tick .7s ease; }
 @keyframes px-tick { 0% { color: #93c5fd; } 100% { color: inherit; } }
 .input { width: 100%; padding: 9px 11px; border: 1px solid var(--site-border-strong); font: 12.5px var(--font-mono); background: #0a0c10; color: var(--site-text); }
@@ -346,12 +385,26 @@ table.data tbody tr.phase-pick.selected:hover { background: #15243d; }
 .sim-date-face { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 6px; padding: 9px 11px; border: 1px solid var(--site-border-strong); background: #0a0c10; color: var(--site-text); font: 13px var(--font-mono); pointer-events: none; }
 .sim-date-face svg { width: 16px; height: 16px; color: #93c5fd; }
 .sim-date input[type="date"] { position: absolute; left: 0; right: 0; bottom: 0; height: 38px; opacity: 0; cursor: pointer; }
+.grid.cols-2 > .span-2 { grid-column: 1 / -1; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+.form-grid.one { grid-template-columns: 1fr; }
+.form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .form-grid label { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--site-text-4); text-transform: uppercase; letter-spacing: .05em; font-family: var(--font-mono); }
 .form-grid > div { position: relative; }
 .form-grid .help-pop { top: 22px; left: 0; right: auto; width: min(280px, 100%); }
 .profiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.profile { text-align: left; cursor: pointer; color: inherit; font: inherit; background: var(--site-canvas); border: 1px solid var(--site-border); padding: 12px; }
+.risk-cols { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.risk-span-5 { grid-column: span 5; }
+.risk-span-2 { grid-column: span 2; min-width: 0; }
+.risk-span-1 { grid-column: span 1; min-width: 0; }
+.risk-stack { display: flex; flex-direction: column; gap: 14px; }
+.risk-span-1 h2 { flex-wrap: wrap; align-items: flex-start; }
+@media (max-width: 1100px) {
+  .risk-cols { grid-template-columns: 1fr; }
+  .risk-span-5, .risk-span-2, .risk-span-1 { grid-column: auto; }
+  .form-grid.three { grid-template-columns: 1fr; }
+}
+.profile { min-width: 0; text-align: left; cursor: pointer; color: inherit; font: inherit; background: var(--site-canvas); border: 1px solid var(--site-border); padding: 12px; }
 .profile.on { border-color: var(--site-primary); background: #101c33; }
 .profile .name { font-weight: 700; font-size: 13px; }
 .stat .value.tone-defensive { color: #4ade80; }
@@ -396,6 +449,8 @@ button.btn.busy::after {
   border: 2px solid #333d49; border-top-color: #6b96f2; border-radius: 50%;
   animation: ath-spin .7s linear infinite;
 }
+button.btn.primary.busy:disabled { opacity: 1; }
+button.btn.primary.busy::after { border-color: rgba(255,255,255,.28); border-top-color: #fff; }
 @keyframes ath-spin { to { transform: rotate(360deg); } }
 .nav .foot { display: flex; flex-direction: column; align-items: stretch; gap: 6px; font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); }
 .nav .foot .chip, .nav .foot .cycle-row { align-self: flex-start; max-width: 100%; }
@@ -894,23 +949,25 @@ def _layout(
 ) -> str:
     badges = _nav_badges(conn)
     links = []
-    for href, label in NAV:
-        current = " class=\"active\"" if href == path else ""
-        badge = badges.get(href)
-        mark = ""
-        if badge:
-            count, warn, caption = badge
-            kind = "nav-badge warn" if warn else "nav-badge"
-            if isinstance(count, str):
-                tip = caption
-                shown = count
-            else:
-                tip = f"{count} {caption}"
-                shown = str(count)
-            mark = (
-                f'<span class="{kind}" title="{escape(tip, quote=True)}">{escape(shown)}</span>'
-            )
-        links.append(f"<a{current} href=\"{href}\">{escape(label)}{mark}</a>")
+    for group, items in NAV_GROUPS:
+        links.append(f'<div class="nav-group">{escape(group)}</div>')
+        for href, label in items:
+            current = " class=\"active\"" if href == path else ""
+            badge = badges.get(href)
+            mark = ""
+            if badge:
+                count, warn, caption = badge
+                kind = "nav-badge warn" if warn else "nav-badge"
+                if isinstance(count, str):
+                    tip = caption
+                    shown = count
+                else:
+                    tip = f"{count} {caption}"
+                    shown = str(count)
+                mark = (
+                    f'<span class="{kind}" title="{escape(tip, quote=True)}">{escape(shown)}</span>'
+                )
+            links.append(f"<a{current} href=\"{href}\">{escape(label)}{mark}</a>")
     chip_html = "".join(
         f"<span class=\"chip {kind}\"><span class=\"dot\"></span>{escape(text)}</span>" for kind, text in chips
     )
@@ -1114,7 +1171,7 @@ def _cockpit_body(
 </div>
 <div class="card fill"><h2>watchlist pulse <a class="more" href="/phase">nfr board →</a></h2>
   <div class="scroll-y"><table class="data"><thead><tr>
-    <th>symbol</th><th>price</th><th>ivr</th><th>phase</th><th>tags</th><th>side</th><th>strike</th><th>dte</th><th>status</th>
+    <th>symbol</th><th>price</th><th>52w</th><th>ivr</th><th>phase</th><th>tags</th><th>side</th><th>strike</th><th>dte</th><th>status</th>
   </tr></thead><tbody>{_watch_html(rows)}</tbody></table></div></div>
 <template id="slot-editor">
   <p class="slot-note">weekdays, hong kong time. each row is one window. gaps between them stay idle.</p>
@@ -1138,6 +1195,7 @@ def _watch_html(rows: list[dict]) -> str:
             f"<td class=\"mono pulse-px\" data-symbol=\"{escape(row['symbol'], quote=True)}\">"
             f"<span class=\"px\">{escape(row['price'])}</span> "
             f"<span class=\"px-chg {escape(row['tone'])}\">{escape(row['change'])}</span></td>"
+            f"{_band_cell(row['band'], row['high_pct'], row['low_pct'])}"
             f"<td>{spark} <span class=\"mono\" style=\"font-size:11px;color:var(--site-text-3)\">{escape(row['rank'])}</span></td>"
             f"<td><span class=\"tag {escape(row['phase_class'])}\">{escape(row['phase'])}</span></td>"
             f"<td>{_badges(row['tags'])}</td>"
@@ -1148,6 +1206,31 @@ def _watch_html(rows: list[dict]) -> str:
             "</tr>"
         )
     return "".join(body)
+
+
+def _band_cell(band: str, high_pct: str, low_pct: str) -> str:
+    if not high_pct:
+        return f'<td class="mono band"><span class="px">{escape(band)}</span></td>'
+    if not low_pct:
+        gap = escape(high_pct)
+    else:
+        gap = (
+            f'<span class="{_pct_tone(high_pct)}">{escape(high_pct)}</span>/'
+            f'<span class="{_pct_tone(low_pct)}">{escape(low_pct)}</span>'
+        )
+    return (
+        '<td class="mono band">'
+        f'<span class="px">{escape(band)}</span> '
+        f'<span class="px-chg">{gap}</span></td>'
+    )
+
+
+def _pct_tone(text: str) -> str:
+    if text.startswith("+"):
+        return "chg-up"
+    if text.startswith("-"):
+        return "chg-down"
+    return ""
 
 
 def _badges(items: list[dict]) -> str:
@@ -1357,6 +1440,89 @@ _CLIENT_JS = r"""
     const text = event.target.getAttribute("data-confirm");
     if (text && !window.confirm(text)) event.preventDefault();
   });
+  function paintPoolCount(count) {
+    document.querySelectorAll("[data-pool-count]").forEach((node) => {
+      node.textContent = count + " symbols";
+    });
+    document.querySelectorAll(".top-end .chip").forEach((node) => {
+      node.childNodes.forEach((child) => {
+        if (child.nodeType === 3 && child.textContent.indexOf("IN POOL") !== -1) {
+          child.textContent = count + " IN POOL";
+        }
+      });
+    });
+  }
+  function placePoolRow(symbol, html) {
+    const current = document.querySelector('#pool-table tr[data-symbol="' + CSS.escape(symbol) + '"]');
+    const wrap = document.createElement("tbody");
+    wrap.innerHTML = html.trim();
+    const next = wrap.querySelector("tr");
+    if (!next) return;
+    if (current) current.replaceWith(next);
+    else {
+      const body = document.querySelector("#pool-table tbody");
+      const empty = document.getElementById("pool-empty");
+      if (!body) return;
+      if (empty) body.insertBefore(next, empty);
+      else body.appendChild(next);
+    }
+    document.dispatchEvent(new Event("ath-feed"));
+  }
+  function postUniverse(form) {
+    const body = new URLSearchParams(new FormData(form));
+    body.set("partial", "row");
+    const symbol = (body.get("symbol") || "").toUpperCase();
+    const select = form.querySelector("select.intent");
+    const controls = form.querySelectorAll("button, select");
+    controls.forEach((node) => { node.disabled = true; });
+    fetch("/universe", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body
+    }).then((res) => res.json().then((data) => ({ ok: res.ok, data: data }))).then((result) => {
+      const data = result.data || {};
+      if (!result.ok || !data.ok) {
+        if (select && select.dataset.prev != null) select.value = select.dataset.prev;
+        toast("Not saved", data.message || "Try again", "err");
+        return;
+      }
+      if (data.removed) {
+        const row = document.querySelector('#pool-table tr[data-symbol="' + CSS.escape(symbol) + '"]');
+        if (row) row.remove();
+        document.dispatchEvent(new Event("ath-feed"));
+      } else if (data.html) {
+        placePoolRow(symbol, data.html);
+      }
+      if (data.count != null) paintPoolCount(data.count);
+      if (form.closest(".ath-panel, .ath-modal")) closeAll();
+      toast("Saved", data.message || "", "ok");
+    }).catch(() => {
+      if (select && select.dataset.prev != null) select.value = select.dataset.prev;
+      toast("Not saved", "The console did not answer.", "err");
+    }).finally(() => {
+      controls.forEach((node) => { node.disabled = false; });
+    });
+  }
+  function refreshPoolRow(symbol) {
+    if (!symbol) return;
+    fetch("/universe?partial=symbol&symbol=" + encodeURIComponent(symbol))
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.html) placePoolRow(symbol, data.html);
+        if (data.count != null) paintPoolCount(data.count);
+      }).catch(() => {});
+  }
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!form || form.tagName !== "FORM" || event.defaultPrevented) return;
+    if ((form.getAttribute("action") || "") !== "/universe") return;
+    event.preventDefault();
+    postUniverse(form);
+  });
+  document.addEventListener("focusin", (event) => {
+    const node = event.target.closest && event.target.closest("select.intent");
+    if (node) node.dataset.prev = node.value;
+  });
   const settingsForm = document.getElementById("settings-form");
   if (settingsForm) {
     let saving = false;
@@ -1367,7 +1533,9 @@ _CLIENT_JS = r"""
         return;
       }
       saving = true;
+      const credential = settingsForm.querySelector("[name=credential_token]");
       const body = new URLSearchParams(new FormData(settingsForm));
+      if (credential && credential.dataset.edited !== "1") body.delete("credential_token");
       fetch(settingsForm.getAttribute("action") || "/settings", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1389,6 +1557,17 @@ _CLIENT_JS = r"""
           }
           input.value = "";
         });
+        if (credential && credential.dataset.edited === "1") {
+          const provider = settingsForm.querySelector("[name=ai_provider]");
+          const masksNode = document.getElementById("credential-masks");
+          const masks = masksNode ? JSON.parse(masksNode.textContent) : {};
+          const typed = credential.value.trim();
+          const masked = typed && !typed.includes("•") ? maskCenter(typed) : typed;
+          if (provider) masks[provider.value] = masked;
+          if (masksNode) masksNode.textContent = JSON.stringify(masks);
+          credential.value = masked;
+          credential.dataset.edited = "";
+        }
         toast("Saved", sub, "ok");
       }).catch(() => {
         toast("Not saved", "The console did not answer.", "err");
@@ -1406,7 +1585,8 @@ _CLIENT_JS = r"""
       const catalog = document.getElementById("ai-models");
       const block = document.getElementById("credential-block");
       const help = document.getElementById("credential-help");
-      const readyNode = document.getElementById("credential-ready");
+      const masksNode = document.getElementById("credential-masks");
+      const credential = settingsForm.querySelector("[name=credential_token]");
       if (!provider || !model || !catalog) return;
       const lists = JSON.parse(catalog.textContent);
       const names = lists[provider.value] || [];
@@ -1430,18 +1610,20 @@ _CLIENT_JS = r"""
       if (help) {
         const env = envs[provider.value];
         help.textContent = env
-          ? "Leave blank to keep the saved token. An empty stored value uses " + env + "."
+          ? "Clear the field to remove the token. With nothing saved, Athena uses " + env + "."
           : "";
       }
-      if (readyNode && block) {
-        const ready = JSON.parse(readyNode.textContent);
-        const tag = block.querySelector(".tag");
-        if (tag) {
-          const set = !!ready[provider.value];
-          tag.textContent = set ? "SET" : "EMPTY";
-          tag.className = set ? "tag green" : "tag";
-        }
+      if (credential && masksNode) {
+        const masks = JSON.parse(masksNode.textContent);
+        credential.value = masks[provider.value] || "";
+        credential.dataset.edited = "";
       }
+    }
+    const credentialInput = settingsForm.querySelector("[name=credential_token]");
+    if (credentialInput) {
+      credentialInput.addEventListener("input", () => {
+        credentialInput.dataset.edited = "1";
+      });
     }
     settingsForm.addEventListener("change", (event) => {
       const target = event.target;
@@ -1594,7 +1776,7 @@ _CLIENT_JS = r"""
           const name = picked.textContent.trim().toUpperCase();
           document.querySelectorAll(".chips .chip").forEach((chip) => {
             const label = chip.childNodes[chip.childNodes.length - 1];
-            if (label && /^(DEFENSIVE|STANDARD|INCOME|AGGRESSIVE|TEST|CUSTOM)$/.test(label.textContent || "")) label.textContent = name;
+            if (label && /^(DEFENSIVE|STANDARD|INCOME|AGGRESSIVE|TEST|PAPER|CUSTOM)$/.test(label.textContent || "")) label.textContent = name;
           });
         }
         toast("Saved", sub, "ok");
@@ -1608,8 +1790,41 @@ _CLIENT_JS = r"""
         }
       });
     }
+    riskForm.addEventListener("focusin", (event) => {
+      const input = event.target;
+      if (input && input.dataset && input.dataset.preview) input.dataset.was = input.value;
+    });
     riskForm.addEventListener("change", (event) => {
       if (!event.target || !event.target.name) return;
+      if (event.target.dataset && event.target.dataset.preview) {
+        const input = event.target;
+        const previous = input.dataset.was != null ? input.dataset.was : input.defaultValue;
+        if (input.value === previous) return;
+        const body = new URLSearchParams(new FormData(riskForm));
+        body.set("action", "preview");
+        body.set("preview_field", input.name);
+        fetch(riskForm.getAttribute("action") || "/risk", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body
+        }).then((res) => res.json()).then((data) => {
+          if (!data.ok) {
+            input.value = previous;
+            toast("Not saved", data.text || "Preview failed", "err");
+            return;
+          }
+          if (window.confirm(data.text)) {
+            input.dataset.was = input.value;
+            saveRisk();
+          } else {
+            input.value = previous;
+          }
+        }).catch(() => {
+          input.value = previous;
+          toast("Not saved", "The console did not answer.", "err");
+        });
+        return;
+      }
       saveRisk();
     });
     riskForm.addEventListener("submit", (event) => {
@@ -1620,7 +1835,7 @@ _CLIENT_JS = r"""
   document.querySelectorAll("[data-limits]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const parts = (btn.getAttribute("data-limits") || "").split(",");
-      ["max_symbol", "cash", "halt", "contracts", "min_ivr", "min_dte"].forEach((name, index) => {
+      ["max_symbol", "cash", "halt", "contracts", "min_rv", "min_dte", "position", "max_orders", "margin", "blackout"].forEach((name, index) => {
         const input = document.querySelector("[name=" + name + "]");
         if (input) input.value = parts[index];
       });
@@ -1738,16 +1953,26 @@ _CLIENT_JS = r"""
       end: row.querySelector("[name=end]").value
     }));
     if (!rows.length) return { error: "Add one Athena window and one Mobile window." };
+    const minutes = (value) => {
+      const parts = value.split(":");
+      return Number(parts[0]) * 60 + Number(parts[1]);
+    };
+    const pieces = [];
     for (const row of rows) {
       if (!row.start || !row.end) return { error: "Each window needs a start and an end." };
-      if (row.start >= row.end) return { error: row.owner + " " + row.start + " must end later." };
+      if (row.start === row.end) return { error: row.owner + " " + row.start + " needs a different end." };
+      const start = minutes(row.start);
+      const end = minutes(row.end);
+      const spans = start < end ? [[start, end]] : [[start, 1440], [0, end]];
+      spans.forEach((span) => pieces.push({ start: span[0], end: span[1], owner: row.owner }));
     }
-    const ordered = rows.slice().sort((a, b) => a.start.localeCompare(b.start));
-    for (let i = 1; i < ordered.length; i++) {
-      if (ordered[i].start < ordered[i - 1].end) {
-        return { error: ordered[i - 1].owner + " and " + ordered[i].owner + " overlap. Windows may meet, not cross." };
+    pieces.sort((a, b) => a.start - b.start || a.end - b.end);
+    for (let i = 1; i < pieces.length; i++) {
+      if (pieces[i].start < pieces[i - 1].end) {
+        return { error: pieces[i - 1].owner + " and " + pieces[i].owner + " overlap. Windows may meet, not cross." };
       }
     }
+    const ordered = rows.slice().sort((a, b) => a.start.localeCompare(b.start));
     if (!rows.some((row) => row.owner === "Athena") || !rows.some((row) => row.owner === "Mobile")) {
       return { error: "Keep one Athena window and one Mobile window." };
     }
@@ -2680,8 +2905,13 @@ _CLIENT_JS = r"""
         }
       }
       if (task.status !== "running" && (task.kind === "health" || task.kind === "backup" || task.kind === "halt" || task.kind === "resume")) return;
-      const refreshPage = (task.kind === "fill" && location.pathname === "/universe")
-        || (task.kind === "positions" && location.pathname === "/positions");
+      if (task.status === "done" && task.kind === "fill" && location.pathname === "/universe" && !reloadedTasks.has(task.id)) {
+        reloadedTasks.add(task.id);
+        sessionStorage.setItem("ath-task-reloaded", JSON.stringify([...reloadedTasks]));
+        refreshPoolRow(task.symbol);
+        return;
+      }
+      const refreshPage = task.kind === "positions" && location.pathname === "/positions";
       if (task.status === "done" && refreshPage && !reloadedTasks.has(task.id)) {
         reloadedTasks.add(task.id);
         sessionStorage.setItem("ath-task-reloaded", JSON.stringify([...reloadedTasks]));
@@ -2850,7 +3080,7 @@ _CLIENT_JS = r"""
   }
   document.addEventListener("change", (event) => {
     const node = event.target.closest("select.intent");
-    if (node && node.form) node.form.submit();
+    if (node && node.form) postUniverse(node.form);
   });
   const audit = document.getElementById("audit-table");
   if (audit) {
@@ -2974,7 +3204,14 @@ _CLIENT_JS = r"""
   function paintSimText(info) {
     const status = document.getElementById("sim-status");
     if (!status) return;
-    status.textContent = info.label || "None";
+    status.replaceChildren();
+    if (info.status === "active") {
+      const spin = document.createElement("span");
+      spin.className = "sim-spin";
+      spin.setAttribute("aria-hidden", "true");
+      status.appendChild(spin);
+    }
+    status.appendChild(document.createTextNode(info.label || "None"));
     const day = document.getElementById("sim-day");
     const span = document.getElementById("sim-window");
     const step = document.getElementById("sim-step");
@@ -3050,10 +3287,18 @@ _CLIENT_JS = r"""
       read.className = "sim-read";
       el.appendChild(read);
     }
+    let now = el.querySelector(".sim-now");
+    if (!now) {
+      now = document.createElement("div");
+      now.className = "sim-now";
+      now.setAttribute("aria-hidden", "true");
+      el.appendChild(now);
+    }
     if (!isFinite(low)) {
       const old = el.querySelector("svg");
       if (old) old.remove();
       read.textContent = "";
+      now.hidden = true;
       return;
     }
     const mid = (high + low) / 2;
@@ -3074,6 +3319,7 @@ _CLIENT_JS = r"""
     }
     parts.push('<line x1="' + padL + '" y1="' + priceBottom + '" x2="' + (padL + plotW) + '" y2="' + priceBottom + '" stroke="#2a3340" stroke-width="1"></line>');
     const bw = Math.max(slot * 0.62, 2);
+    let nowX = null;
     visible.forEach((bar, i) => {
       if (!bar) return;
       const x = padL + (i + 0.5) * slot;
@@ -3090,9 +3336,7 @@ _CLIENT_JS = r"""
       }
       const vh = maxVol > 0 ? ((bar.v || 0) / maxVol) * (volBase - volTop - 2) : 0;
       parts.push('<rect x="' + (x - bw / 2).toFixed(1) + '" y="' + (volBase - vh).toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + Math.max(vh, 1).toFixed(1) + '" fill="' + color + '"' + fade + "></rect>");
-      if (cursor && date === cursor) {
-        parts.push('<line x1="' + x.toFixed(1) + '" y1="' + priceTop + '" x2="' + x.toFixed(1) + '" y2="' + volBase + '" stroke="#6b96f2" stroke-width="1"></line>');
-      }
+      if (cursor && date === cursor) nowX = x;
     });
     const hover = Number(el.dataset.hover);
     const hy = Number(el.dataset.hy);
@@ -3106,6 +3350,12 @@ _CLIENT_JS = r"""
     const old = el.querySelector("svg");
     if (old) old.remove();
     el.insertAdjacentHTML("beforeend", '<svg viewBox="0 0 ' + width + " " + height + '" width="' + width + '" height="' + height + '">' + parts.join("") + "</svg>");
+    if (nowX == null) {
+      now.hidden = true;
+    } else {
+      now.hidden = false;
+      now.style.left = nowX.toFixed(1) + "px";
+    }
     let shown = visible[hover] ? hover : -1;
     if (shown < 0 && cursor) {
       visible.forEach((bar, i) => {
@@ -3232,6 +3482,123 @@ _CLIENT_JS = r"""
         }
       }).catch(() => {});
     }, 5000);
+  }
+  const skillTry = document.querySelector(".skill-try");
+  if (skillTry) {
+    const kind = document.getElementById("skill-play-kind");
+    const urlBox = document.getElementById("skill-play-url");
+    const body = document.getElementById("skill-play-body");
+    const send = document.getElementById("skill-play-send");
+    const out = document.getElementById("skill-play-out");
+    skillTry.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-skill-tab]");
+      if (!tab) return;
+      const name = tab.getAttribute("data-skill-tab");
+      skillTry.querySelectorAll("[data-skill-tab]").forEach((node) => {
+        node.classList.toggle("on", node === tab);
+      });
+      skillTry.querySelectorAll("[data-skill-panel]").forEach((panel) => {
+        panel.hidden = panel.getAttribute("data-skill-panel") !== name;
+      });
+    });
+    let samples = {};
+    const samplesNode = document.getElementById("skill-play-samples");
+    try { samples = samplesNode ? JSON.parse(samplesNode.textContent || "{}") : {}; }
+    catch (err) { samples = {}; }
+    function paintPlayUrl() {
+      const spec = kind ? samples[kind.value] : null;
+      if (!spec || !urlBox) return;
+      let path = spec.path;
+      if (path.indexOf("{task_id}") >= 0) {
+        const taskId = body ? body.value.trim() : "";
+        path = path.replace("{task_id}", taskId ? encodeURIComponent(taskId) : "{task_id}");
+      }
+      urlBox.value = "http://127.0.0.1:8788" + path;
+    }
+    if (kind && body) {
+      kind.addEventListener("change", () => {
+        const spec = samples[kind.value];
+        if (spec) body.value = spec.body;
+        paintPlayUrl();
+      });
+      body.addEventListener("input", paintPlayUrl);
+      paintPlayUrl();
+    }
+    function escapeSkill(text) {
+      return text.replace(/[&<>]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]));
+    }
+    function paintJson(node, value) {
+      const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      try { JSON.parse(text); }
+      catch (err) {
+        node.textContent = text;
+        return;
+      }
+      const token = /"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b|[{}\[\],:]/g;
+      let html = "";
+      let pos = 0;
+      let match;
+      while ((match = token.exec(text))) {
+        html += escapeSkill(text.slice(pos, match.index));
+        const piece = match[0];
+        pos = match.index + piece.length;
+        let kind = "jn";
+        if (piece.charAt(0) === '"') kind = text.slice(pos).trim().charAt(0) === ":" ? "jk" : "js";
+        else if ("{}[],:".indexOf(piece) >= 0) kind = "jp";
+        else if (piece === "true" || piece === "false" || piece === "null") kind = "jb";
+        html += '<span class="' + kind + '">' + escapeSkill(piece) + "</span>";
+      }
+      node.innerHTML = html + escapeSkill(text.slice(pos));
+    }
+    async function skillFetch(url, init) {
+      const res = await fetch(url, init);
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch (err) { return { ok: false, status: "failed", error: text || "The console did not answer." }; }
+    }
+    if (send && kind && body && out) {
+      send.addEventListener("click", async () => {
+        const spec = samples[kind.value];
+        const keyNode = document.querySelector("[data-secret]");
+        const key = keyNode ? (keyNode.getAttribute("data-secret") || "") : "";
+        if (!spec) return;
+        if (!key) {
+          out.textContent = "No key yet. Generate one on Settings.";
+          return;
+        }
+        const headers = { Authorization: "Bearer " + key };
+        let url = spec.path;
+        const init = { method: spec.method, headers: headers };
+        if (spec.method === "POST") {
+          headers["Content-Type"] = "application/json";
+          init.body = body.value;
+        } else {
+          url = "/api/v1/tasks/" + encodeURIComponent(body.value.trim());
+        }
+        send.disabled = true;
+        send.classList.add("busy");
+        try {
+          let payload = await skillFetch(url, init);
+          paintJson(out, payload);
+          const taskId = payload && payload.task_id;
+          if (spec.method === "POST" && taskId && payload.status === "running") {
+            for (let step = 0; step < 60; step += 1) {
+              await new Promise((resolve) => setTimeout(resolve, 1500));
+              payload = await skillFetch("/api/v1/tasks/" + encodeURIComponent(taskId), {
+                method: "GET",
+                headers: { Authorization: "Bearer " + key }
+              });
+              paintJson(out, payload);
+              if (!payload || payload.status !== "running") break;
+            }
+          }
+        } catch (err) {
+          out.textContent = "The console did not answer.";
+        }
+        send.disabled = false;
+        send.classList.remove("busy");
+      });
+    }
   }
   bootSim();
   pollTasks();

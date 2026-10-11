@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -122,8 +121,6 @@ def store_profile(
         """,
         (account, symbol, classifiers, thesis),
     )
-    if not quote_note:
-        quote_note = "Price from the public quote." if _sync_once(conn, symbol, facts["price"], facts["prev"]) else ""
     conn.commit()
     log.info("pool fill symbol=%s classifiers=%s", symbol, classifiers or "-")
     return _note(verb, symbol, name, classifiers, ai_note, quote_note)
@@ -154,31 +151,6 @@ def _lookup(symbol: str) -> dict:
     except json.JSONDecodeError:
         log.info("pool chart skipped symbol=%s", symbol)
         return empty
-
-
-def _sync_once(conn: psycopg.Connection, symbol: str, price: Decimal | None, prev: Decimal | None) -> bool:
-    if price is None:
-        return False
-    existing = conn.execute(
-        "SELECT 1 FROM market_bars WHERE symbol = %s LIMIT 1",
-        (symbol,),
-    ).fetchone()
-    if existing is not None:
-        return False
-    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-    rows = [(now, price)]
-    if prev is not None:
-        rows.append((now - timedelta(days=1), prev))
-    for ts, close in rows:
-        conn.execute(
-            """
-            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
-            VALUES (%s, %s, %s, %s, %s, %s, 0, 'pool-sync')
-            ON CONFLICT (symbol, ts, source) DO NOTHING
-            """,
-            (symbol, ts, close, close, close, close),
-        )
-    return True
 
 
 def _note(verb: str, symbol: str, name: str, classifiers: str, ai_note: str, quote_note: str) -> str:

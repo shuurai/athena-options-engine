@@ -7,19 +7,21 @@ read or write the paper account and never call placeOrder.
 import json
 import os
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
 from athena_exec.gate import live_block_reason
 from athena_exec.halt import halt as book_halt
 from athena_exec.session import _submit_queued
-from athena_settings.model import standard_payload
-from athena_store.migrate import connect
+from athena_settings.model import TacticFlags, standard_payload
+from athena_store.migrate import apply_migrations, connect
+from athena_strategy.agents import run_signaled
 from athena_strategy.drafts import decide
-from athena_strategy.iv import record_iv_marks, tags_from_iv
+from athena_strategy.iv import estimated_iv, record_iv_marks, tags_from_iv
 from athena_strategy.manage import manage_book, management_tactic
 from athena_strategy.phases import evaluate_symbol
+from athena_strategy.tags import OVERSOLD, SUPPORT_TOUCH
 
 ACCOUNT = "ZZTEST"
 RUN = "sim_zztest"
@@ -43,7 +45,10 @@ def setUpModule() -> None:
 
 class WorkflowTest(unittest.TestCase):
     def setUp(self) -> None:
+        self._machine = os.environ.get("ATHENA_STATE_MACHINE")
+        os.environ["ATHENA_STATE_MACHINE"] = "off"
         self.conn = connect(_url())
+        apply_migrations(self.conn)
         self.paper = patch("athena_orchestrator.sim.trading_mode", return_value="paper")
         self.paper.start()
         self._wipe()
@@ -53,6 +58,10 @@ class WorkflowTest(unittest.TestCase):
         self._wipe()
         self.paper.stop()
         self.conn.close()
+        if self._machine is None:
+            os.environ.pop("ATHENA_STATE_MACHINE", None)
+        else:
+            os.environ["ATHENA_STATE_MACHINE"] = self._machine
 
     def _wipe(self) -> None:
         drafts = "SELECT id FROM drafts WHERE account_id = %s"
@@ -61,6 +70,7 @@ class WorkflowTest(unittest.TestCase):
         self.conn.execute(f"DELETE FROM orders WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute(f"DELETE FROM fills WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute("DELETE FROM drafts WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM tickets WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute("DELETE FROM positions WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute("DELETE FROM sim_runs WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute("DELETE FROM symbol_phases WHERE account_id = %s", (ACCOUNT,))
@@ -70,8 +80,11 @@ class WorkflowTest(unittest.TestCase):
         self.conn.execute("DELETE FROM nav_marks WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute("DELETE FROM account_marks WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute("DELETE FROM option_plans WHERE symbol = %s", (SYMBOL,))
+        self.conn.execute("DELETE FROM option_choices WHERE symbol = %s", (SYMBOL,))
         self.conn.execute("DELETE FROM market_bars WHERE symbol = %s", (SYMBOL,))
         self.conn.execute("DELETE FROM iv_marks WHERE symbol = %s", (SYMBOL,))
+        self.conn.execute("DELETE FROM rv_marks WHERE symbol = %s", (SYMBOL,))
+        self.conn.execute("DELETE FROM chain_marks WHERE symbol = %s", (SYMBOL,))
         self.conn.execute("DELETE FROM symbol_facts WHERE symbol = %s", (SYMBOL,))
         self.conn.commit()
 
@@ -328,12 +341,19 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(status[0], "queued")
 
     def test_open_csp_is_stored_as_hold_and_a_short_option_rolls(self) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO symbol_phases (account_id, symbol, phase, tags, tactic)
+            VALUES (%s, %s, 'P4', '', 'HOLD')
+            """,
+            (ACCOUNT, SYMBOL),
+        )
         evaluate_symbol(
             self.conn,
             standard_payload(),
             SYMBOL,
             ACCOUNT,
-            tags={"LOW_IV", "OVERSOLD", "SUPPORT_TOUCH"},
+            tags={OVERSOLD, SUPPORT_TOUCH},
             event_offset=2,
         )
         stored = self.conn.execute(
@@ -398,10 +418,89 @@ class WorkflowTest(unittest.TestCase):
         )
         self.conn.commit()
         settings = standard_payload()
-        settings = settings.model_copy(
-            update={"strategy": settings.strategy.model_copy(update={"ivr_min_samples": 1})}
+        self.assertEqual(tags_from_iv(self.conn, SYMBOL, settings), set())
+        self.assertIsNone(estimated_iv(self.conn, SYMBOL, date(2026, 10, 10)))
+        method = self.conn.execute(
+            "SELECT method FROM iv_marks WHERE symbol = %s AND day = %s",
+            (SYMBOL, date(2026, 10, 10)),
+        ).fetchone()
+        self.assertEqual(method[0], "premium_ratio")
+
+    def test_method_windows_do_not_mix(self) -> None:
+        from athena_strategy.iv import iv_rank, iv_samples
+
+        self.conn.execute(
+            """
+            INSERT INTO iv_marks (symbol, day, credit, underlying, iv_proxy, method)
+            VALUES (%s, '2020-01-01', 1, 10, 0.5, 'premium_ratio')
+            """,
+            (SYMBOL,),
         )
-        self.assertIn("HIGH_IV", tags_from_iv(self.conn, SYMBOL, settings))
+        for offset in range(20):
+            day = date(2021, 1, 1) + timedelta(days=offset)
+            self.conn.execute(
+                """
+                INSERT INTO iv_marks (symbol, day, credit, underlying, iv_proxy, method)
+                VALUES (%s, %s, 1, 10, %s, 'chain_bs')
+                """,
+                (SYMBOL, day, Decimal(offset + 1)),
+            )
+        self.conn.commit()
+        premium = iv_samples(self.conn, SYMBOL, "premium_ratio")
+        chain = iv_samples(self.conn, SYMBOL, "chain_bs")
+        self.assertEqual(premium, [Decimal("0.5")])
+        self.assertEqual(len(chain), 20)
+        self.assertNotIn(Decimal("0.5"), chain)
+        self.assertIsNone(iv_rank(premium, premium[-1], 20))
+        self.assertEqual(iv_rank(chain, chain[-1], 20), 100)
+        from athena_strategy.drafts import _stored_iv_rank
+
+        with patch("athena_strategy.drafts.load_active") as load:
+            load.return_value.strategy.ivr_min_samples = 20
+            self.assertIsNone(_stored_iv_rank(self.conn, ACCOUNT, SYMBOL))
+
+    def test_phase_indicators_match_the_reading(self) -> None:
+        from athena_strategy.agents import _trail_context
+        from athena_strategy.indicators import read_indicators
+
+        for index in range(30):
+            day = date(2024, 1, 1) + timedelta(days=index)
+            close = 100 + index
+            self.conn.execute(
+                """
+                INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+                VALUES (%s, %s, %s, %s, %s, %s, 1000, 'ib-daily')
+                """,
+                (
+                    SYMBOL,
+                    datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+                    close,
+                    close + 1,
+                    close - 1,
+                    close,
+                ),
+            )
+        self.conn.commit()
+        settings = standard_payload()
+        reading = read_indicators(self.conn, settings, SYMBOL)
+        evaluate_symbol(self.conn, settings, SYMBOL, ACCOUNT)
+        stored = self.conn.execute(
+            "SELECT indicators FROM symbol_phases WHERE account_id = %s AND symbol = %s",
+            (ACCOUNT, SYMBOL),
+        ).fetchone()
+        trail = _trail_context(
+            {"tags": "none", "flags": "", "numbers": reading.line(), "indicators": reading.payload()},
+            TacticFlags(),
+            "P1",
+            {},
+        )
+        self.assertEqual(stored[0]["rail_pos"], reading.payload()["rail_pos"])
+        self.assertEqual(trail["indicators"]["trend_slope_pct"], stored[0]["trend_slope_pct"])
+        self.assertIsNone(stored[0]["rv_pctl"])
+        self.assertNotIn("iv=", reading.line())
+        count = self.conn.execute("SELECT count(*) FROM rv_marks WHERE symbol = %s", (SYMBOL,)).fetchone()
+        self.assertEqual(count[0], 1)
+        self.assertIsNone(estimated_iv(self.conn, SYMBOL, date(2026, 10, 10)))
 
     def test_simulation_handlers(self) -> None:
         from athena_orchestrator.console import _post_tasks
@@ -426,3 +525,741 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertTrue(json.loads(body)["ok"])
         self.assertIsNone(self.conn.execute("SELECT 1 FROM sim_runs WHERE id = %s", (RUN,)).fetchone())
+
+    def test_merged_daily_bars_keep_the_session_low(self) -> None:
+        from athena_marketdata.pricing import daily_bars, last_daily_close, last_tradeable_price
+
+        day = datetime(2026, 1, 5, tzinfo=timezone.utc)
+        later = datetime(2026, 1, 5, 15, tzinfo=timezone.utc)
+        morning = datetime(2026, 1, 6, 10, tzinfo=timezone.utc)
+        afternoon = datetime(2026, 1, 6, 15, tzinfo=timezone.utc)
+        self._print(day, "ib-daily", "190.01", "195", "192")
+        self._print(later, "ib-delayed", "200", "200", "200")
+        self._print(morning, "ib-delayed", "180", "180", "180")
+        self._print(afternoon, "ib-delayed", "181", "181", "181")
+        self._print(day, "seed", "100", "100", "100")
+        bars = daily_bars(self.conn, SYMBOL, 63)
+        self.assertEqual([bar.day for bar in bars], [date(2026, 1, 5), date(2026, 1, 6)])
+        self.assertEqual(bars[0].low, Decimal("190.01"))
+        self.assertEqual(bars[0].high, Decimal("195"))
+        self.assertEqual(bars[0].close, Decimal("200"))
+        self.assertEqual(bars[1].close, Decimal("181"))
+        self.assertEqual(last_daily_close(self.conn, SYMBOL), Decimal("181"))
+        self.assertEqual(last_tradeable_price(self.conn, SYMBOL), Decimal("181"))
+
+    def test_missing_itick_quote_writes_nothing(self) -> None:
+        from athena_marketdata import write_watchlist_bars
+
+        written = write_watchlist_bars(self.conn, [SYMBOL], "http://127.0.0.1", "")
+        self.assertEqual(written, 0)
+        count = self.conn.execute(
+            "SELECT count(*) FROM market_bars WHERE symbol = %s",
+            (SYMBOL,),
+        ).fetchone()[0]
+        self.assertEqual(count, 0)
+
+    def test_short_symbol_uses_range_tags(self) -> None:
+        from athena_settings.model import TacticFlags
+        from athena_strategy.agents import _context
+
+        self._print(datetime(2026, 1, 5, tzinfo=timezone.utc), "ib-daily", "10", "12", "11")
+        context = _context(self.conn, standard_payload(), ACCOUNT, SYMBOL, TacticFlags())
+        self.assertEqual(context["range_high_tag"], "HIGH_RANGE")
+        self.assertEqual(context["range_low_tag"], "LOW_RANGE")
+        self.assertEqual(context["range_sessions"], "1")
+        from athena_marketdata.pricing import year_band
+
+        self.assertEqual(year_band(self.conn, SYMBOL), "-/-")
+
+    def test_year_band_uses_252_sessions(self) -> None:
+        from datetime import timedelta
+
+        from athena_marketdata.pricing import year_band
+
+        start = date(2024, 1, 1)
+        for offset in range(252):
+            day = start + timedelta(days=offset)
+            low = "140.12" if offset == 10 else "150.00"
+            high = "234.23" if offset == 200 else "160.00"
+            self._print(datetime(day.year, day.month, day.day, tzinfo=timezone.utc), "ib-daily", low, high, "155.00")
+        self.assertEqual(year_band(self.conn, SYMBOL), "234.23/140.12")
+        from athena_marketdata.pricing import year_view
+
+        _band, high_pct, low_pct = year_view(self.conn, SYMBOL)
+        last = Decimal("155")
+        self.assertEqual(high_pct, f"{(last - Decimal('234.23')) / Decimal('234.23') * 100:+.2f}%")
+        self.assertEqual(low_pct, f"{(last - Decimal('140.12')) / Decimal('140.12') * 100:+.2f}%")
+
+    def test_two_year_pull_marks_a_short_book(self) -> None:
+        from datetime import timedelta
+
+        from athena_marketdata.pricing import set_history_short
+        from athena_orchestrator.backfill import pull_symbol
+        from athena_store import apply_migrations
+
+        apply_migrations(self.conn)
+
+        class _Broker:
+            def history_span(self, symbol, duration, end=""):
+                start = date(2024, 1, 1) if end else date(2025, 1, 1)
+                return [
+                    (
+                        start + timedelta(days=offset),
+                        Decimal("1"),
+                        Decimal("2"),
+                        Decimal("0.5"),
+                        Decimal("1"),
+                        Decimal("3"),
+                    )
+                    for offset in range(10)
+                ]
+
+        count = pull_symbol(self.conn, _Broker(), SYMBOL)
+        set_history_short(self.conn, SYMBOL, count < 252)
+        self.conn.commit()
+        self.assertEqual(count, 20)
+        row = self.conn.execute(
+            "SELECT history_short FROM symbol_facts WHERE symbol = %s",
+            (SYMBOL,),
+        ).fetchone()
+        self.assertTrue(row[0])
+
+    def _print(self, ts: datetime, source: str, low: str, high: str, close: str) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+            VALUES (%s, %s, %s, %s, %s, %s, 0, %s)
+            """,
+            (SYMBOL, ts, close, high, low, close, source),
+        )
+        self.conn.commit()
+
+    def test_covered_call_needs_free_shares(self) -> None:
+        from datetime import timedelta
+
+        from athena_strategy.drafts import stage_draft
+
+        expiry = date.today() + timedelta(days=40)
+        settings = standard_payload()
+
+        def open_call(contracts: int, multiplier: str = "100"):
+            return stage_draft(
+                self.conn, settings, SYMBOL, "OPEN_CC", contracts, "call", "P1", ACCOUNT,
+                instrument="OPT", limit_price=Decimal("1"), expiry=expiry,
+                call_strike=Decimal("20"), call_limit=Decimal("1"), multiplier=multiplier,
+            )
+
+        naked = open_call(1)
+        self.assertEqual(naked["status"], "blocked")
+        self.assertIn("covered shares, held 0", naked["detail"])
+        self._shares(50)
+        odd = open_call(1)
+        self.assertEqual(odd["status"], "blocked")
+        self.assertIn("held 50", odd["detail"])
+        self._clear_gate()
+        self._shares(100)
+        two = open_call(2)
+        self.assertEqual(two["status"], "blocked")
+        self.assertIn("needs 200", two["detail"])
+        self._clear_gate()
+        self._shares(100)
+        self._working_call()
+        used = open_call(1)
+        self.assertEqual(used["status"], "blocked")
+        self.assertIn("needs 200", used["detail"])
+        self._clear_gate()
+        self._shares(100)
+        first = open_call(1)
+        self.assertEqual(first["status"], "pending")
+        second = open_call(1)
+        self.assertEqual(second["status"], "blocked")
+        self.assertIn("needs 200", second["detail"])
+        self._clear_gate()
+        self._shares(1000)
+        covered = open_call(1, "1000")
+        self.assertEqual(covered["status"], "pending")
+        self._clear_gate()
+        self._shares(100)
+        short = open_call(1, "1000")
+        self.assertEqual(short["status"], "blocked")
+        self.assertIn("needs 1000", short["detail"])
+
+    def test_wheel_allows_a_covered_call_beside_a_short_put(self) -> None:
+        from datetime import timedelta
+
+        from athena_strategy.drafts import stage_draft
+
+        expiry = date.today() + timedelta(days=40)
+        settings = standard_payload()
+        self._option(-1, "P")
+        put = stage_draft(
+            self.conn, settings, SYMBOL, "OPEN_CSP", 1, "put", "P1", ACCOUNT,
+            instrument="OPT", limit_price=Decimal("1"), expiry=expiry,
+            put_strike=Decimal("20"), put_limit=Decimal("1"),
+        )
+        self.assertEqual(put["status"], "blocked")
+        self.assertIn("I3: duplicate short put", put["detail"])
+        stacked = stage_draft(
+            self.conn, settings, SYMBOL, "OPEN_STRANGLE", 1, "strangle", "P1", ACCOUNT,
+            instrument="OPT", limit_price=Decimal("2"), expiry=expiry,
+            put_strike=Decimal("20"), call_strike=Decimal("30"),
+            put_limit=Decimal("1"), call_limit=Decimal("1"),
+        )
+        self.assertEqual(stacked["status"], "blocked")
+        self.assertIn("I3: option leg already open", stacked["detail"])
+        self._clear_gate()
+        self._shares(100)
+        self._option(-1, "P")
+        covered = stage_draft(
+            self.conn, settings, SYMBOL, "OPEN_CC", 1, "call", "P1", ACCOUNT,
+            instrument="OPT", limit_price=Decimal("1"), expiry=expiry,
+            call_strike=Decimal("30"), call_limit=Decimal("1"),
+        )
+        self.assertEqual(covered["status"], "pending")
+        self._clear_gate()
+        flat = stage_draft(
+            self.conn, settings, SYMBOL, "OPEN_CSP", 1, "put", "P1", ACCOUNT,
+            instrument="OPT", limit_price=Decimal("1"), expiry=expiry,
+            put_strike=Decimal("20"), put_limit=Decimal("1"),
+        )
+        self.assertEqual(flat["status"], "pending")
+        self._clear_gate()
+        self._shares(100)
+        one = stage_draft(
+            self.conn, settings, SYMBOL, "OPEN_CC", 1, "call", "P1", ACCOUNT,
+            instrument="OPT", limit_price=Decimal("1"), expiry=expiry,
+            call_strike=Decimal("30"), call_limit=Decimal("1"),
+        )
+        self.assertEqual(one["status"], "pending")
+        self._clear_gate()
+        self._option(-1, "C")
+        beside = stage_draft(
+            self.conn, settings, SYMBOL, "OPEN_CSP", 1, "put", "P1", ACCOUNT,
+            instrument="OPT", limit_price=Decimal("1"), expiry=expiry,
+            put_strike=Decimal("20"), put_limit=Decimal("1"),
+        )
+        self.assertEqual(beside["status"], "pending")
+        self._clear_gate()
+        self._shares(100)
+        self._option(-1, "P")
+        strict = standard_payload().model_copy(
+            update={"risk": standard_payload().risk.model_copy(update={"strict_conflict": True})}
+        )
+        banned = stage_draft(
+            self.conn, strict, SYMBOL, "OPEN_CC", 1, "call", "P1", ACCOUNT,
+            instrument="OPT", limit_price=Decimal("1"), expiry=expiry,
+            call_strike=Decimal("30"), call_limit=Decimal("1"),
+        )
+        self.assertEqual(banned["status"], "blocked")
+        self.assertIn("conflicting short", banned["detail"])
+
+    def test_ticket_budget_blocks_both_legs(self) -> None:
+        from athena_settings.model import RiskLimits, TacticFlags
+        from athena_strategy.agents import _drafts
+
+        self._book(nav="10000", cash="8000", price="10")
+        cash_settings = standard_payload().model_copy(update={"risk": RiskLimits(
+            profile="test", max_symbol_pct_nav=80, cash_reserve_pct=30, daily_loss_halt_pct=0,
+            max_contracts_per_symbol=12, max_position_per_symbol=0, min_rv_pctl_new_short=0,
+            min_dte_new=0, max_short_opt_margin_pct=80, earnings_blackout_days=0, margin_rate=20,
+        )})
+        flags = TacticFlags(long=True, intent="both")
+        answers = {
+            "CSP": {"expiry": "2026-12-18", "strike": 40, "limit": 1},
+            "Consolidator": {"drafts": [
+                {"tactic": "BUY", "limit": 2000, "reason": "rail"},
+                {"tactic": "CSP", "limit": 1, "reason": "put"},
+            ]},
+        }
+        self.assertEqual(_drafts(self.conn, cash_settings, ACCOUNT, SYMBOL, flags, answers, {"tags": "none"}), [])
+        reasons = self.conn.execute(
+            "SELECT status, reason FROM drafts WHERE account_id = %s ORDER BY tactic",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(len(reasons), 2)
+        self.assertTrue(all(status == "blocked" and reason.startswith("I2: ticket breaches cash_reserve_pct") for status, reason in reasons))
+        self._clear_gate()
+        self._book(nav="10000", cash="9000", price="20")
+        symbol_settings = cash_settings.model_copy(update={"risk": cash_settings.risk.model_copy(update={
+            "max_symbol_pct_nav": 20, "cash_reserve_pct": 5,
+        })})
+        symbol_answers = {
+            "CSP": {"expiry": "2026-12-18", "strike": 10, "limit": 1},
+            "Consolidator": {"drafts": [
+                {"tactic": "BUY", "limit": 1500, "reason": "rail"},
+                {"tactic": "CSP", "limit": 1, "reason": "put"},
+            ]},
+        }
+        self.assertEqual(_drafts(self.conn, symbol_settings, ACCOUNT, SYMBOL, flags, symbol_answers, {"tags": "none"}), [])
+        symbol_reasons = self.conn.execute(
+            "SELECT reason FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(len(symbol_reasons), 2)
+        self.assertTrue(all(row[0].startswith("I2: ticket breaches max_symbol_pct_nav") for row in symbol_reasons))
+        self._clear_gate()
+        self._book(nav="100000", cash="80000", price="10")
+        calm = cash_settings.model_copy(update={"risk": cash_settings.risk.model_copy(update={
+            "max_symbol_pct_nav": 50, "cash_reserve_pct": 5,
+        })})
+        calm_answers = {
+            "CSP": {"expiry": "2026-12-18", "strike": 10, "limit": 1},
+            "Consolidator": {"drafts": [
+                {"tactic": "BUY", "limit": 10, "reason": "rail"},
+                {"tactic": "CSP", "limit": 1, "reason": "put"},
+            ]},
+        }
+        created = _drafts(self.conn, calm, ACCOUNT, SYMBOL, flags, calm_answers, {"tags": "none"})
+        self.assertEqual(len(created), 2)
+        pending = self.conn.execute(
+            "SELECT status FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertTrue(all(row[0] == "pending" for row in pending))
+
+    def _shares(self, quantity: int) -> None:
+        self.conn.execute("DELETE FROM positions WHERE account_id = %s AND sec_type = 'STK'", (ACCOUNT,))
+        self.conn.execute(
+            """
+            INSERT INTO positions (account_id, symbol, quantity, avg_price, sec_type, simulated)
+            VALUES (%s, %s, %s, 10, 'STK', false)
+            """,
+            (ACCOUNT, SYMBOL, quantity),
+        )
+        self.conn.commit()
+
+    def _option(self, quantity: int, right: str) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, contract_right, strike, simulated
+            )
+            VALUES (%s, %s, %s, 1, 'OPT', %s, 20, false)
+            """,
+            (ACCOUNT, SYMBOL, quantity, right),
+        )
+        self.conn.commit()
+
+    def _working_call(self) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id, instrument, simulated
+            )
+            VALUES ('draft_zzseed', %s, 'OPEN_CC', 1, 'approved', 'seed', 'P1', %s, 'OPT', false)
+            """,
+            (SYMBOL, ACCOUNT),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO orders (
+                id, draft_id, account_id, symbol, tactic, action, contracts, status, contract_right, simulated
+            )
+            VALUES ('ord_zzseed', 'draft_zzseed', %s, %s, 'OPEN_CC', 'SELL', 1, 'submitted', 'C', false)
+            """,
+            (ACCOUNT, SYMBOL),
+        )
+        self.conn.commit()
+
+    def _book(self, nav: str, cash: str, price: str) -> None:
+        from psycopg.types.json import Jsonb
+
+        self.conn.execute("DELETE FROM nav_marks WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM account_marks WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM market_bars WHERE symbol = %s", (SYMBOL,))
+        self.conn.execute(
+            """
+            INSERT INTO nav_marks (account_id, day, start_nav, last_nav)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (ACCOUNT, date.today(), nav, nav),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO account_marks (account_id, day, cash, margin, base_currency, fx_rates)
+            VALUES (%s, %s, %s, 0, 'HKD', %s)
+            """,
+            (ACCOUNT, date.today(), cash, Jsonb({"USD": "1"})),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+            VALUES (%s, %s, %s, %s, %s, %s, 1, 'ib-daily')
+            """,
+            (SYMBOL, datetime(2026, 10, 1, 12, tzinfo=timezone.utc), price, price, price, price),
+        )
+        self.conn.commit()
+
+    def _sessions(self, count: int) -> None:
+        start = date(2024, 1, 2)
+        for offset in range(count):
+            day = start + timedelta(days=offset)
+            self.conn.execute(
+                """
+                INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+                VALUES (%s, %s, 10, 11, 9, 10, 100, 'ib-daily')
+                """,
+                (SYMBOL, datetime(day.year, day.month, day.day, 21, tzinfo=timezone.utc)),
+            )
+        self.conn.commit()
+
+    def _chain(self) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO option_plans (
+                symbol, expiry, put_strike, call_strike, put_limit, call_limit,
+                trading_class, option_exchange
+            )
+            VALUES (%s, '2026-12-18', 10, 12, 1, 1, 'ZZT', 'SMART')
+            """,
+            (SYMBOL,),
+        )
+        self.conn.commit()
+
+    def _audit_settings(self, **flags) -> object:
+        return standard_payload().model_copy(
+            update={
+                "watchlist": [SYMBOL],
+                "tactic_flags": {SYMBOL: TacticFlags(long=True, intent="accumulate", **flags)},
+            }
+        )
+
+    def _pass(self, replies: list[str], settings=None) -> list:
+        queue = list(replies)
+
+        def _chat(_system, user, _model, _provider, _token, _thinking):
+            text = queue.pop(0) if queue else '{"quiet":true}'
+            return {"text": text, "error": "", "latency_ms": 1, "tokens": 1, "request": {"user": user}}
+
+        apply_migrations(self.conn)
+        with patch("athena_strategy.agents.chat", side_effect=_chat):
+            return run_signaled(self.conn, settings or self._audit_settings(), ACCOUNT)
+
+    def _trail(self) -> tuple:
+        return self.conn.execute(
+            "SELECT outcome, summary FROM decision_trails WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchone()
+
+    def _calls(self) -> list:
+        return self.conn.execute(
+            "SELECT agent, status FROM ai_calls WHERE account_id = %s ORDER BY id",
+            (ACCOUNT,),
+        ).fetchall()
+
+    def test_audit_states_cover_drafted_quiet_no_chain_and_invalid(self) -> None:
+        quiet = [
+            '{"tags":["LOWER_RAIL"]}',
+            '{"news_wash":false}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"thinking":"","drafts":[]}',
+        ]
+        self._sessions(63)
+        self._chain()
+        drafted = quiet[:-1] + ['{"thinking":"rail","drafts":[{"tactic":"BUY","limit":10,"reason":"lower rail"}]}']
+        self._pass(drafted)
+        self.assertEqual(self._trail()[0], "drafted")
+        self.assertTrue(self._calls())
+        self._clear_gate()
+        self.conn.execute("DELETE FROM ai_calls WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+        self._pass(quiet)
+        self.assertEqual(self._trail(), ("quiet", "no drafts"))
+        self.conn.execute("DELETE FROM option_plans WHERE symbol = %s", (SYMBOL,))
+        self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM ai_calls WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+        self._pass(quiet[:2])
+        self.assertEqual(self._trail(), ("no_data", "no_chain"))
+        self.assertEqual([row[0] for row in self._calls()], ["Location", "News"])
+        self.assertTrue(all(row[1] == "ok" for row in self._calls()))
+        self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM ai_calls WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+        self._chain()
+        self._pass(["not json", "still not"])
+        self.assertEqual(self._trail()[0], "invalid")
+        self.assertIn("Location", self._trail()[1])
+        self.assertIn("parse", self._trail()[1])
+
+    def test_one_invalid_reply_is_retried_once(self) -> None:
+        self._sessions(63)
+        self._chain()
+        replies = [
+            "not json",
+            '{"tags":[]}',
+            '{"news_wash":false}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"quiet":true}',
+            '{"thinking":"","drafts":[]}',
+        ]
+        self._pass(replies)
+        rows = self._calls()
+        location = [row for row in rows if row[0] == "Location"]
+        self.assertEqual(location, [("Location", "invalid"), ("Location", "ok")])
+        self.assertEqual(self._trail()[0], "quiet")
+        request = self.conn.execute(
+            "SELECT request FROM ai_calls WHERE account_id = %s AND agent = 'Location' ORDER BY id DESC LIMIT 1",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertIn("Reply with JSON only", request[0]["user"])
+
+    def test_two_invalid_replies_stop_the_pass(self) -> None:
+        self._sessions(63)
+        self._chain()
+        self._pass(["not json", "still not", '{"tags":[]}'])
+        rows = self._calls()
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row[1] == "invalid" for row in rows))
+        self.assertEqual(self._trail()[0], "invalid")
+
+    def test_contradictory_quiet_reply_is_invalid(self) -> None:
+        self._sessions(63)
+        self._chain()
+        bad = '{"quiet": true, "strike": 9}'
+        self._pass(['{"tags":[]}', '{"news_wash":false}', bad, bad])
+        self.assertEqual(self._trail(), ("invalid", "CSP schema"))
+        self.assertEqual(len(self._calls()), 4)
+
+    def test_short_history_does_not_call_the_model(self) -> None:
+        self._sessions(10)
+        self._chain()
+        calls = {"n": 0}
+
+        def _chat(*_args, **_kwargs):
+            calls["n"] += 1
+            return {"text": '{"tags":[]}', "error": "", "latency_ms": 1, "tokens": 0, "request": {}}
+
+        apply_migrations(self.conn)
+        with patch("athena_strategy.agents.chat", side_effect=_chat):
+            run_signaled(self.conn, self._audit_settings(), ACCOUNT)
+        self.assertEqual(calls["n"], 0)
+        self.assertEqual(self._trail(), ("no_data", "no_bars"))
+        self.assertEqual(self._calls(), [])
+
+    def test_halt_blocked_and_options_off_skip_tactics(self) -> None:
+        self._sessions(63)
+        self._chain()
+        apply_migrations(self.conn)
+        book_halt(self.conn, ACCOUNT, "test halt")
+        self.conn.commit()
+        with patch("athena_strategy.agents.chat") as chat:
+            run_signaled(self.conn, self._audit_settings(), ACCOUNT)
+        self.assertEqual(chat.call_count, 0)
+        self.assertEqual(self._trail(), ("no_data", "halted"))
+        self.conn.execute("DELETE FROM halts WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+        blocked = standard_payload().model_copy(update={"watchlist": [SYMBOL], "blocked_symbols": [SYMBOL]})
+        with patch("athena_strategy.agents.chat") as chat:
+            run_signaled(self.conn, blocked, ACCOUNT)
+        self.assertEqual(chat.call_count, 0)
+        self.assertEqual(self._trail(), ("no_data", "symbol blocked"))
+        self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+        off = self._audit_settings(csp=False, cc=False, strangle=False)
+        with patch("athena_strategy.agents.chat", return_value={
+            "text": '{"tags":[],"news_wash":false}',
+            "error": "",
+            "latency_ms": 1,
+            "tokens": 1,
+            "request": {},
+        }) as chat:
+            run_signaled(self.conn, off, ACCOUNT)
+        self.assertEqual(chat.call_count, 2)
+        self.assertEqual(self._trail(), ("no_data", "options off"))
+        self.assertTrue(all(row[1] == "ok" for row in self._calls()))
+
+    def test_chain_snapshot_appends_and_skips_a_missing_bid(self) -> None:
+        from athena_exec.session import cache_symbol_chain, record_chain_snapshot
+        from athena_strategy.iv import estimated_iv
+
+        apply_migrations(self.conn)
+        today = date(2026, 10, 11)
+        settings = standard_payload()
+        iv_before = self.conn.execute("SELECT count(*) FROM iv_marks").fetchone()[0]
+
+        class _Chain:
+            def __init__(self) -> None:
+                self.missing = False
+
+            def option_chain(self, symbol):
+                return (["20261120"], [], "ZZT", "SMART", "100")
+
+            def expiry_strikes(self, symbol, expiry, trading_class, exchange):
+                return [90.0, 100.0, 110.0]
+
+            def option_mid(self, symbol, expiry, strike, right, trading_class, exchange, multiplier="100"):
+                if self.missing and right == "P":
+                    return None
+                return Decimal("1.50") if right == "P" else Decimal("1.20")
+
+            def option_ask(self, symbol, expiry, strike, right, trading_class, exchange, multiplier="100"):
+                return Decimal("1")
+
+        broker = _Chain()
+        self.assertTrue(record_chain_snapshot(self.conn, broker, settings, SYMBOL, Decimal("105"), today))
+        self.assertTrue(record_chain_snapshot(self.conn, broker, settings, SYMBOL, Decimal("105"), today))
+        rows = self.conn.execute(
+            """
+            SELECT expiry, dte, k_call, k_put, moneyness_pct, mid_call, mid_put
+            FROM chain_marks WHERE symbol = %s ORDER BY id
+            """,
+            (SYMBOL,),
+        ).fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertNotEqual(rows[0], None)
+        self.assertEqual(rows[0][0], date(2026, 11, 20))
+        self.assertEqual(rows[0][2], Decimal("110"))
+        self.assertEqual(rows[0][3], Decimal("100"))
+        self.assertEqual(rows[0][5], Decimal("1.20"))
+        self.assertEqual(rows[0][6], Decimal("1.50"))
+        self.assertGreater(rows[0][4], 0)
+        broker.missing = True
+        self.assertFalse(record_chain_snapshot(self.conn, broker, settings, SYMBOL, Decimal("105"), today))
+        count = self.conn.execute(
+            "SELECT count(*) FROM chain_marks WHERE symbol = %s",
+            (SYMBOL,),
+        ).fetchone()[0]
+        self.assertEqual(count, 2)
+        self.assertIsNone(estimated_iv(self.conn, SYMBOL, today))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM iv_marks").fetchone()[0], iv_before)
+        cache_symbol_chain(self.conn, broker, settings, SYMBOL, Decimal("105"), today)
+        self.assertEqual(
+            self.conn.execute("SELECT count(*) FROM chain_marks WHERE symbol = %s", (SYMBOL,)).fetchone()[0],
+            2,
+        )
+
+    def test_every_expiry_in_the_band_stores_an_ask(self) -> None:
+        from athena_exec.session import _store_choices
+
+        apply_migrations(self.conn)
+        today = date(2026, 10, 11)
+        settings = standard_payload()
+        expiries = ["20261106", "20261120", "20261204"]
+        asked: list[str] = []
+
+        class _Band:
+            def expiry_strikes(self, symbol, expiry, trading_class, exchange):
+                return [80.0, 90.0, 110.0, 120.0]
+
+            def option_ask(self, symbol, expiry, strike, right, trading_class, exchange, multiplier="100"):
+                asked.append(expiry)
+                return Decimal("1.25")
+
+        _store_choices(
+            self.conn, _Band(), SYMBOL, expiries, today, Decimal("100"),
+            "ZZT", "SMART", "100", settings.strategy, None,
+        )
+        rows = self.conn.execute(
+            """
+            SELECT expiry, count(*) FROM option_choices
+            WHERE symbol = %s AND limit_price > 0
+            GROUP BY expiry ORDER BY expiry
+            """,
+            (SYMBOL,),
+        ).fetchall()
+        self.assertEqual([row[0] for row in rows], [date(2026, 11, 6), date(2026, 11, 20), date(2026, 12, 4)])
+        self.assertTrue(all(row[1] > 0 for row in rows))
+        self.assertEqual(set(asked), {date(2026, 11, 6), date(2026, 11, 20), date(2026, 12, 4)})
+
+    def test_universe_toggle_returns_the_row(self) -> None:
+        import json
+
+        from athena_orchestrator.pages import _post_universe, _universe
+        from athena_settings.model import SettingsPayload, TacticFlags, standard_payload
+        from athena_settings.repository import load_active, save_settings
+
+        try:
+            before = load_active(self.conn, ACCOUNT)
+        except RuntimeError:
+            from athena_settings.repository import seed_standard_if_empty
+
+            seed_standard_if_empty(self.conn, ACCOUNT)
+            before = load_active(self.conn, ACCOUNT)
+        original = SettingsPayload.model_validate(
+            {key: before.model_dump()[key] for key in SettingsPayload.model_fields}
+        )
+        staged = standard_payload().model_copy(
+            update={
+                "watchlist": [SYMBOL],
+                "tactic_flags": {SYMBOL: TacticFlags(csp=True, cc=True, strangle=True)},
+            }
+        )
+        try:
+            save_settings(self.conn, ACCOUNT, staged, "test", "universe row")
+            result = _post_universe(
+                self.conn,
+                ACCOUNT,
+                {"symbol": [SYMBOL], "action": ["toggle"], "field": ["csp"], "partial": ["row"]},
+                "test",
+            )
+            self.assertEqual(result["kind"], "json")
+            data = json.loads(result["body"])
+            self.assertTrue(data["ok"])
+            self.assertIn(f'data-symbol="{SYMBOL}"', data["html"])
+            self.assertIn('aria-label="CSP"', data["html"])
+            self.assertNotIn('class="pool-tgl on" type="submit" aria-label="CSP"', data["html"])
+            fetched = json.loads(
+                _universe(self.conn, ACCOUNT, {"partial": ["symbol"], "symbol": [SYMBOL]})["body"]
+            )
+            self.assertEqual(fetched["html"], data["html"])
+            self.assertNotIn("<html", result["body"])
+        finally:
+            try:
+                save_settings(self.conn, ACCOUNT, original, "test", "restore universe row")
+            except ValueError:
+                pass
+
+    def test_chain_list_skips_names_with_options_off(self) -> None:
+        from athena_exec.session import chain_names
+        from athena_settings.model import TacticFlags
+        from athena_strategy.iv import estimated_iv
+
+        settings = standard_payload().model_copy(
+            update={
+                "watchlist": ["SPY", "QQQ", "NVDA"],
+                "tactic_flags": {
+                    "SPY": TacticFlags(csp=False, cc=False, strangle=False, long=False),
+                    "QQQ": TacticFlags(csp=False, cc=True, strangle=False),
+                },
+            }
+        )
+        self.assertEqual(chain_names(settings), ["QQQ", "NVDA"])
+        self.assertIsNone(estimated_iv(self.conn, "SPY", date(2026, 10, 11)))
+
+    def test_history_list_adds_spy_without_touching_the_watchlist(self) -> None:
+        from athena_orchestrator.backfill import history_symbols, listing_symbol, watchlist_after_listing
+
+        watch = ["NVDA", "0992"]
+        symbols = history_symbols([watch], ["spy"])
+        self.assertEqual(symbols, ["NVDA", "0992", "SPY"])
+        self.assertEqual(watch, ["NVDA", "0992"])
+        self.assertEqual(history_symbols([["SPY"]], ["SPY"]), ["SPY"])
+
+        class _Qualify:
+            def qualifies_stock(self, symbol):
+                return symbol == "992"
+
+        self.assertEqual(listing_symbol(_Qualify(), "0992"), "992")
+        self.assertEqual(listing_symbol(_Qualify(), "NVDA"), "NVDA")
+        self.assertEqual(watchlist_after_listing(["NVDA", "0992", "992"], "0992", "992"), ["NVDA", "992"])
+
+        class _Keep:
+            def qualifies_stock(self, symbol):
+                return symbol == "0992"
+
+        self.assertEqual(listing_symbol(_Keep(), "0992"), "0992")
+
+    def _clear_gate(self) -> None:
+        self.conn.execute("DELETE FROM orders WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM drafts WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM positions WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+

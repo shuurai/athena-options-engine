@@ -51,6 +51,8 @@ class IbBroker:
 
             nest_asyncio.apply()
             ib = IB()
+            # 0 means wait forever. A hung quote must not pin the probe lock.
+            ib.RequestTimeout = 30
             ib.connect(host, port, clientId=client_id, readonly=readonly, timeout=3)
         except Exception as exc:
             log.info("gateway down: %s", exc)
@@ -112,6 +114,21 @@ class IbBroker:
         contract = Stock(symbol, exchange, currency)
         if not self._ib.qualifyContracts(contract):
             return None
+        return self._read_quote(contract)
+
+    def quote(self, kind: str, symbol: str) -> Decimal | None:
+        """Delayed last for one named kind. None when this session is not connected."""
+        if self._ib is None:
+            return None
+        fields = quote_fields(kind, symbol)
+        if isinstance(fields, str):
+            return None
+        contract = _quote_contract(fields)
+        if not self._ib.qualifyContracts(contract):
+            return None
+        return self._read_quote(contract)
+
+    def _read_quote(self, contract) -> Decimal | None:
         self._ib.reqMarketDataType(3)
         ticker = self._ib.reqMktData(contract, "", False, False)
         self._ib.sleep(2)
@@ -134,8 +151,12 @@ class IbBroker:
         bars = self._ib.reqHistoricalData(contract, "", "60 D", "1 day", "TRADES", True, 1)
         return list(bars or [])
 
-    def history_span(self, symbol: str, duration: str) -> list[tuple]:
-        """Daily TRADES bars for one IB duration, such as '2 Y'. Empty when none exist."""
+    def history_span(self, symbol: str, duration: str, end: str = "") -> list[tuple]:
+        """Daily TRADES bars for one IB duration, such as '1 Y'.
+
+        end is an IB endDateTime. Empty means now, so a second year can stop
+        where the first year starts.
+        """
         if self._ib is None:
             return []
         from ib_insync import Stock
@@ -144,7 +165,7 @@ class IbBroker:
         contract = Stock(symbol, exchange, currency)
         if not self._ib.qualifyContracts(contract):
             return []
-        bars = self._ib.reqHistoricalData(contract, "", duration, "1 day", "TRADES", True, 1)
+        bars = self._ib.reqHistoricalData(contract, end, duration, "1 day", "TRADES", True, 1)
         found = []
         for bar in bars or []:
             found.append(
@@ -303,6 +324,42 @@ class IbBroker:
         if currency != "USD":
             return None
         return _cboe_close(self._ib, symbol, expiry, strike, right, trading_class, multiplier)
+
+    def qualifies_stock(self, symbol: str) -> bool:
+        """True when IB accepts this stock symbol on its venue."""
+        if self._ib is None:
+            return False
+        from ib_insync import Stock
+
+        exchange, currency = stock_venue(symbol)
+        return bool(self._ib.qualifyContracts(Stock(symbol, exchange, currency)))
+
+    def option_mid(
+        self,
+        symbol: str,
+        expiry: date,
+        strike: Decimal,
+        right: str,
+        trading_class: str,
+        exchange: str,
+        multiplier: str = "100",
+    ) -> Decimal | None:
+        """Delayed (bid + ask) / 2. Missing either side writes nothing."""
+        if self._ib is None:
+            return None
+        currency = "HKD" if symbol.isdigit() else "USD"
+        contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
+        if not self._ib.qualifyContracts(contract):
+            return None
+        self._ib.reqMarketDataType(3)
+        ticker = self._ib.reqMktData(contract, "", False, False)
+        self._ib.sleep(2)
+        bid = _positive(ticker.bid)
+        ask = _positive(ticker.ask)
+        self._ib.cancelMktData(contract)
+        if bid is None or ask is None:
+            return None
+        return (bid + ask) / Decimal(2)
 
     def order_states(self) -> dict[int, str]:
         """Status of each open order on this login, including orders from client 1."""
@@ -651,6 +708,49 @@ def stock_venue(symbol: str) -> tuple[str, str]:
     if symbol.isdigit():
         return "SEHK", "HKD"
     return "SMART", "USD"
+
+
+def quote_fields(kind: str, symbol: str) -> dict | str:
+    """Contract fields for one quote command, or a sentence when the symbol does not fit."""
+    raw = symbol.strip().upper()
+    if kind in {"stock", "etf"}:
+        if raw.isdigit():
+            return "Use /hk for a Hong Kong stock."
+        if not raw.isalpha():
+            example = "AAPL" if kind == "stock" else "SPY"
+            return f"Use letters, such as {example}."
+        label = "stock" if kind == "stock" else "ETF"
+        return {
+            "kind": kind, "symbol": raw, "show": raw, "label": label,
+            "exchange": "SMART", "currency": "USD", "sec": "STK",
+        }
+    if kind == "hk":
+        if not raw.isdigit():
+            return "Use the SEHK number, such as 700."
+        code = raw.lstrip("0") or "0"
+        return {
+            "kind": "hk", "symbol": code, "show": code, "label": "HK stock",
+            "exchange": "SEHK", "currency": "HKD", "sec": "STK",
+        }
+    if kind == "fx":
+        pair = raw.replace("/", "")
+        if len(pair) != 6 or not pair.isalpha():
+            return "Use a pair such as EURUSD or EUR/USD."
+        return {
+            "kind": "fx", "symbol": pair, "show": pair, "label": "FX",
+            "exchange": "IDEALPRO", "currency": pair[3:], "sec": "CASH", "base": pair[:3],
+        }
+    return "Unknown quote."
+
+
+def _quote_contract(fields: dict):
+    if fields["sec"] == "CASH":
+        from ib_insync import Forex
+
+        return Forex(fields["symbol"])
+    from ib_insync import Stock
+
+    return Stock(fields["symbol"], fields["exchange"], fields["currency"])
 
 
 def _broker_position(account: str, contract, quantity, avg_cost, market_price, book=None) -> BrokerPosition:

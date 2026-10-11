@@ -129,7 +129,7 @@
       "<td>" + s.cls.map((c) => '<span class="tag">' + c + "</span>").join(" ") + "</td>" +
       '<td class="mono">' + s.ivr + "</td>" +
       "<td>" + (s.pc ? '<span class="tag ' + s.pc + '">' + s.phase + "</span>" : '<span class="tag">' + s.phase + "</span>") + "</td>" +
-      '<td><select class="intent" data-k="intent"><option value="income"' + (s.intent === "income" ? " selected" : "") + '>Income</option><option value="accumulate"' + (s.intent === "accumulate" ? " selected" : "") + ">Accumulate</option></select></td>" +
+      '<td><select class="intent" data-k="intent"><option value="income"' + (s.intent === "income" ? " selected" : "") + '>Income</option><option value="both"' + (s.intent === "both" ? " selected" : "") + '>Both</option><option value="accumulate"' + (s.intent === "accumulate" ? " selected" : "") + ">Accumulate</option></select></td>" +
       '<td><span class="tgl' + (s.long ? " on" : "") + '" data-k="long"></span></td>' +
       '<td><span class="tgl green' + (s.on ? " on" : "") + '" data-k="on"></span></td>' +
       '<td><span class="tgl' + (s.csp ? " on" : "") + '" data-k="csp"></span></td>' +

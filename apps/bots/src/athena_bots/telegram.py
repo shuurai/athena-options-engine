@@ -291,14 +291,94 @@ def _handle(client: TelegramClient, database_url: str, allowlist: set[str], upda
         client.call("sendMessage", {"chat_id": chat_id, "text": _news(database_url, arg)})
     elif command == "/settings":
         client.call("sendMessage", {"chat_id": chat_id, "text": _settings(database_url, actor, arg)})
+    elif command == "/help":
+        client.call("sendMessage", {"chat_id": chat_id, "text": help_text()})
+    elif command in {"/stock", "/etf", "/hk", "/fx"}:
+        client.call("sendMessage", {"chat_id": chat_id, "text": quote_text(database_url, command, arg)})
     else:
-        client.call(
-            "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": "Commands: /drafts /status /slots /backup now /approve <id> /reject <id> [reason] /news <symbol> <headline> /halt /resume /settings get risk /ops health",
-            },
-        )
+        client.call("sendMessage", {"chat_id": chat_id, "text": "Use /help to see the commands."})
+
+
+def help_text() -> str:
+    """What the bot does, then each command in one sentence."""
+    return "\n".join((
+        "Athena sends drafts to this chat. Only a linked user can run a command. Nothing is sent to the broker until you Approve.",
+        "",
+        "Prices. IB is asked first. The word delayed means that quote. If the gateway is down, the word stored means the last price already on disk.",
+        "/stock AAPL is a US stock. Use letters. A number such as 700 belongs on /hk.",
+        "/etf SPY is a US ETF. It uses the same listing as a stock, and the reply says ETF.",
+        "/hk 700 is a Hong Kong stock on SEHK, in HKD. 0700 is read as 700.",
+        "/fx EURUSD is a currency pair. EUR/USD is the same pair, on IDEALPRO.",
+        "",
+        "Drafts.",
+        "/drafts lists what is waiting.",
+        "/approve <id> queues that draft for the next Athena slot.",
+        "/reject <id> [reason] drops it.",
+        "",
+        "The book.",
+        "/status shows the account, the slot, and open positions.",
+        "/slots shows the Athena and Mobile windows. HK and US sessions.",
+        "/halt pauses new trading. /resume clears that pause.",
+        "/news AAPL lists the stored headlines. /news AAPL <headline> stores one you paste.",
+        "/settings get risk prints the limits.",
+        "/ops health checks the gateway, the store, and the bot.",
+        "/backup now writes a local snapshot.",
+    ))
+
+
+def quote_text(database_url: str, command: str, arg: str) -> str:
+    """One price line, or a sentence when the symbol does not fit that command."""
+    from decimal import Decimal
+
+    from athena_exec.broker import quote_fields
+
+    kind = command.lstrip("/")
+    if not arg.strip():
+        return {
+            "stock": "Name a US stock. Example: /stock AAPL",
+            "etf": "Name a US ETF. Example: /etf SPY",
+            "hk": "Name a Hong Kong stock by its SEHK number. Example: /hk 700",
+            "fx": "Name a pair. Example: /fx EURUSD",
+        }.get(kind, "Use /help to see the commands.")
+    fields = quote_fields(kind, arg)
+    if isinstance(fields, str):
+        return fields
+    price = _live_quote(fields)
+    source = "delayed"
+    if price is None:
+        price = _stored_quote(database_url, fields["show"])
+        source = "stored"
+    if price is None:
+        return f"The gateway is not open, and there is no stored price for {fields['show']}."
+    number = Decimal(price)
+    shown = f"{number:,.2f}"
+    return f"{fields['show']}  {fields['label']}  {fields['exchange']} {fields['currency']}  {shown}  {source}"
+
+
+def _live_quote(fields: dict):
+    from athena_exec.broker import IbBroker
+
+    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    port = int(os.environ.get("IB_GATEWAY_PORT", "4001"))
+    client_id = int(os.environ.get("IB_CLIENT_ID", "1")) + 20
+    broker = IbBroker()
+    try:
+        if not broker.connect(host, port, client_id, True):
+            return None
+        return broker.quote(fields["kind"], fields["symbol"])
+    finally:
+        broker.disconnect()
+
+
+def _stored_quote(database_url: str, symbol: str):
+    from athena_marketdata.pricing import last_tradeable_price
+
+    try:
+        with connect(database_url) as conn:
+            return last_tradeable_price(conn, symbol)
+    except Exception as exc:
+        log.info("stored quote failed symbol=%s error=%s", symbol, exc.__class__.__name__)
+        return None
 
 
 def _handle_callback(client: TelegramClient, database_url: str, allowlist: set[str], query: dict) -> None:
@@ -413,7 +493,7 @@ def _slots_text(database_url: str) -> str:
             lines.append(f"{account} now {state}")
             lines.append(f"Athena {settings.ib.athena_slots}")
             lines.append(f"Mobile {settings.ib.mobile_slots}")
-    lines.append("Weekdays only. Lunch and the weekend are idle.")
+    lines.append("HK weekdays, plus the US session through Saturday 04:00. Lunch stays idle.")
     return "\n".join(lines)
 
 
@@ -498,7 +578,7 @@ def _settings(database_url: str, actor: str, arg: str) -> str:
                 lines.append(f"halt {risk.daily_loss_halt_pct}")
                 lines.append(f"contracts {risk.max_contracts_per_symbol}")
                 lines.append(f"position {risk.max_position_per_symbol}")
-                lines.append(f"iv {risk.min_iv_rank_new_short}")
+                lines.append(f"rv {risk.min_rv_pctl_new_short}")
                 lines.append(f"dte {risk.min_dte_new}")
                 lines.append(f"margin {risk.max_short_opt_margin_pct}")
                 lines.append(f"earnings {risk.earnings_blackout_days}")
@@ -521,11 +601,42 @@ def _news(database_url: str, arg: str) -> str:
     from athena_strategy.news import store_manual
 
     symbol, _, title = arg.strip().partition(" ")
-    if not symbol or not title:
-        return "Use /news <symbol> <headline>"
+    if not symbol:
+        return "Use /news <symbol> or /news <symbol> <headline>"
+    if not title:
+        return _stored_headlines(database_url, symbol)
     with connect(database_url) as conn:
         stored = store_manual(conn, symbol, title)
     return f"Stored {symbol.upper()}." if stored else f"{symbol.upper()} was already stored."
+
+
+def _stored_headlines(database_url: str, symbol: str) -> str:
+    name = symbol.upper()
+    with connect(database_url) as conn:
+        rows = conn.execute(
+            """
+            SELECT ts, source, title
+            FROM news_events
+            WHERE symbol = %s AND dismissed = false
+            ORDER BY ts DESC
+            LIMIT 8
+            """,
+            (name,),
+        ).fetchall()
+    return format_headlines(name, rows)
+
+
+def format_headlines(symbol: str, rows: list[tuple]) -> str:
+    """The newest stored headlines for one symbol. Dismissed rows are already left out."""
+    if not rows:
+        return f"No stored headline for {symbol}."
+    lines = [f"{symbol}  {len(rows)} stored"]
+    for ts, source, title in rows:
+        when = ts.astimezone(HKT).strftime("%Y-%m-%d %H:%M")
+        lines.append("")
+        lines.append(f"{when}  {source}")
+        lines.append((title or "").strip()[:180])
+    return "\n".join(lines)
 
 
 def _ops(database_url: str, actor: str, allowlist: set[str], command: str) -> str:

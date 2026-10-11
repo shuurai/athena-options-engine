@@ -270,6 +270,9 @@ def _pull_ib(symbol: str) -> tuple[Decimal | None, list, str]:
         try:
             price = broker.last_price(symbol)
             bars = broker.daily_history(symbol)
+        except Exception as exc:
+            log.info("pool ib timed out symbol=%s error=%s", symbol, exc.__class__.__name__)
+            return None, [], "IB quote timed out."
         finally:
             broker.disconnect()
     if price is None and not bars:

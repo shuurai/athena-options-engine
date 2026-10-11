@@ -3,9 +3,10 @@ name = "athena-exec"
 version = "0.0.0"
 description = "IB slot clock and approve-gated limit orders."
 requires-python = ">=3.12"
-dependencies = ["athena-settings", "ib_insync>=0.9.86", "nest_asyncio>=1.6"]
+dependencies = ["athena-marketdata", "athena-settings", "ib_insync>=0.9.86", "nest_asyncio>=1.6"]
 
 [tool.uv.sources]
+athena-marketdata = { workspace = true }
 athena-settings = { workspace = true }
 
 [build-system]

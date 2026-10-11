@@ -4,13 +4,26 @@
 
 | Need | Primary | Secondary |
 |------|---------|-----------|
-| Realtime ping / price movement | **iTick** | IB only if iTick gap |
-| Bars for tags (RSI, support/resistance) | iTick → local store | IB hist backfill |
-| Long historical pulls | **IB** (in Athena slots) | — |
-| Options chain / Greeks when subscribed | IB preferred; iTick if available | Cached snapshots |
+| Draft reference price | Newest `ib-delayed` close, else the daily close | Not a rail input |
+| Bars for tags (RSI, rails, realized vol) | **IB daily**, one row per calendar day | Same-day `ib-delayed` may update that day’s close only |
+| Long historical pulls | **IB** (in Athena slots), target 252 sessions | Short history is marked, not padded |
+| Options chain asks | IB, every expiry inside the DTE band | Cached `option_choices` |
+| At-the-money mids | Appended to `chain_marks` on a live slot | Not read yet. A replay does not write them |
 | Account positions / cash / margin | **IB sync** | — |
 | Order execution | **IB** | — |
 | Ad-hoc human trades | **Mobile IB App** in reserved slots | Athena reconciles next sync |
+
+iTick may still store an hourly print under source `itick` when a key is set. That print is not a daily bar. A missing key writes nothing. Synthetic `seed` bars are not written.
+
+## Daily bar contract
+
+`pricing.daily_bars` is the only production reader of `market_bars` for a window.
+
+- One bar per calendar day. Sources are `ib-daily` and `ib-delayed`.
+- High, low, open, and volume come from `ib-daily` when that day has one. The close is the latest print of the day, so a delayed quote can move the close and cannot move the high or the low.
+- Fewer than 252 `ib-daily` sessions sets `symbol_facts.history_short`. Range tags are then `HIGH_RANGE` and `LOW_RANGE`.
+- Realized volatility for the rank is stored on `rv_marks` (`method` `close_log_252`). It is not backfilled.
+- `iv_marks.method` exists so a future implied-vol sample cannot be ranked against the old premium ratio. No new method is written. `estimated_iv()` returns nothing.
 
 Until profitable enough for extra IB market data subscriptions: lean on iTick for live quotes; use IB for what the account already allows + execution.
 
@@ -18,9 +31,9 @@ Until profitable enough for extra IB market data subscriptions: lean on iTick fo
 
 Not a separate SaaS product named iTicksDB in-repo — a **local** Postgres/Timescale (name in code: `store`) fed by iTick + IB.
 
-Core tables (from PRD, adapted): ticks/bars, options_chain, iv_history, positions, signals/drafts, news_events, settings_versions, approvals, orders/fills.
+Core tables: `market_bars`, `option_choices`, `option_plans`, `chain_marks`, `rv_marks`, `iv_marks`, `symbol_phases` (tags plus `indicators`), `decision_trails`, `ai_calls`, positions, drafts, news_events, settings_versions, approvals, orders/fills.
 
-Retention sketch: ticks short; bars long; chains ~90d; Greeks/IV long; audit forever.
+Retention sketch: ticks short; bars long; chain snapshots append-only; audit forever. `chain_marks` cannot be backfilled.
 
 ## IB session reality
 

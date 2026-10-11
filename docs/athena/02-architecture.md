@@ -146,11 +146,14 @@ Recommended remote access: Tailscale (or similar) so Vercel/bots call a private 
 
 | Store | Contents |
 |-------|----------|
-| `market_bars` / ticks | iTick + downsampled bars |
-| `options_chain` | Snapshots (IB or iTick when available) |
-| `iv_history` | IV rank / percentile |
-| `tags` / `phases` | Per-symbol NFR state |
-| `signals` / `drafts` | Proposed actions |
+| `market_bars` | `ib-daily` and `ib-delayed`. One merged day is the indicator window. `itick` is not part of that window |
+| `option_choices` / `option_plans` | Asks the strike menu ranks. Liquidity and vendor IV columns stay empty until the broker sends them |
+| `chain_marks` | At-the-money mids appended on a live slot. Not read yet |
+| `rv_marks` | Daily `RV20`, method `close_log_252` |
+| `iv_marks` | Old premium-ratio rows, tagged with `method`. No implied vol is written |
+| `symbol_phases` | Phase, tags, and `indicators` numbers |
+| `decision_trails` / `ai_calls` | What the pass decided, and each model reply |
+| `drafts` | Proposed actions. Pending until Approve |
 | `orders` / `fills` | Execution audit |
 | `positions` | Snapshots from IB sync |
 | `settings_versions` | Audited config |

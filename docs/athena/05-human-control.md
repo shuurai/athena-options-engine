@@ -82,6 +82,21 @@ sequenceDiagram
 - Buttons: Approve / Reject / Open details  
 - Link: one-time control page (amend fields then confirm)  
 
+## Decision trail
+
+Each symbol pass writes one `decision_trails` row. The outcome is one of:
+
+| Outcome | Meaning |
+|---------|---------|
+| `drafted` | At least one draft was written |
+| `quiet` | Bars existed and the model named no trade |
+| `no_data` | Halted, blocked, or fewer than 63 daily bars. No model call |
+| `invalid` | The reply failed the schema. It is retried once. A second failure keeps the raw reply on `ai_calls` |
+| `observed` | The name was read and the slot does not allow a new draft |
+| `dropped` | The pass stopped on an error |
+
+`quiet` is not the label for a broken reply or for missing bars. A transport error is not retried.  
+
 ### Amend
 
 Allowed amend fields (Settings-configurable): qty, limit price, strike choice from shortlist, expiry in band. Structural changes (different tactic) = Reject + new draft.

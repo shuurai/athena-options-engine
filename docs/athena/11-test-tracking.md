@@ -3,7 +3,9 @@
 Each development step has a check. **Pending means the event has not happened yet.** It does not stop the next step.
 
 **Status values:** `passed` · `pending` · `deferred`  
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-11
+
+Rows below are the proof recorded on that day. The live rules for price, cover, audit outcomes, realized-vol tags, and the strike menu are in [03-strategy-news-frontrun.md](03-strategy-news-frontrun.md). A row that still says `HIGH_IV` or `source=seed` is history, not the current rule.
 
 Build tasks stay in [10-implementation-tracker.md](10-implementation-tracker.md). This file only records proof.
 

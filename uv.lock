@@ -83,6 +83,7 @@ name = "athena-exec"
 version = "0.0.0"
 source = { editable = "apps/exec-ib" }
 dependencies = [
+    { name = "athena-marketdata" },
     { name = "athena-settings" },
     { name = "ib-insync" },
     { name = "nest-asyncio" },
@@ -90,6 +91,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "athena-marketdata", editable = "packages/marketdata" },
     { name = "athena-settings", editable = "packages/settings" },
     { name = "ib-insync", specifier = ">=0.9.86" },
     { name = "nest-asyncio", specifier = ">=1.6" },
@@ -176,6 +178,7 @@ version = "0.0.0"
 source = { editable = "packages/strategy-nfr" }
 dependencies = [
     { name = "athena-exec" },
+    { name = "athena-marketdata" },
     { name = "athena-risk" },
     { name = "athena-settings" },
     { name = "athena-store" },
@@ -184,6 +187,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "athena-exec", editable = "apps/exec-ib" },
+    { name = "athena-marketdata", editable = "packages/marketdata" },
     { name = "athena-risk", editable = "packages/risk" },
     { name = "athena-settings", editable = "packages/settings" },
     { name = "athena-store", editable = "packages/store" },

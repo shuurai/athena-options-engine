@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import re
 import secrets
@@ -47,25 +48,43 @@ from athena_settings.resolve import (
 )
 from athena_strategy.classifiers import CLASSIFIER_BADGE, CLASSIFIER_MEANING, CLASSIFIERS, clean_classifiers
 from athena_strategy.drafts import AmendError, amend_view, apply_amend, decide
-from athena_strategy.iv import iv_rank
+from athena_strategy.iv import PREMIUM_METHOD, iv_rank
+from athena_strategy.tags import tag_color
 from athena_strategy.news import dismiss_event, ingest_url
 from athena_strategy.pool import clean_symbol
 from athena_strategy.types import NEWS_TYPE_BADGE, NEWS_TYPE_MEANING
 from athena_strategy.phases import calendar_offset
 
+PROFILE_LIMITS = (
+    "max_symbol_pct_nav",
+    "cash_reserve_pct",
+    "daily_loss_halt_pct",
+    "max_contracts_per_symbol",
+    "min_rv_pctl_new_short",
+    "min_dte_new",
+    "max_position_per_symbol",
+    "max_orders_per_day",
+    "max_short_opt_margin_pct",
+    "earnings_blackout_days",
+)
+FORM_LIMITS = (
+    "max_symbol", "cash", "halt", "contracts", "min_rv", "min_dte",
+    "position", "max_orders", "margin", "blackout",
+)
 PROFILES = {
-    "defensive": (10, 40, 3, 1, 60, 21),
-    "standard": (20, 30, 5, 3, 50, 7),
-    "income": (25, 25, 5, 2, 45, 14),
-    "aggressive": (35, 15, 8, 4, 30, 7),
-    "test": (80, 5, 20, 12, 0, 1),
+    "defensive": (10, 40, 3, 1, 60, 21, 0, 10, 50, 7),
+    "standard": (20, 30, 5, 3, 50, 7, 0, 10, 50, 7),
+    "income": (25, 25, 5, 2, 45, 14, 0, 10, 50, 7),
+    "aggressive": (35, 15, 8, 4, 30, 7, 0, 10, 50, 7),
+    "paper": (25, 20, 8, 5, 40, 21, 20000, 6, 35, 7),
 }
+PREVIEW_FIELDS = ("rv_high_pctl", "rv_low_pctl", "rv_window", "ivr_min_samples")
 PROFILE_COPY = {
     "defensive": "Tighter name size, more cash, one contract.",
     "standard": "The book Athena starts with.",
     "income": "More premium, a shorter DTE floor.",
     "aggressive": "Larger name size and more contracts.",
-    "test": "Much looser limits for a paper test. Approve and the Athena slot still apply.",
+    "paper": "Acceptance limits. Approve still applies.",
 }
 PHASES = (
     ("P1", "Warning", "Watchlist and IV"),
@@ -96,13 +115,16 @@ def build(conn, path: str, query: dict) -> dict | None:
         "/simulation": _simulation,
         "/drafts": _drafts,
         "/phase": _phase,
+        "/orchestration": _strategy,
         "/strategy": _strategy,
+        "/volatility": _volatility_page,
         "/audit": _audit,
         "/news": _news,
         "/universe": _universe,
         "/history": _history,
         "/history.csv": _history_csv,
         "/positions": _positions_page,
+        "/book": _book_page,
         "/accounts": _accounts,
         "/risk": _risk,
         "/settings": _settings,
@@ -120,7 +142,7 @@ def submit(conn, path: str, form: dict, actor: str, allowlist: set[str]) -> dict
         return _post_draft(conn, account, form, actor, allowlist)
     if path == "/news":
         return _post_news(conn, account, form)
-    if path == "/strategy":
+    if path in {"/orchestration", "/strategy"}:
         return _post_strategy(conn, account, form, actor)
     if path == "/universe":
         return _post_universe(conn, account, form, actor)
@@ -161,7 +183,7 @@ def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
         ).fetchall()
     cards = "".join(_draft_card(conn, account, row, index == 0) for index, row in enumerate(pending))
     if not cards:
-        cards = '<div class="card"><p>No draft is waiting.</p></div>'
+        cards = f'<div class="card draft-empty"><div class="sim-idle">{_SIM_IDLE}<p>No draft is waiting.</p></div></div>'
     rows = []
     for created, draft_id, symbol, tactic, decision, actor, reason in recent:
         label = {"approve": "APPROVED", "reject": "REJECTED"}.get(decision, decision.upper())
@@ -248,19 +270,8 @@ def _draft_card(conn, account: str, row, hot: bool) -> str:
     )
 
 
-_DRIVER_COLOR = {
-    "HIGH_IV": "teal",
-    "LOW_IV": "teal",
-    "NEWS_WASH": "amber",
-    "FED_EVENT": "blue",
-    "EARNINGS_NEAR": "amber",
-    "PRICE_WEAK": "red",
-    "VOLUME_SPIKE": "amber",
-}
-
-
 def _driver_tag(name: str) -> str:
-    color = _DRIVER_COLOR.get(name, "")
+    color = tag_color(name)
     klass = f"tag {color}".strip()
     return f'<span class="{klass}">{escape(name)}</span>'
 
@@ -330,10 +341,14 @@ def _draft_risk(conn, account: str, symbol: str, contracts: int, expiry, tactic:
         if nav_value and nav_value > 0 and cash is not None and tactic in {"OPEN_CSP", "OPEN_STRANGLE"}:
             ok = cash / nav_value * Decimal(100) >= limits.cash_reserve_pct
             badges.append(("CASH OK" if ok else "CASH LOW", "green" if ok else "amber"))
-        _series, rank = _iv_series(conn, symbol, settings.strategy.ivr_min_samples)
+        stored = conn.execute(
+            "SELECT indicators FROM symbol_phases WHERE account_id = %s AND symbol = %s",
+            (account, symbol),
+        ).fetchone()
+        rank = None if stored is None or not stored[0] else stored[0].get("rv_pctl")
         if rank is not None:
-            ok = rank >= limits.min_iv_rank_new_short
-            badges.append((f"IVR ≥ {limits.min_iv_rank_new_short}", "green" if ok else "amber"))
+            ok = int(rank) >= limits.min_rv_pctl_new_short
+            badges.append((f"RV ≥ {limits.min_rv_pctl_new_short}", "green" if ok else "amber"))
         if isinstance(expiry, date):
             dte = (expiry - datetime.now(HKT).date()).days
             ok = dte >= limits.min_dte_new
@@ -356,9 +371,9 @@ def _draft_risk(conn, account: str, symbol: str, contracts: int, expiry, tactic:
         badges.append(("SIZE", "red"))
     elif opening and limits.max_position_per_symbol > 0:
         from athena_risk import allowed_open
-        from athena_strategy.drafts import _exposure, _latest_price
+        from athena_strategy.drafts import _exposure, last_tradeable_price
 
-        price = _latest_price(conn, symbol)
+        price = last_tradeable_price(conn, symbol)
         if price is not None:
             mult = Decimal(multiplier or "100")
             if mult <= 0:
@@ -527,51 +542,53 @@ def _sort_th(label: str, key: str) -> str:
     )
 
 
+def _year_band(conn, symbol: str) -> tuple[str, str, str]:
+    from athena_marketdata.pricing import year_view
+
+    return year_view(conn, symbol)
+
+
+def _band_cell(band: str, high_pct: str, low_pct: str) -> str:
+    if not high_pct:
+        return f'<td class="mono band"><span class="px">{escape(band)}</span></td>'
+    if not low_pct:
+        gap = escape(high_pct)
+    else:
+        gap = (
+            f'<span class="{_pct_tone(high_pct)}">{escape(high_pct)}</span>/'
+            f'<span class="{_pct_tone(low_pct)}">{escape(low_pct)}</span>'
+        )
+    return (
+        '<td class="mono band">'
+        f'<span class="px">{escape(band)}</span> '
+        f'<span class="px-chg">{gap}</span></td>'
+    )
+
+
+def _pct_tone(text: str) -> str:
+    if text.startswith("+"):
+        return "chg-up"
+    if text.startswith("-"):
+        return "chg-down"
+    return ""
+
+
 def _universe(conn, account: str, query: dict, note: str = "") -> dict:
     settings = load_active(conn, account) if account else None
     symbols = list(settings.watchlist) if settings else []
     offset = _offset(query)
     page, more, nxt = _window(symbols, offset)
-    rows = []
-    for symbol in page:
-        last, change, tone = _closes(conn, symbol)
-        phase, _tags, _tactic = _phase_row(conn, account, symbol)
-        name, cap, classifiers, thesis = _pool_profile(conn, account, symbol)
-        rank = _rank_text(conn, symbol, settings.strategy.ivr_min_samples if settings else 20)
-        enabled = symbol.upper() not in {item.upper() for item in settings.blocked_symbols}
-        flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
-        faded = "" if enabled else ' style="opacity:.45"'
-        phase_html = f'<span class="tag">{escape(phase)}</span>' if phase else DASH
-        price_sort = "" if last == DASH else last
-        cap_sort = "" if cap is None else format(Decimal(cap), "f")
-        rows.append(
-            f"<tr{faded}"
-            f' data-symbol="{escape(symbol, quote=True)}"'
-            f' data-name="{escape(name, quote=True)}"'
-            f' data-price="{escape(price_sort, quote=True)}"'
-            f' data-cap="{escape(cap_sort, quote=True)}"'
-            f' data-classifiers="{escape(classifiers, quote=True)}">'
-            f"<td><b>{escape(symbol)}</b><div class=\"sym-name\">{escape(name) if name else DASH}</div></td>"
-            f"<td class=\"mono\" style=\"font-weight:600\">{escape(last)}</td>"
-            f"<td class=\"mono {tone}\">{escape(change)}</td>"
-            f"<td class=\"mono\" style=\"color:var(--site-text-3)\">{escape(_cap_text(cap))}</td>"
-            f"<td>{_classifier_badges(classifiers)}</td>"
-            f"<td class=\"mono\">{escape(rank)}</td>"
-            f"<td>{phase_html}</td>"
-            f"<td>{_intent_select(symbol, flags.intent)}</td>"
-            f"<td>{_toggle(symbol, 'long', flags.long)}</td>"
-            f"<td>{_toggle(symbol, 'enabled', enabled, green=True)}</td>"
-            f"<td>{_toggle(symbol, 'csp', flags.csp)}</td>"
-            f"<td>{_toggle(symbol, 'cc', flags.cc)}</td>"
-            f"<td>{_toggle(symbol, 'strangle', flags.strangle)}</td>"
-            f"<td class=\"pool-actions\">{_edit_symbol(symbol, name, cap, classifiers, thesis, last, change, rank, phase)}{_sync_symbol(symbol)}{_remove_symbol(symbol)}</td>"
-            "</tr>"
-        )
+    if (query.get("partial") or [""])[0] == "symbol":
+        wanted = (query.get("symbol") or [""])[0].strip().upper()
+        if settings is None or wanted not in {item.upper() for item in symbols}:
+            return _pool_patch(False, "Symbol is not in the pool.", status=404)
+        return _pool_patch(True, "", html=_pool_row(conn, account, settings, wanted), count=len(symbols))
+    rows = [_pool_row(conn, account, settings, symbol) for symbol in page]
     body_rows = "".join(rows)
     if not body_rows and offset == 0:
-        body_rows = '<tr><td colspan="14">The watchlist is empty.</td></tr>'
+        body_rows = '<tr><td colspan="15">The watchlist is empty.</td></tr>'
     if offset == 0:
-        body_rows += '<tr id="pool-empty" hidden><td colspan="14">No symbols match.</td></tr>'
+        body_rows += '<tr id="pool-empty" hidden><td colspan="15">No symbols match.</td></tr>'
     if _wants_rows(query):
         return _fragment(body_rows, more, nxt)
     classifier_options = "".join(
@@ -586,9 +603,10 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
         "income": "tone-income",
         "aggressive": "tone-aggressive",
         "test": "tone-test",
+        "paper": "tone-paper",
         "custom": "tone-custom",
     }.get(profile, "")
-    ivr_floor = settings.risk.min_iv_rank_new_short if settings else 50
+    ivr_floor = settings.risk.min_rv_pctl_new_short if settings else 50
     pending = 0
     if account:
         pending = conn.execute(
@@ -604,7 +622,7 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
         f'<div class="meta">IVR≥{ivr_floor}</div></div>'
         '<div class="card stat"><div class="label">Last scan</div>'
         f'<div class="value">{DASH}</div>'
-        f'<div class="meta">{len(symbols)} symbols</div></div>'
+        f'<div class="meta" data-pool-count>{len(symbols)} symbols</div></div>'
         '<div class="card stat"><div class="label">Drafts from scan</div>'
         f"{draft_value}"
         '<div class="meta"><a href="/drafts" style="color:var(--site-primary)">open queue →</a></div></div>'
@@ -617,9 +635,9 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
         "</div>"
         '<div class="scroll-y" data-feed="/universe" data-offset="'
         f'{nxt}" data-more="{"1" if more else "0"}"><table class="data" id="pool-table"><thead><tr>'
-        f"{_sort_th('Symbol', 'symbol')}{_sort_th('Price', 'price')}<th>1D %</th>{_sort_th('Mkt cap', 'cap')}"
+        f"{_sort_th('Symbol', 'symbol')}{_sort_th('Price', 'price')}<th>1D %</th><th>52w</th>{_sort_th('Mkt cap', 'cap')}"
         "<th>Classifiers</th><th>IVR</th><th>Phase</th>"
-        "<th>Intent</th><th>Long</th><th>Enabled</th><th>CSP</th><th>CC</th><th>Strangle</th><th></th></tr></thead>"
+        "<th>Intent</th><th>Long</th><th>May buy</th><th>Enabled</th><th>CSP</th><th>CC</th><th>Strangle</th><th></th></tr></thead>"
         f"<tbody>{body_rows}</tbody></table></div></div>"
     )
     return _html(
@@ -684,6 +702,459 @@ def _history_table(rows: str) -> str:
     )
 
 
+def _kept_int(form: dict, key: str, default: int) -> int:
+    raw = form.get(key)
+    if not raw or str(raw[0]).strip() == "":
+        return default
+    return int(raw[0])
+
+
+def _kept_float(form: dict, key: str, default: float) -> float:
+    raw = form.get(key)
+    if not raw or str(raw[0]).strip() == "":
+        return float(default)
+    return float(raw[0])
+
+
+def _book_page(conn, account: str, query: dict) -> dict:
+    """Read-only concentration. It does not choose a trade."""
+    del query
+    from athena_risk import panel_enabled
+    from athena_strategy.indicators import compute, load_bars
+
+    if not account:
+        return _html("Book", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
+    settings = load_active(conn, account)
+    load_bars(conn, settings.strategy.regime_index, settings.strategy.regime_lookback)
+    if not panel_enabled():
+        return _html("Book", "Charts are off.", '<div class="card"><p>Charts are off.</p></div>', [("info", "panel off")])
+    points, book_point = _book_points(conn, settings, account, compute, load_bars)
+    buckets = _book_buckets(conn, account, settings)
+    assignment = _book_assignment(conn, account, settings)
+    intents = {symbol.upper(): flags.intent for symbol, flags in settings.tactic_flags.items()}
+    heatmap = _position_heatmap(_position_rows(conn, account), intents)
+    body = (
+        '<div class="book-stack">'
+        '<div class="grid cols-3">'
+        f'<div class="card"><h2>Universe vs book</h2>{_scatter(points, book_point)}</div>'
+        f'<div class="card"><h2>Buckets</h2>{_bucket_chart(buckets, settings.risk.max_bucket_pct_nav)}</div>'
+        f'<div class="card"><h2>Assignment now</h2>{_assignment_chart(assignment, settings.risk)}</div>'
+        "</div>"
+        f'<div class="card"><h2>Positions</h2>{heatmap}</div>'
+        "</div>"
+    )
+    return _html(
+        "Book",
+        "Realized risk and signed premium.",
+        body,
+        [("info", "read only")],
+    )
+
+
+def _book_points(conn, settings, account: str, compute, load_bars) -> tuple[list, tuple | None]:
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (symbol, expiry, contract_right, strike)
+            symbol, quantity, avg_price, expiry, contract_right, strike, multiplier
+        FROM positions
+        WHERE account_id = %s AND simulated = false AND quantity < 0 AND sec_type = 'OPT'
+        ORDER BY symbol, expiry, contract_right, strike, snapshot_at DESC
+        """,
+        (account,),
+    ).fetchall()
+    today = datetime.now(HKT).date()
+    points = []
+    weighted_x = Decimal(0)
+    weighted_y = Decimal(0)
+    weight = Decimal(0)
+    for symbol, quantity, avg_price, expiry, _right, strike, multiplier in rows:
+        if avg_price is None or strike is None or expiry is None:
+            continue
+        dte = (expiry - today).days
+        if dte <= 0 or Decimal(strike) <= 0:
+            continue
+        bars = load_bars(conn, symbol, settings.strategy.rv_window + 1)
+        rv20 = compute(bars, settings.strategy).rv20
+        if rv20 is None:
+            continue
+        capital = abs(Decimal(quantity)) * Decimal(strike) * Decimal(multiplier or 100)
+        premium = abs(Decimal(quantity)) * Decimal(avg_price) * Decimal(multiplier or 100)
+        yld = premium / capital * Decimal(365) / Decimal(dte) * Decimal(100)
+        names = _symbol_classifiers(conn, account, symbol)
+        points.append((float(rv20), float(yld), float(capital), _bucket_color(names[:1]), symbol))
+        weighted_x += Decimal(rv20) * capital
+        weighted_y += yld * capital
+        weight += capital
+    book_point = None
+    if weight > 0:
+        book_point = (float(weighted_x / weight), float(weighted_y / weight))
+    return points, book_point
+
+
+def _symbol_classifiers(conn, account: str, symbol: str) -> list[str]:
+    row = conn.execute(
+        "SELECT classifiers FROM symbol_phases WHERE account_id = %s AND symbol = %s",
+        (account, symbol.upper()),
+    ).fetchone()
+    if row is None or not row[0]:
+        return []
+    return [part.strip() for part in str(row[0]).split(",") if part.strip()]
+
+
+def _book_buckets(conn, account: str, settings) -> list[tuple[str, float, str]]:
+    from athena_strategy.budget import _baseline
+
+    book = _baseline(conn, settings, account)
+    nav = book.nav or Decimal(0)
+    found = []
+    for name, amount in sorted(book.buckets.items()):
+        pct = float(amount / nav * 100) if nav > 0 else 0.0
+        count = _bucket_count(conn, account, name)
+        rho = Decimal("0.7")
+        bets = Decimal(count) / (1 + (Decimal(count) - 1) * rho) if count else Decimal(0)
+        found.append((name, pct, f"N_eff {bets:.1f} at ρ 0.7"))
+    return found
+
+
+def _bucket_count(conn, account: str, name: str) -> int:
+    rows = conn.execute(
+        "SELECT classifiers FROM symbol_phases WHERE account_id = %s AND classifiers <> ''",
+        (account,),
+    ).fetchall()
+    return sum(1 for (text,) in rows if name in [part.strip() for part in str(text).split(",")])
+
+
+def _book_assignment(conn, account: str, settings) -> dict:
+    from athena_strategy.budget import _baseline
+
+    book = _baseline(conn, settings, account)
+    nav = book.nav or Decimal(0)
+    cash = book.cash if book.cash is not None else Decimal(0)
+    assign = book.assignment
+    return {
+        "assign_pct": float(assign / nav * 100) if nav > 0 else 0.0,
+        "cash_after_pct": float((cash - assign) / nav * 100) if nav > 0 else 0.0,
+    }
+
+
+def _bucket_color(names: list[str]) -> str:
+    palette = {
+        "AI_NARRATIVE": "#6b96f2",
+        "SEMIS": "#22d3ee",
+        "MEGA_CAP": "#a78bfa",
+        "HIGH_BETA": "#f7931a",
+        "DEFENSIVE": "#16c784",
+        "MAG7": "#f472b6",
+    }
+    if not names:
+        return "#8b97a8"
+    return palette.get(names[0], "#8b97a8")
+
+
+def _scatter(points: list, book_point: tuple | None) -> str:
+    width, height, pad = 640, 220, 28
+    xs = [0.0] + [point[0] for point in points]
+    ys = [0.0] + [point[1] for point in points]
+    if book_point:
+        xs.append(book_point[0])
+        ys.append(book_point[1])
+    max_x = max(xs) or 1
+    max_y = max(ys) or 1
+
+    def px(value: float) -> float:
+        return pad + (value / max_x) * (width - 2 * pad)
+
+    def py(value: float) -> float:
+        return height - pad - (value / max_y) * (height - 2 * pad)
+
+    parts = [
+        f'<line x1="{px(0)}" y1="{py(0)}" x2="{px(max_x)}" y2="{py(0)}" stroke="#3a4350"/>',
+        f'<line x1="{px(0)}" y1="{py(0)}" x2="{px(0)}" y2="{py(max_y)}" stroke="#3a4350"/>',
+        f'<text x="{pad}" y="{height - 8}" fill="#8b97a8" font-size="11">RV20</text>',
+        f'<text x="{pad + 6}" y="16" fill="#8b97a8" font-size="11">premium yield</text>',
+    ]
+    if book_point and book_point[0] > 0:
+        y_end = min(max_y, book_point[1] / book_point[0] * max_x)
+        parts.append(
+            f'<line x1="{px(0)}" y1="{py(0)}" x2="{px(max_x)}" y2="{py(y_end)}" stroke="#6b96f2"/>'
+        )
+    for rv, yld, capital, color, label in points:
+        radius = 4 + min(10, capital / 5000)
+        parts.append(
+            f'<circle cx="{px(rv):.1f}" cy="{py(yld):.1f}" r="{radius:.1f}" fill="{color}">'
+            f'<title>{escape(label)}</title></circle>'
+        )
+    if book_point:
+        parts.append(
+            f'<circle cx="{px(book_point[0]):.1f}" cy="{py(book_point[1]):.1f}" r="8" fill="none" stroke="#e7ecf3" stroke-width="2"/>'
+        )
+    return (
+        f'<svg viewBox="0 0 {width} {height}" role="img" style="width:100%;height:auto">'
+        + "".join(parts)
+        + "</svg>"
+    )
+
+
+def _bucket_chart(rows: list[tuple[str, float, str]], cap: int) -> str:
+    if not rows:
+        return '<p class="note">No bucket capital yet.</p>'
+    width, height = 640, max(80, 28 * len(rows) + 16)
+    cap_x = 16 + (min(cap, 100) / 100) * (width - 32)
+    parts = [f'<line x1="{cap_x:.1f}" y1="8" x2="{cap_x:.1f}" y2="{height - 8}" stroke="#f7931a"/>']
+    for index, (name, pct, note) in enumerate(rows):
+        y = 16 + index * 28
+        bar = 16 + (min(pct, 100) / 100) * (width - 32)
+        parts.append(f'<text x="16" y="{y + 12}" fill="#8b97a8" font-size="11">{escape(name)} {pct:.0f}% {escape(note)}</text>')
+        parts.append(f'<rect x="16" y="{y + 16}" width="{max(bar - 16, 0):.1f}" height="6" fill="#6b96f2"/>')
+    return f'<svg viewBox="0 0 {width} {height}" role="img" style="width:100%;height:auto">{"".join(parts)}</svg>'
+
+
+def _assignment_chart(facts: dict, risk) -> str:
+    width, height = 640, 90
+    assign = min(facts["assign_pct"], 100)
+    cash_after = facts["cash_after_pct"]
+    parts = [
+        f'<text x="16" y="24" fill="#8b97a8" font-size="11">assignment {assign:.0f}% / cap {risk.max_assign_pct_nav}%</text>',
+        f'<rect x="16" y="30" width="{16 + assign / 100 * (width - 48):.1f}" height="8" fill="#f7931a"/>',
+        f'<text x="16" y="64" fill="#8b97a8" font-size="11">cash after {cash_after:.0f}% / floor {risk.min_cash_after_assign_pct}%</text>',
+        f'<rect x="16" y="70" width="{16 + max(min(cash_after, 100), 0) / 100 * (width - 48):.1f}" height="8" fill="#16c784"/>',
+    ]
+    return f'<svg viewBox="0 0 {width} {height}" role="img" style="width:100%;height:auto">{"".join(parts)}</svg>'
+
+
+_HEAT_GREY = "#3a4350"
+_HEAT_CAP = 25.0
+_INTENT_LABELS = (("income", "Income"), ("both", "Both"), ("accumulate", "Accumulate"))
+
+
+def _worst_ratio(row: list[float], side: float) -> float:
+    if not row or side <= 0:
+        return math.inf
+    total = sum(row)
+    if total <= 0:
+        return math.inf
+    high = max(row)
+    low = min(row)
+    side2 = side * side
+    return max((side2 * high) / (total * total), (total * total) / (side2 * low))
+
+
+def _squarify(
+    items: list[tuple[float, object]], x: float, y: float, w: float, h: float
+) -> list[tuple[float, float, float, float, object]]:
+    """Squarified treemap. Larger values are placed first. Rects do not overlap."""
+    if w <= 0 or h <= 0 or not items:
+        return []
+    ranked = sorted(items, key=lambda item: item[0], reverse=True)
+    total = sum(value for value, _ref in ranked) or 1.0
+    areas = [(value / total) * (w * h) for value, _ref in ranked]
+    refs = [ref for _value, ref in ranked]
+    out: list[tuple[float, float, float, float, object]] = []
+    left, top, width, height = x, y, w, h
+    while areas:
+        row_areas: list[float] = []
+        row_refs: list[object] = []
+        index = 0
+        while index < len(areas):
+            candidate = row_areas + [areas[index]]
+            side = min(width, height)
+            current = _worst_ratio(row_areas, side) if row_areas else math.inf
+            if not row_areas or _worst_ratio(candidate, side) <= current:
+                row_areas.append(areas[index])
+                row_refs.append(refs[index])
+                index += 1
+            else:
+                break
+        row_sum = sum(row_areas) or 1.0
+        if width >= height:
+            column = row_sum / height if height else 0.0
+            cursor = top
+            for area, ref in zip(row_areas, row_refs):
+                tile_h = (area / row_sum) * height
+                out.append((left, cursor, column, tile_h, ref))
+                cursor += tile_h
+            left += column
+            width -= column
+        else:
+            row_h = row_sum / width if width else 0.0
+            cursor = left
+            for area, ref in zip(row_areas, row_refs):
+                tile_w = (area / row_sum) * width
+                out.append((cursor, top, tile_w, row_h, ref))
+                cursor += tile_w
+            top += row_h
+            height -= row_h
+        del areas[: len(row_areas)]
+        del refs[: len(row_areas)]
+    return out
+
+
+def _lerp_hex(start: str, end: str, amount: float) -> str:
+    def channels(color: str) -> list[int]:
+        raw = color.lstrip("#")
+        return [int(raw[index:index + 2], 16) for index in (0, 2, 4)]
+
+    left, right = channels(start), channels(end)
+    mixed = [round(left[index] + (right[index] - left[index]) * amount) for index in range(3)]
+    return "#" + "".join(f"{part:02x}" for part in mixed)
+
+
+def _heat_color(pnl: float | None) -> tuple[str, str]:
+    """Grey at no change. Green deepens with profit, red with loss, capped at ±25%."""
+    if pnl is None or abs(pnl) < 0.05:
+        return _HEAT_GREY, "#c5ced9"
+    amount = max(-1.0, min(1.0, pnl / _HEAT_CAP))
+    if amount > 0:
+        return _lerp_hex("#1e3a2a", "#16c784", amount), "#e7ecf3"
+    return _lerp_hex("#3a1c1c", "#f87171", -amount), "#e7ecf3"
+
+
+def _heat_tile(row: dict) -> dict:
+    qty = abs(Decimal(row["qty"]))
+    average = Decimal(row["avg"])
+    raw_mult = str(row.get("multiplier") or "").strip()
+    multiplier = Decimal(raw_mult) if raw_mult else Decimal(1)
+    cost = qty * average * multiplier
+    market = row.get("market")
+    area = abs(Decimal(market)) if market not in (None, 0, Decimal(0)) else cost
+    if area <= 0:
+        area = Decimal(1)
+    pnl = row.get("pnl")
+    pct = None
+    if pnl is not None and cost > 0:
+        pct = float(Decimal(pnl) / cost * Decimal(100))
+    name = str(row["symbol"])
+    if row.get("sec_type") == "OPT":
+        bits = [name, str(row.get("right") or ""), str(row.get("strike") or "")]
+        name = " ".join(bit for bit in bits if bit)
+    return {
+        "name": name,
+        "mark": str(row.get("mark") or ""),
+        "area": float(area),
+        "cost": float(cost),
+        "pnl": None if pnl is None else float(pnl),
+        "pct": pct,
+    }
+
+
+def _heat_groups(rows: list[dict], intents: dict[str, str]) -> list[dict]:
+    buckets: dict[str, list[dict]] = {key: [] for key, _label in _INTENT_LABELS}
+    for row in rows:
+        tile = _heat_tile(row)
+        intent = intents.get(str(row["symbol"]).upper(), "income")
+        if intent not in buckets:
+            intent = "income"
+        buckets[intent].append(tile)
+    groups = []
+    for key, label in _INTENT_LABELS:
+        tiles = buckets[key]
+        if not tiles:
+            continue
+        cost = sum(tile["cost"] for tile in tiles)
+        pnl = sum(tile["pnl"] or 0 for tile in tiles)
+        groups.append({
+            "label": label,
+            "tiles": tiles,
+            "area": sum(tile["area"] for tile in tiles) or 1.0,
+            "pct": (pnl / cost * 100) if cost else 0.0,
+        })
+    groups.sort(key=lambda group: group["area"], reverse=True)
+    return groups
+
+
+def _fit_label(text: str, width: float, size: int) -> str:
+    room = max(1, int(width / (size * 0.62)))
+    if len(text) <= room:
+        return text
+    return text[: max(1, room - 1)] + "…"
+
+
+def _heat_tip(tile: dict) -> str:
+    lines = [tile["name"]]
+    if tile["mark"]:
+        lines.append(f"Mark {tile['mark']}")
+    if tile["pct"] is None:
+        lines.append("P&L —")
+    else:
+        sign = "+" if tile["pct"] > 0 else ""
+        lines.append(f"P&L {sign}{tile['pct']:.1f}%")
+    return "\n".join(lines)
+
+
+def _position_heatmap(rows: list[dict], intents: dict[str, str]) -> str:
+    """Nested treemap. Outer blocks are intent. Inner tiles are open positions."""
+    groups = _heat_groups(rows, intents)
+    if not groups:
+        return '<p class="note">No open position.</p>'
+    width, height = 960, 420
+    parts: list[str] = []
+    font = "ui-monospace, monospace"
+    for left, top, block_w, block_h, group in _squarify(
+        [(group["area"], group) for group in groups], 0, 0, width, height
+    ):
+        parts.append(
+            f'<rect x="{left:.1f}" y="{top:.1f}" width="{block_w:.1f}" height="{block_h:.1f}" '
+            f'fill="#10141a" stroke="#3a4350"/>'
+        )
+        header = 22 if block_h > 70 and block_w > 90 else 0
+        if header:
+            ink = "#8b97a8"
+            if group["pct"] > 0.05:
+                ink = "#16c784"
+            elif group["pct"] < -0.05:
+                ink = "#f87171"
+            sign = "+" if group["pct"] > 0 else ""
+            parts.append(
+                f'<text x="{left + 8:.1f}" y="{top + 15:.1f}" fill="#e7ecf3" font-size="11" '
+                f'font-family="{font}">{escape(group["label"])}</text>'
+            )
+            parts.append(
+                f'<text x="{left + block_w - 8:.1f}" y="{top + 15:.1f}" fill="{ink}" font-size="11" '
+                f'text-anchor="end" font-family="{font}">{sign}{group["pct"]:.1f}%</text>'
+            )
+        inner_w = block_w
+        inner_h = block_h - header
+        if inner_w <= 6 or inner_h <= 6:
+            continue
+        for tile_x, tile_y, tile_w, tile_h, tile in _squarify(
+            [(item["area"], item) for item in group["tiles"]], left, top + header, inner_w, inner_h
+        ):
+            bg, fg = _heat_color(tile["pct"])
+            gap_x, gap_y = tile_x + 2, tile_y + 2
+            gap_w, gap_h = max(0.0, tile_w - 4), max(0.0, tile_h - 4)
+            parts.append(
+                f'<rect x="{gap_x:.1f}" y="{gap_y:.1f}" width="{gap_w:.1f}" height="{gap_h:.1f}" fill="{bg}" '
+                f'data-name="{escape(tile["name"], quote=True)}"><title>{escape(_heat_tip(tile))}</title></rect>'
+            )
+            if gap_w <= 32 or gap_h <= 22:
+                continue
+            size = min(13, max(9, int(gap_w / 7)))
+            parts.append(
+                f'<text x="{gap_x + 6:.1f}" y="{gap_y + size + 4:.1f}" fill="{fg}" font-size="{size}" '
+                f'font-family="{font}">{escape(_fit_label(tile["name"], gap_w - 8, size))}</text>'
+            )
+            if gap_w <= 60 or gap_h <= 44:
+                continue
+            cursor = gap_y + size + 4 + size + 2
+            if tile["mark"]:
+                parts.append(
+                    f'<text x="{gap_x + 6:.1f}" y="{cursor:.1f}" fill="{fg}" font-size="{size}" '
+                    f'font-family="{font}">{escape(tile["mark"])}</text>'
+                )
+                cursor += size + 2
+            if tile["pct"] is not None:
+                sign = "+" if tile["pct"] > 0 else ""
+                parts.append(
+                    f'<text x="{gap_x + 6:.1f}" y="{cursor:.1f}" fill="{fg}" font-size="{size}" '
+                    f'font-family="{font}">Δ {sign}{tile["pct"]:.1f}%</text>'
+                )
+    return (
+        f'<svg class="book-heat" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img">'
+        + "".join(parts)
+        + "</svg>"
+    )
+
+
 def _positions_page(conn, account: str, query: dict) -> dict:
     kind = (query.get("kind") or ["all"])[0]
     if kind not in {"all", "stock", "option"}:
@@ -703,7 +1174,8 @@ def _positions_page(conn, account: str, query: dict) -> dict:
         return _fragment(body_rows, more, nxt)
     synced = _position_clock(rows)
     body = (
-        '<div class="grid cols-4">'
+        '<div class="grid cols-5">'
+        f"{_position_nlv_stat(rows)}"
         f"{_position_stat('Open', str(len(rows)), 'on this account')}"
         f"{_position_stat('Stock', str(sum(1 for row in rows if row['sec_type'] == 'STK')), 'shares')}"
         f"{_position_stat('Option', str(sum(1 for row in rows if row['sec_type'] == 'OPT')), 'contracts')}"
@@ -776,6 +1248,7 @@ def _position_rows(conn, account: str) -> list[dict]:
             "dte": dte,
             "strike": "" if strike is None else _plain_number(strike),
             "mark": "" if price is None else f"{price:,.2f}",
+            "market": market_value,
             "value": "" if market_value is None else f"{market_value:,.2f}",
             "pnl": pnl,
             "currency": currency or "",
@@ -801,6 +1274,33 @@ def _position_stat(label: str, value: str, meta: str) -> str:
         f'<div class="card stat"><div class="label">{label}</div>'
         f'<div class="value">{escape(value)}</div><div class="meta">{escape(meta)}</div></div>'
     )
+
+
+def _position_nlv_stat(rows: list[dict]) -> str:
+    known = [row for row in rows if row["market"] is not None]
+    if not rows:
+        return _position_stat("NLV", DASH, "flat")
+    if not known:
+        return _position_stat("NLV", DASH, "no mark yet")
+    currencies = {row["currency"] or "USD" for row in known}
+    missing = len(rows) - len(known)
+    gap = "" if missing == 0 else f" · {missing} unmarked"
+    if len(currencies) == 1:
+        currency = next(iter(currencies))
+        total = sum((row["market"] for row in known), Decimal(0))
+        return (
+            '<div class="card stat"><div class="label">NLV</div>'
+            f'<div class="value">{escape(marked(total, currency))}</div>'
+            f'<div class="meta">{escape(currency + gap)}</div></div>'
+        )
+    parts = []
+    for currency in sorted(currencies):
+        total = sum(
+            (row["market"] for row in known if (row["currency"] or "USD") == currency),
+            Decimal(0),
+        )
+        parts.append(f"{currency} {total:,.2f}")
+    return _position_stat("NLV", "mixed", "  ".join(parts) + gap)
 
 
 def _position_pnl_stat(rows: list[dict]) -> str:
@@ -1015,11 +1515,254 @@ def _post_accounts(conn, account: str, form: dict, actor: str) -> dict:
     return _accounts(conn, account, {}, note)
 
 
+def _volatility_card(risk, strategy) -> str:
+    """One card for the volatility gate and the strike band. The RV floor still follows the profile."""
+    method = _field("Method", "The mark written today. This page cannot change it.", _tag("premium_ratio", "blue"))
+    waiting = _field("chain_bs", "Waits for measured chain marks. It cannot be selected.", _tag("chain_bs"))
+    return (
+        '<div class="card risk-span-2" id="volatility-reading"><h2>Volatility reading</h2>'
+        '<div class="form-grid">'
+        f"{method}{waiting}"
+        f"{_limit('Min samples for rank', 'ivr_min_samples', strategy.ivr_min_samples, 'How many samples a rank needs. Fewer than 20 leaves the rank off.', preview=True)}"
+        f"{_limit('RV window', 'rv_window', strategy.rv_window, 'Sessions in the realized-vol window. This is the volatility gate.', preview=True)}"
+        f"{_limit('RV high at pctl', 'rv_high_pctl', strategy.rv_high_pctl, 'RV20 percentile at or above this is RV_HIGH.', preview=True)}"
+        f"{_limit('RV low at pctl', 'rv_low_pctl', strategy.rv_low_pctl, 'RV20 percentile at or below this is RV_LOW.', preview=True)}"
+        f"{_limit('Min RV percentile new short', 'min_rv', risk.min_rv_pctl_new_short, 'This follows the current profile. A new short is blocked when the symbol RV20 percentile is below this. Fewer than 20 samples does not pass.')}"
+        f"{_limit('Chain band %', 'chain_band_pct', strategy.chain_band_pct, 'How wide a strike menu to fetch. This is discovery, not the strike that gets sold. The sold strike follows the delta target.')}"
+        f"{_limit('Strangle delta target', 'strangle_delta_target', strategy.strangle_delta_target, 'Strangle legs prefer this delta. Changing it moves the distance for every symbol.', step='0.01')}"
+        f"{_limit('OTM floor %', 'otm_floor_pct', strategy.otm_floor_pct, 'The narrowest distance the volatility width may use.')}"
+        f"{_limit('OTM ceiling %', 'otm_ceiling_pct', strategy.otm_ceiling_pct, 'The widest distance the volatility width may use.')}"
+        f"{_limit('RV multiple high', 'iv_rv_multiple_hi', strategy.iv_rv_multiple_hi, 'Assumption, not a measurement. Used only to pick a strike when realized vol is 45% or higher.', step='0.01')}"
+        f"{_limit('RV multiple mid', 'iv_rv_multiple_mid', strategy.iv_rv_multiple_mid, 'Assumption, not a measurement. Used only to pick a strike when realized vol is 25% to 45%.', step='0.01')}"
+        f"{_limit('RV multiple low', 'iv_rv_multiple_lo', strategy.iv_rv_multiple_lo, 'Assumption, not a measurement. Used only to pick a strike when realized vol is below 25%.', step='0.01')}"
+        "</div></div>"
+    )
+
+
+def method_switch_note(symbols: int) -> str:
+    """Wording for a future chain_bs switch. The disabled control does not call this."""
+    return "\n".join((
+        "method: premium_ratio → chain_bs",
+        f"symbols: {symbols}",
+        "quiet sessions: 20",
+        "sanity: expected ok",
+    ))
+
+
+def listed_otm_pct(spot: Decimal | None, choices: list[tuple[str, Decimal]]) -> Decimal | None:
+    """Shallowest positive distance in a stored strike list. None when nothing is listed out of the money."""
+    if spot is None or spot <= 0:
+        return None
+    found: list[Decimal] = []
+    for right, strike in choices:
+        if strike <= 0:
+            continue
+        if right == "P" and strike < spot:
+            found.append((spot - strike) / spot * Decimal(100))
+        elif right == "C" and strike > spot:
+            found.append((strike - spot) / spot * Decimal(100))
+    if not found:
+        return None
+    return min(found)
+
+
+def band_gap(listed: Decimal | None, target: Decimal | None) -> Decimal | None:
+    """Listed distance minus the target distance. Positive means the menu is farther out."""
+    if listed is None or target is None:
+        return None
+    return listed - target
+
+
+def vol_tag(tags: set[str]) -> str:
+    from athena_strategy.tags import RV_HIGH, RV_LOW
+
+    if RV_HIGH in tags:
+        return "RV_HIGH"
+    if RV_LOW in tags:
+        return "RV_LOW"
+    return "—"
+
+
+def reading_shift(bars, samples, strategy, field: str, new_value: int) -> tuple[str, str]:
+    """Tags before and after one threshold change. The second call is the saved reading."""
+    from athena_strategy.indicators import compute
+
+    before = vol_tag(compute(bars, strategy, rv_samples=samples).tags)
+    after = vol_tag(compute(bars, strategy.model_copy(update={field: new_value}), rv_samples=samples).tags)
+    return before, after
+
+
+def threshold_preview(field: str, old: int, new: int, before: list[str], after: list[str]) -> str:
+    high_before = before.count("RV_HIGH")
+    high_after = after.count("RV_HIGH")
+    low_before = before.count("RV_LOW")
+    low_after = after.count("RV_LOW")
+    changed = sum(1 for left, right in zip(before, after) if left != right)
+    return "\n".join((
+        f"{field}: {old} → {new}",
+        f"RV_HIGH: {high_before} → {high_after}",
+        f"RV_LOW: {low_before} → {low_after}",
+        f"Symbols changed: {changed}",
+    ))
+
+
+def settings_note(profile: str, before, after) -> str:
+    """Name only the blocks that differ. A profile click that also moves a strategy knob lists both."""
+    parts = []
+    if before.risk.model_dump() != after.risk.model_dump():
+        parts.append(f"risk {profile}")
+    names = [
+        name for name in type(after.strategy).model_fields
+        if getattr(before.strategy, name) != getattr(after.strategy, name)
+    ]
+    if names:
+        parts.append("strategy " + " ".join(names))
+    return " + ".join(parts) if parts else f"risk {profile}"
+
+
+def _rv_need(strategy) -> int:
+    return max(strategy.rv_window + 1, strategy.volume_avg_sessions + 1, 30)
+
+
+def _preview_thresholds(conn, current, form: dict) -> dict:
+    field = (form.get("preview_field") or [""])[0]
+    if field not in PREVIEW_FIELDS:
+        return {"status": 400, "kind": "json", "body": json.dumps({"ok": False, "text": "That field does not preview."})}
+    try:
+        new_value = int((form.get(field) or [""])[0])
+    except ValueError:
+        return {"status": 400, "kind": "json", "body": json.dumps({"ok": False, "text": "Use a whole number."})}
+    from athena_strategy.indicators import load_bars, rv_samples
+
+    before: list[str] = []
+    after: list[str] = []
+    for symbol in current.watchlist:
+        bars = load_bars(conn, symbol, _rv_need(current.strategy))
+        samples = rv_samples(conn, symbol)
+        left, right = reading_shift(bars, samples, current.strategy, field, new_value)
+        before.append(left)
+        after.append(right)
+    text = threshold_preview(field, getattr(current.strategy, field), new_value, before, after)
+    return {"status": 200, "kind": "json", "body": json.dumps({"ok": True, "text": text})}
+
+
+def _points(value: Decimal | None) -> str:
+    if value is None:
+        return "—"
+    return f"{value.quantize(Decimal('0.01'))}"
+
+
+def _vol_table(conn, settings) -> str:
+    """Read-only evidence. It does not record a new RV mark."""
+    from athena_exec.options import rv_multiple, target_otm_pct
+    from athena_marketdata.pricing import last_tradeable_price
+    from athena_strategy.indicators import compute, load_bars, rv_samples
+    from athena_strategy.iv import PREMIUM_METHOD, RANK_FLOOR, iv_rank, sanity_label
+    from athena_strategy.screener import load_choices
+
+    rows = []
+    floor = max(settings.strategy.ivr_min_samples, RANK_FLOOR)
+    for symbol in settings.watchlist:
+        bars = load_bars(conn, symbol, _rv_need(settings.strategy))
+        samples = rv_samples(conn, symbol)
+        reading = compute(bars, settings.strategy, rv_samples=samples)
+        target = None
+        sigma = None
+        if reading.rv20 is not None and reading.rv20 > 0:
+            target, _clamp = target_otm_pct(reading.rv20, settings.strategy, settings.strategy.dte_target)
+            sigma = rv_multiple(reading.rv20, settings.strategy) * reading.rv20
+        listed = listed_otm_pct(
+            last_tradeable_price(conn, symbol),
+            [(choice.right, choice.strike) for choice in load_choices(conn, symbol)],
+        )
+        gap = band_gap(listed, target)
+        rank_text = f"pending ({len(samples)}/{floor})" if reading.rv_pctl is None else str(reading.rv_pctl)
+        method, count, proxy, underlying, pairs = _iv_window(conn, symbol)
+        iv_rank_text = "—"
+        if proxy is not None:
+            ranked = iv_rank([item[0] for item in pairs], proxy, settings.strategy.ivr_min_samples)
+            iv_rank_text = f"pending ({count}/{floor})" if ranked is None else str(ranked)
+        verdict = sanity_label(pairs)
+        tone = {"INVERTED?": "red", "pending": "amber", "ok": "green"}.get(verdict, "")
+        rows.append(
+            "<tr>"
+            f"<td>{escape(symbol)}</td>"
+            f"<td>{_points(reading.rv20)}</td>"
+            f"<td>{escape(rank_text)}</td>"
+            f"<td>{escape(vol_tag(reading.tags))}</td>"
+            f"<td>{_points(sigma)}</td>"
+            f"<td>{_points(target)}</td>"
+            f"<td>{_points(listed)}</td>"
+            f"<td>{_points(gap)}</td>"
+            f"<td>{escape(method or PREMIUM_METHOD)}</td>"
+            f"<td>{count}</td>"
+            f"<td>{_points(proxy)}</td>"
+            f"<td>{_points(underlying)}</td>"
+            f"<td>{escape(iv_rank_text)}</td>"
+            f"<td>{_tag(verdict, tone)}</td>"
+            "</tr>"
+        )
+    body = "".join(rows) or '<tr><td colspan="14">No symbol is on the watchlist.</td></tr>'
+    return (
+        '<div class="card" id="vol-evidence"><h2>Volatility</h2>'
+        '<p class="card-lead">A full red sanity column is the known state. The stored premium ratio moves opposite the price. It turns ok when measured chain marks exist.</p>'
+        '<table class="data"><thead>'
+        '<tr><th colspan="8">Volatility</th><th colspan="6">Legacy premium ratio</th></tr>'
+        "<tr><th>Symbol</th><th>rv20</th><th>rv pctl</th><th>tag</th>"
+        f"<th>{_q('sigma ref', 'Assumption, not a measurement. The RV multiple times RV20. Not implied vol.')}</th>"
+        "<th>target otm %</th><th>listed otm %</th>"
+        f"<th>{_q('band gap', 'Listed distance minus the target distance. Positive means the nearest listed strike is farther out than the target.')}</th>"
+        "<th>method</th><th>samples</th><th>iv proxy</th><th>underlying</th><th>rank</th><th>sanity</th>"
+        "</tr></thead>"
+        f"<tbody>{body}</tbody></table></div>"
+    )
+
+
+def _volatility_page(conn, account: str, query: dict, note: str = "") -> dict:
+    """Realized vol, strike distance, and the premium-ratio check. Read only."""
+    del query
+    if not account:
+        return _html("Volatility", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
+    current = load_active(conn, account)
+    note_html = f'<p class="note">{escape(note)}</p>' if note else ""
+    body = f'{note_html}<div class="strategy-scroll">{_vol_table(conn, current)}</div>'
+    return _html(
+        "Volatility",
+        "Realized vol for each watched symbol, the strike distance, and the premium-ratio check.",
+        body,
+        [],
+    )
+
+
+def _iv_window(conn, symbol: str) -> tuple[str, int, Decimal | None, Decimal | None, list[tuple[Decimal, Decimal]]]:
+    from athena_strategy.iv import PREMIUM_METHOD
+
+    rows = conn.execute(
+        """
+        SELECT method, iv_proxy, underlying
+        FROM iv_marks
+        WHERE symbol = %s
+        ORDER BY day
+        """,
+        (symbol.upper(),),
+    ).fetchall()
+    if not rows:
+        return PREMIUM_METHOD, 0, None, None, []
+    method = rows[-1][0] or PREMIUM_METHOD
+    same = [row for row in rows if (row[0] or PREMIUM_METHOD) == method]
+    pairs = [(row[1], row[2]) for row in same if row[2] is not None and row[1] is not None]
+    last = same[-1]
+    proxy = None if last[1] is None else Decimal(last[1])
+    underlying = None if last[2] is None else Decimal(last[2])
+    return method, len(same), proxy, underlying, [(Decimal(proxy), Decimal(underlying)) for proxy, underlying in pairs]
+
+
 def _risk(conn, account: str, query: dict, note: str = "") -> dict:
     if not account:
-        return _html("Risk control", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
+        return _html("Risk & Strategy", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
     current = load_active(conn, account)
     risk = current.risk
+    strategy = current.strategy
     cards = []
     for name, values in PROFILES.items():
         on = " on" if risk.profile == name else ""
@@ -1039,19 +1782,42 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
     body = (
         f"{note_html}"
+        '<div class="strategy-scroll">'
         f'<div class="profiles">{"".join(cards)}</div>'
-        '<form id="risk-form" method="post" action="/risk" class="grid cols-2 fill">'
-        '<div class="card"><h2>Limits</h2><div class="form-grid">'
+        '<form id="risk-form" method="post" action="/risk" class="risk-cols">'
+        '<div class="card risk-span-5" id="strategy-card"><h2>Strategy</h2>'
+        '<p class="card-lead">NFR tactic shape. Size and halt limits are above. Volatility knobs are on the reading card.</p>'
+        '<div class="form-grid three">'
+        f"{_limit('IVR high', 'ivr_high', strategy.ivr_high, 'A line on the phase chart. It does not tag a symbol.')}"
+        f"{_limit('Screener top N', 'screener_top_n', strategy.screener_top_n, 'How many ranked strikes each table shows.')}"
+        f"{_limit('CSP delta low', 'csp_delta_lo', strategy.csp_delta_lo, 'Puts quieter than this stay off the cash-secured put table.', step='0.01')}"
+        f"{_limit('CSP delta target', 'csp_delta_target', strategy.csp_delta_target, 'The cash-secured put table prefers this delta.', step='0.01')}"
+        f"{_limit('CSP delta high', 'csp_delta_hi', strategy.csp_delta_hi, 'Puts busier than this stay off the cash-secured put table.', step='0.01')}"
+        f"{_limit('CC delta target', 'cc_delta_target', strategy.cc_delta_target, 'Covered calls are ordered by strike, then by distance to this delta.', step='0.01')}"
+        f"{_limit('CC rail position', 'cc_rail_pos', strategy.cc_rail_pos, 'Sell a covered call when price is at least this far up the 63-session channel. Location may also tag the upper rail.', step='0.01')}"
+        f"{_limit('DTE min', 'dte_min', strategy.dte_min, 'Shortest expiry the chain menu will offer.')}"
+        f"{_limit('DTE target', 'dte_target', strategy.dte_target, 'Expiry the chain menu prefers.')}"
+        f"{_limit('DTE max', 'dte_max', strategy.dte_max, 'Longest expiry the chain menu will offer.')}"
+        f"{_limit('Profit take %', 'profit_take_pct', strategy.profit_take_pct, 'Close a short when this percent of the credit is captured.')}"
+        f"{_limit('Roll DTE', 'roll_dte', strategy.roll_dte, 'Roll when days to expiry are at or below this.')}"
+        "</div></div>"
+        f"{_volatility_card(risk, strategy)}"
+        '<div class="card risk-span-2"><h2>Limits</h2><div class="form-grid">'
         f"{_limit('Max symbol % NAV', 'max_symbol', risk.max_symbol_pct_nav, 'Share of net liquidation one underlying may use. A new open above this is blocked.')}"
         f"{_limit('Cash reserve %', 'cash', risk.cash_reserve_pct, 'Cash that must stay free, as a percent of net liquidation. A cash-secured open below this is blocked.')}"
         f"{_limit('Daily loss halt %', 'halt', risk.daily_loss_halt_pct, 'Trading pauses when today drops this percent from the first mark. Zero turns this off.')}"
         f"{_limit('Max contracts / symbol', 'contracts', risk.max_contracts_per_symbol, 'Most contracts one symbol may use. A draft above this is blocked.')}"
         f"{_limit('Max position / symbol', 'position', risk.max_position_per_symbol, 'Ticker currency. One contract is the latest price times the multiplier. A total within 10% still fits. When one contract is already above this, the contract limit is used. Zero turns this off.')}"
-        f"{_limit('Min IV rank new short', 'min_ivr', risk.min_iv_rank_new_short, 'A new short is blocked when IV rank is below this.')}"
+        f"{_limit('Max orders / day', 'max_orders', risk.max_orders_per_day, 'New orders stop for the day after this many. A profile that differs here is custom.')}"
         f"{_limit('Min DTE new', 'min_dte', risk.min_dte_new, 'A new open is blocked when days to expiry are below this.')}"
         f"{_limit('Seller margin budget %', 'margin', risk.max_short_opt_margin_pct, 'Short-option margin may not exceed this percent of net liquidation.')}"
         f"{_limit('Earnings blackout days', 'blackout', risk.earnings_blackout_days, 'No new open within this many days of earnings.')}"
+        f"{_limit('Max bucket % NAV', 'max_bucket', risk.max_bucket_pct_nav, 'Capital in one classifier bucket may not exceed this share of net liquidation. A name sits in every bucket it carries.')}"
+        f"{_limit('Max assignment % NAV', 'max_assign', risk.max_assign_pct_nav, 'Short puts that are likely to be assigned may not exceed this share of net liquidation.')}"
+        f"{_limit('Min cash after assignment %', 'min_cash_after', risk.min_cash_after_assign_pct, 'Cash left after those likely assignments, as a percent of net liquidation.')}"
+        f"{_limit('Assignment delta', 'assign_delta', risk.assign_delta, 'A short put counts as a likely assignment when its absolute delta is at least this. Delta is a proxy, not a probability.', step='0.01')}"
         "</div></div>"
+        '<div class="risk-stack risk-span-1">'
         '<div class="card"><h2>Approval privilege'
         '<span>'
         '<button class="help-q" type="button" data-cmd="help-q" aria-label="About privilege" '
@@ -1059,11 +1825,14 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         '<button class="more" type="button" data-cmd="view-book" data-panel="risk-versions" data-title="Risk versions" data-wide>version history →</button>'
         '</span></h2>'
         f'<div class="seg stack">{"".join(priv)}</div>'
-        f'<template id="risk-versions">{versions}</template></div></form>'
+        f'<template id="risk-versions">{versions}</template></div>'
+        f"{_conflict_card(risk.strict_conflict)}"
+        "</div></form>"
+        "</div>"
     )
     return _html(
-        "Risk control",
-        "Pick a profile to fill the fields, then save. Privilege does not change.",
+        "Risk & Strategy",
+        "Pick a profile to fill the limits, then save. Strategy knobs are on this page. Privilege does not change.",
         body,
         [("info", risk.profile.upper()), ("", f"V{current.id}")],
     )
@@ -1074,11 +1843,9 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         return _html("Settings", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
     current = load_active(conn, account)
     news = current.news
-    strategy = current.strategy
     mode = trading_mode().upper()
     key_ready = bool(itick_key(current))
     dsh_ready = bool(os.environ.get("DSH_BIN", "").strip())
-    deepseek_ready = bool(deepseek_token(current))
     token_ready = bool(bot_token(current))
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
     body = (
@@ -1104,11 +1871,9 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f'<script type="application/json" id="ai-models">{json.dumps({key: list(names) for key, names in MODELS.items()})}</script>'
         f"{_row('DSH binary', _tag('SET', 'green') if dsh_ready else _tag('EMPTY'), 'Whether DSH_BIN is set on this machine.')}"
         f'<div id="credential-block"{"" if current.ai.provider != "DSH" else " hidden"}>'
-        f"{_row('Credential token', _tag('SET', 'green') if deepseek_ready else _tag('EMPTY'), 'Whether this provider has a stored token or an inherited environment value.')}"
-        f"{_field('Credential token', 'Leave blank to keep the saved token.', '<input class=\"input\" name=\"credential_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
+        f"{_field('Credential token', 'The middle stays hidden. Clear the field to remove the token.', _credential_input(current))}"
         f'<p class="slot-note" id="credential-help">{escape(_credential_help(current.ai.provider))}</p>'
-        '<button class="btn" type="submit" name="action" value="clear-credential" data-explicit>Clear token</button>'
-        f'<script type="application/json" id="credential-ready">{json.dumps(_credential_ready(current))}</script>'
+        f'<script type="application/json" id="credential-masks">{json.dumps(_credential_masks(current))}</script>'
         "</div></div></div></div>"
         '<div class="settings-col">'
         f"{_sim_card(conn, current)}"
@@ -1128,7 +1893,7 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div></div>'
         '<div class="settings-col">'
         f"{_developer_card(current)}"
-        '<div class="card"><h2>News</h2><div class="scroll-y">'
+        '<div class="card fill"><h2>News</h2><div class="scroll-y">'
         f"{_switch('Yahoo', 'yahoo', news.yahoo, 'Pull Yahoo headlines for the watchlist.')}"
         f"{_switch('Finviz', 'finviz', news.finviz, 'Pull Finviz headlines for the watchlist.')}"
         f"{_switch('Fed calendar', 'fed_calendar', news.fed_calendar, 'Watch the Fed calendar for nearby events.')}"
@@ -1137,17 +1902,7 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Poll seconds', 'poll_seconds', news.poll_seconds, 'How often the news sources are checked.')}"
         f"{_limit('Wash count', 'wash_min_negative', news.wash_min_negative, 'How many negative headlines count as a wash.')}"
         f"{_limit('Wash window days', 'wash_window_days', news.wash_window_days, 'Those headlines must fall inside this many days.')}</div></div>"
-        '<div class="card fill"><h2>Strategy</h2><div class="scroll-y">'
-        '<p class="card-lead">NFR tactic shape. Size and halt limits are not here.</p>'
-        '<div class="form-grid">'
-        f"{_limit('IVR high', 'ivr_high', strategy.ivr_high, 'IV rank at or above this is tagged high.')}"
-        f"{_limit('Strangle distance %', 'strangle_otm_pct', strategy.strangle_otm_pct, 'How far out of the money a short strangle is placed.')}"
-        f"{_limit('DTE min', 'dte_min', strategy.dte_min, 'Shortest expiry the chain menu will offer.')}"
-        f"{_limit('DTE target', 'dte_target', strategy.dte_target, 'Expiry the chain menu prefers.')}"
-        f"{_limit('DTE max', 'dte_max', strategy.dte_max, 'Longest expiry the chain menu will offer.')}"
-        f"{_limit('Profit take %', 'profit_take_pct', strategy.profit_take_pct, 'Close a short when this percent of the credit is captured.')}"
-        f"{_limit('Roll DTE', 'roll_dte', strategy.roll_dte, 'Roll when days to expiry are at or below this.')}"
-        "</div></div></div></div></div>"
+        "</div></div>"
         "</form>"
     )
     return _html(
@@ -1209,81 +1964,171 @@ def _post_news(conn, account: str, form: dict) -> dict:
     return failed
 
 
+def _pool_patch(ok: bool, message: str, html: str = "", removed: bool = False, count: int = 0, status: int = 200) -> dict:
+    return {
+        "status": status,
+        "kind": "json",
+        "body": json.dumps({"ok": ok, "message": message, "html": html, "removed": removed, "count": count}),
+        "title": "",
+        "lead": "",
+        "chips": [],
+    }
+
+
+def _pool_row(conn, account: str, settings, symbol: str) -> str:
+    last, change, tone = _closes(conn, symbol)
+    band, high_pct, low_pct = _year_band(conn, symbol)
+    phase, _tags, _tactic = _phase_row(conn, account, symbol)
+    name, cap, classifiers, thesis = _pool_profile(conn, account, symbol)
+    rank = _rank_text(conn, symbol, settings.strategy.ivr_min_samples)
+    enabled = symbol.upper() not in {item.upper() for item in settings.blocked_symbols}
+    flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+    faded = "" if enabled else ' style="opacity:.45"'
+    phase_html = f'<span class="tag">{escape(phase)}</span>' if phase else DASH
+    price_sort = "" if last == DASH else last
+    cap_sort = "" if cap is None else format(Decimal(cap), "f")
+    return (
+        f"<tr{faded}"
+        f' data-symbol="{escape(symbol, quote=True)}"'
+        f' data-name="{escape(name, quote=True)}"'
+        f' data-price="{escape(price_sort, quote=True)}"'
+        f' data-cap="{escape(cap_sort, quote=True)}"'
+        f' data-classifiers="{escape(classifiers, quote=True)}">'
+        f"<td><b>{escape(symbol)}</b><div class=\"sym-name\">{escape(name) if name else DASH}</div></td>"
+        f"<td class=\"mono\" style=\"font-weight:600\">{escape(last)}</td>"
+        f"<td class=\"mono {tone}\">{escape(change)}</td>"
+        f"{_band_cell(band, high_pct, low_pct)}"
+        f"<td class=\"mono\" style=\"color:var(--site-text-3)\">{escape(_cap_text(cap))}</td>"
+        f"<td>{_classifier_badges(classifiers)}</td>"
+        f"<td class=\"mono\">{escape(rank)}</td>"
+        f"<td>{phase_html}</td>"
+        f"<td>{_intent_select(symbol, flags.intent)}</td>"
+        f"<td>{_toggle(symbol, 'long', flags.long)}</td>"
+        f"<td>{_toggle(symbol, 'may_buy', flags.may_buy is True or (flags.may_buy is None and flags.long and flags.intent != 'income'))}</td>"
+        f"<td>{_toggle(symbol, 'enabled', enabled, green=True)}</td>"
+        f"<td>{_toggle(symbol, 'csp', flags.csp)}</td>"
+        f"<td>{_toggle(symbol, 'cc', flags.cc)}</td>"
+        f"<td>{_toggle(symbol, 'strangle', flags.strangle)}</td>"
+        f"<td class=\"pool-actions\">{_edit_symbol(symbol, name, cap, classifiers, thesis, last, change, rank, phase)}{_sync_symbol(symbol)}{_remove_symbol(symbol)}</td>"
+        "</tr>"
+    )
+
+
 def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
+    partial = (form.get("partial") or [""])[0] == "row"
+
+    def fail(message: str) -> dict:
+        if partial:
+            return _pool_patch(False, message, status=400)
+        return _universe(conn, account, {}, message) | {"status": 400}
+
+    def done(message: str, removed: bool = False) -> dict:
+        if not partial:
+            return _universe(conn, account, {}, message)
+        current = load_active(conn, account)
+        html = "" if removed else _pool_row(conn, account, current, symbol)
+        return _pool_patch(True, message, html=html, removed=removed, count=len(current.watchlist))
+
     if not account:
-        return _universe(conn, account, {}, "No account is configured.") | {"status": 400}
+        return fail("No account is configured.")
     current = load_active(conn, account)
     payload = SettingsPayload.model_validate(current.model_dump())
     symbol = (form.get("symbol") or [""])[0].strip().upper()
     action = (form.get("action") or [""])[0]
     field = (form.get("field") or [""])[0]
     if not symbol:
-        return _universe(conn, account, {}, "Symbol is required.") | {"status": 400}
+        return fail("Symbol is required.")
     if action == "facts":
         return _save_pool_facts(conn, account, symbol, form)
     if action == "add":
         try:
             symbol = clean_symbol(symbol)
         except ValueError as exc:
-            return _universe(conn, account, {}, str(exc)) | {"status": 400}
+            return fail(str(exc))
         if symbol in {item.upper() for item in payload.watchlist}:
-            return _universe(conn, account, {}, f"{symbol} is already in the pool.") | {"status": 400}
+            return fail(f"{symbol} is already in the pool.")
         payload.watchlist.append(symbol)
         try:
             save_settings(conn, account, payload, f"console:{actor}", f"universe add {symbol}")
         except ValueError as exc:
-            return _universe(conn, account, {}, str(exc)) | {"status": 400}
-        return _universe(conn, account, {}, f"Added {symbol}.")
+            return fail(str(exc))
+        return done(f"Added {symbol}.")
     elif action == "remove":
         payload.watchlist = [item for item in payload.watchlist if item.upper() != symbol]
         payload.blocked_symbols = [item for item in payload.blocked_symbols if item.upper() != symbol]
         payload.tactic_flags.pop(symbol, None)
+        removed = True
     elif action == "toggle" and field == "enabled":
         blocked = {item.upper() for item in payload.blocked_symbols}
         if symbol in blocked:
             payload.blocked_symbols = [item for item in payload.blocked_symbols if item.upper() != symbol]
         else:
             payload.blocked_symbols.append(symbol)
+        removed = False
     elif action == "intent":
         intent = (form.get("intent") or [""])[0]
-        if intent not in {"income", "accumulate"}:
-            return _universe(conn, account, {}, "Intent must be Income or Accumulate.") | {"status": 400}
+        if intent not in {"income", "both", "accumulate"}:
+            return fail("Intent must be Income, Both, or Accumulate.")
         flags = payload.tactic_flags.get(symbol, TacticFlags())
         payload.tactic_flags[symbol] = flags.model_copy(update={"intent": intent})
+        removed = False
+    elif action == "toggle" and field == "may_buy":
+        flags = payload.tactic_flags.get(symbol, TacticFlags())
+        allowed = flags.may_buy is True or (flags.may_buy is None and flags.long and flags.intent != "income")
+        payload.tactic_flags[symbol] = flags.model_copy(update={"may_buy": not allowed})
+        removed = False
     elif action == "toggle" and field in {"csp", "cc", "strangle", "long"}:
         flags = payload.tactic_flags.get(symbol, TacticFlags())
         payload.tactic_flags[symbol] = flags.model_copy(update={field: not getattr(flags, field)})
+        removed = False
     else:
-        return _universe(conn, account, {}, "Unknown action") | {"status": 400}
+        return fail("Unknown action")
     try:
         save_settings(conn, account, payload, f"console:{actor}", f"universe {action} {symbol}")
     except ValueError as exc:
-        return _universe(conn, account, {}, str(exc)) | {"status": 400}
-    return _universe(conn, account, {}, f"Saved {action} {symbol}.")
+        return fail(str(exc))
+    return done(f"Saved {action} {symbol}.", removed)
 
 
 def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
     if not account:
         return _risk(conn, account, {}, "No account is configured.") | {"status": 400}
     current = load_active(conn, account)
+    if (form.get("action") or [""])[0] == "preview":
+        return _preview_thresholds(conn, current, form)
     try:
         values = (
             int((form.get("max_symbol") or ["0"])[0]),
             int((form.get("cash") or ["0"])[0]),
             int((form.get("halt") or ["0"])[0]),
             int((form.get("contracts") or ["0"])[0]),
-            int((form.get("min_ivr") or ["0"])[0]),
+            int((form.get("min_rv") or ["0"])[0]),
             int((form.get("min_dte") or ["0"])[0]),
         )
         margin = int((form.get("margin") or ["0"])[0])
         blackout = int((form.get("blackout") or ["0"])[0])
         position = int((form.get("position") or ["0"])[0])
+        orders = int((form.get("max_orders") or ["10"])[0])
     except ValueError:
         return _risk(conn, account, {}, "Limits must be whole numbers.") | {"status": 400}
     if position < 0:
         return _risk(conn, account, {}, "Max position must be zero or more.") | {"status": 400}
-    symbol, cash, halt, contracts, ivr, dte = values
-    profile = next((name for name, preset in PROFILES.items() if preset == values), "custom")
+    try:
+        bucket_cap = _kept_int(form, "max_bucket", current.risk.max_bucket_pct_nav)
+        assign_cap = _kept_int(form, "max_assign", current.risk.max_assign_pct_nav)
+        cash_after = _kept_int(form, "min_cash_after", current.risk.min_cash_after_assign_pct)
+        assign_delta = _kept_float(form, "assign_delta", current.risk.assign_delta)
+    except ValueError:
+        return _risk(conn, account, {}, "Budget limits must be numbers.") | {"status": 400}
+    if not 0 <= bucket_cap <= 100 or not 0 <= assign_cap <= 100 or not 0 <= cash_after <= 100:
+        return _risk(conn, account, {}, "Budget percents must be 0 to 100.") | {"status": 400}
+    if not 0.01 <= assign_delta <= 0.9:
+        return _risk(conn, account, {}, "Assignment delta must be 0.01 to 0.9.") | {"status": 400}
+    symbol, cash, halt, contracts, rv_floor, dte = values
+    profile = next(
+        (name for name, preset in PROFILES.items() if preset == (symbol, cash, halt, contracts, rv_floor, dte, position, orders, margin, blackout)),
+        "custom",
+    )
     payload = SettingsPayload.model_validate(current.model_dump())
     payload.risk = RiskLimits(
         profile=profile,  # type: ignore[arg-type]
@@ -1292,19 +2137,97 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
         daily_loss_halt_pct=halt,
         max_contracts_per_symbol=contracts,
         max_position_per_symbol=position,
-        min_iv_rank_new_short=ivr,
+        min_rv_pctl_new_short=rv_floor,
         min_dte_new=dte,
         max_short_opt_margin_pct=margin,
         earnings_blackout_days=blackout,
-        max_orders_per_day=current.risk.max_orders_per_day,
+        max_orders_per_day=orders,
+        margin_rate=current.risk.margin_rate,
+        strict_conflict=_checked(form, "strict_conflict"),
+        max_bucket_pct_nav=bucket_cap,
+        max_assign_pct_nav=assign_cap,
+        min_cash_after_assign_pct=cash_after,
+        assign_delta=assign_delta,
     )
     payload.privilege = current.privilege
-    if profile == "test":
-        payload.strategy.ivr_min_samples = 1
-    elif current.risk.profile == "test":
-        payload.strategy.ivr_min_samples = 20
+    strategy_ranges = {
+        "roll_dte": (1, 60),
+        "profit_take_pct": (1, 100),
+        "ivr_high": (1, 100),
+        "chain_band_pct": (1, 80),
+        "otm_floor_pct": (1, 30),
+        "otm_ceiling_pct": (1, 50),
+        "screener_top_n": (1, 10),
+        "dte_min": (1, 90),
+        "dte_target": (1, 120),
+        "dte_max": (1, 180),
+    }
     try:
-        new_id, _changes = save_settings(conn, account, payload, f"console:{actor}", f"risk {profile}")
+        strategy_numbers = {key: int((form.get(key) or [""])[0]) for key in strategy_ranges}
+    except ValueError:
+        return _risk(conn, account, {}, "Strategy knobs must be whole numbers.") | {"status": 400}
+    for key, (low, high) in strategy_ranges.items():
+        if not low <= strategy_numbers[key] <= high:
+            return _risk(conn, account, {}, f"{key} must be {low} to {high}.") | {"status": 400}
+    if not strategy_numbers["dte_min"] <= strategy_numbers["dte_target"] <= strategy_numbers["dte_max"]:
+        return _risk(conn, account, {}, "DTE min, target, and max must stay in order.") | {"status": 400}
+    if strategy_numbers["otm_floor_pct"] >= strategy_numbers["otm_ceiling_pct"]:
+        return _risk(conn, account, {}, "OTM floor must be below the ceiling.") | {"status": 400}
+    float_ranges = {
+        "csp_delta_lo": (0.01, 0.9),
+        "csp_delta_target": (0.01, 0.9),
+        "csp_delta_hi": (0.01, 0.9),
+        "cc_delta_target": (0.01, 0.9),
+        "cc_rail_pos": (0.5, 0.99),
+        "strangle_delta_target": (0.01, 0.9),
+        "iv_rv_multiple_hi": (0.5, 5),
+        "iv_rv_multiple_mid": (0.5, 5),
+        "iv_rv_multiple_lo": (0.5, 5),
+    }
+    try:
+        strategy_floats = {key: float((form.get(key) or [""])[0]) for key in float_ranges}
+    except ValueError:
+        return _risk(conn, account, {}, "Delta and multiple knobs must be numbers.") | {"status": 400}
+    for key, (low, high) in float_ranges.items():
+        if not low <= strategy_floats[key] <= high:
+            return _risk(conn, account, {}, f"{key} must be {low} to {high}.") | {"status": 400}
+    if not strategy_floats["csp_delta_lo"] <= strategy_floats["csp_delta_target"] <= strategy_floats["csp_delta_hi"]:
+        return _risk(conn, account, {}, "CSP delta low, target, and high must stay in order.") | {"status": 400}
+    try:
+        ivr_min_samples = _kept_int(form, "ivr_min_samples", payload.strategy.ivr_min_samples)
+        rv_window = _kept_int(form, "rv_window", payload.strategy.rv_window)
+        rv_high_pctl = _kept_int(form, "rv_high_pctl", payload.strategy.rv_high_pctl)
+        rv_low_pctl = _kept_int(form, "rv_low_pctl", payload.strategy.rv_low_pctl)
+    except ValueError:
+        return _risk(conn, account, {}, "Volatility knobs must be whole numbers.") | {"status": 400}
+    if not 1 <= ivr_min_samples <= 252:
+        return _risk(conn, account, {}, "Min samples must be 1 to 252.") | {"status": 400}
+    if not 2 <= rv_window <= 60:
+        return _risk(conn, account, {}, "RV window must be 2 to 60.") | {"status": 400}
+    if not 1 <= rv_low_pctl < rv_high_pctl <= 100:
+        return _risk(conn, account, {}, "RV low must be below RV high, and both must be 1 to 100.") | {"status": 400}
+    payload.strategy = payload.strategy.model_copy(
+        update={
+            "ivr_high": strategy_numbers["ivr_high"],
+            "chain_band_pct": strategy_numbers["chain_band_pct"],
+            "otm_floor_pct": strategy_numbers["otm_floor_pct"],
+            "otm_ceiling_pct": strategy_numbers["otm_ceiling_pct"],
+            "screener_top_n": strategy_numbers["screener_top_n"],
+            "roll_dte": strategy_numbers["roll_dte"],
+            "profit_take_pct": strategy_numbers["profit_take_pct"],
+            "dte_min": strategy_numbers["dte_min"],
+            "dte_target": strategy_numbers["dte_target"],
+            "dte_max": strategy_numbers["dte_max"],
+            "ivr_min_samples": ivr_min_samples,
+            "rv_window": rv_window,
+            "rv_high_pctl": rv_high_pctl,
+            "rv_low_pctl": rv_low_pctl,
+            **strategy_floats,
+        }
+    )
+    payload.privilege = current.privilege
+    try:
+        new_id, _changes = save_settings(conn, account, payload, f"console:{actor}", settings_note(profile, current, payload))
     except ValueError as exc:
         return _risk(conn, account, {}, str(exc)) | {"status": 400}
     return _risk(conn, account, {}, f"Saved version {new_id}. Privilege stays {payload.privilege}.")
@@ -1348,13 +2271,6 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         "wash_window_days": (1, 14),
         "poll_seconds": (15, 600),
         "draft_ttl": (15, 240),
-        "roll_dte": (1, 60),
-        "profit_take_pct": (1, 100),
-        "ivr_high": (1, 100),
-        "strangle_otm_pct": (1, 50),
-        "dte_min": (1, 90),
-        "dte_target": (1, 120),
-        "dte_max": (1, 180),
         "cycle_minutes": (1, 60),
     }
     try:
@@ -1364,8 +2280,6 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     for key, (low, high) in ranges.items():
         if not low <= numbers[key] <= high:
             return _settings(conn, account, {}, f"{key} must be {low} to {high}.") | {"status": 400}
-    if not numbers["dte_min"] <= numbers["dte_target"] <= numbers["dte_max"]:
-        return _settings(conn, account, {}, "DTE min, target, and max must stay in order.") | {"status": 400}
     posted_currency = (form.get("global_currency") or [""])[0].strip().upper()
     if posted_currency not in CURRENCIES:
         return _settings(conn, account, {}, "Choose a currency from the list.") | {"status": 400}
@@ -1393,10 +2307,11 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         model = MODELS[provider][0]
     payload.itick = payload.itick.model_copy(update=itick_update)
     ai_update = {"model": model, "provider": provider}
-    posted_token = (form.get("credential_token") or form.get("deepseek_token") or [""])[0].strip()
     field = CREDENTIAL_FIELD.get(provider)
-    if posted_token and field:
-        ai_update[field] = posted_token
+    if field and "credential_token" in form:
+        posted_token = (form.get("credential_token") or [""])[0].strip()
+        if "•" not in posted_token:
+            ai_update[field] = posted_token
     payload.ai = payload.ai.model_copy(update=ai_update)
     payload.news = payload.news.model_copy(
         update={
@@ -1411,17 +2326,6 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         }
     )
     payload.notify = payload.notify.model_copy(update=notify_update)
-    payload.strategy = payload.strategy.model_copy(
-        update={
-            "ivr_high": numbers["ivr_high"],
-            "strangle_otm_pct": numbers["strangle_otm_pct"],
-            "roll_dte": numbers["roll_dte"],
-            "profit_take_pct": numbers["profit_take_pct"],
-            "dte_min": numbers["dte_min"],
-            "dte_target": numbers["dte_target"],
-            "dte_max": numbers["dte_max"],
-        }
-    )
     payload.global_currency = posted_currency
     payload.cycle_minutes = numbers["cycle_minutes"]
     payload.privilege = current.privilege
@@ -1453,7 +2357,7 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
     settings = load_active(conn, account) if account else None
     prompts = resolved_agents(settings) if settings else resolved_agents(SettingsPayload(risk=RiskLimits(
         profile="standard", max_symbol_pct_nav=20, cash_reserve_pct=30, daily_loss_halt_pct=5,
-        max_contracts_per_symbol=3, min_iv_rank_new_short=50, min_dte_new=7,
+        max_contracts_per_symbol=3, min_rv_pctl_new_short=50, min_dte_new=7,
         max_short_opt_margin_pct=50, earnings_blackout_days=7,
     )))
     cards = []
@@ -1469,7 +2373,7 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
             "</svg></button>"
         )
         card = (
-            f'<form class="card agent{" collapsed" if not open_card else ""}" method="post" action="/strategy">'
+            f'<form class="card agent{" collapsed" if not open_card else ""}" method="post" action="/orchestration">'
             f"<h2><span>{escape(name)}</span>{fold}</h2>"
             '<div class="body">'
             f'<p class="role">{escape(AGENT_ROLES[name])}</p>'
@@ -1507,8 +2411,8 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         "</div>"
     )
     return _html(
-        "Strategy",
-        "Edit the system prompt and the execution prompt for each agent. Income or Accumulate, and Long, are set per symbol on Universe.",
+        "Orchestration",
+        "The orchestration blueprint. Edit the system prompt and the execution prompt for each agent. Income or Accumulate, and Long, are set per symbol on Universe.",
         body,
         [("info", "7 AGENTS")],
     )
@@ -1768,7 +2672,7 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
 
 def _intent_select(symbol: str, intent: str) -> str:
     options = []
-    for value, label in (("income", "Income"), ("accumulate", "Accumulate")):
+    for value, label in (("income", "Income"), ("both", "Both"), ("accumulate", "Accumulate")):
         selected = " selected" if intent == value else ""
         options.append(f'<option value="{value}"{selected}>{label}</option>')
     return (
@@ -1917,8 +2821,12 @@ def _iv_series(conn, symbol: str, minimum: int) -> tuple[list[float], int | None
     if not symbol:
         return [], None
     rows = conn.execute(
-        "SELECT iv_proxy FROM iv_marks WHERE symbol = %s ORDER BY day DESC LIMIT 26",
-        (symbol,),
+        """
+        SELECT iv_proxy FROM iv_marks
+        WHERE symbol = %s AND method = %s
+        ORDER BY day DESC LIMIT 26
+        """,
+        (symbol, PREMIUM_METHOD),
     ).fetchall()
     samples = [Decimal(row[0]) for row in reversed(rows)]
     series = _rank_points(samples)
@@ -2086,12 +2994,12 @@ def _news_rows(conn, offset: int) -> tuple[str, bool, int]:
         tone, score = _sentiment_parts(sentiment)
         body.append(
             "<tr>"
-            f"<td class=\"mono\">{escape(_stamp(ts))}</td>"
+            f"<td class=\"mono news-when\">{escape(_stamp(ts))}</td>"
             f"<td>{escape(symbol)}</td>"
             f"<td><span class=\"tag\">{escape(source)}</span></td>"
             f"<td>{_type_badge(event_type)}</td>"
             f"<td class=\"mono {tone}\">{escape(score)}</td>"
-            f"<td>{escape(title)}</td>"
+            f"<td class=\"news-title\">{escape(title)}</td>"
             f"<td>{action}</td></tr>"
         )
     inner = "".join(body)
@@ -2126,6 +3034,7 @@ def _simulation(conn, account: str, _query: dict) -> dict:
     step = f'Day {info["day"]} of {info["total"]}' if info["run_id"] else DASH
     left = f'{info["left"]} cycles left' if info["run_id"] else DASH
     status = escape(info["label"]) if info["run_id"] else "Idle"
+    spinner = '<span class="sim-spin" aria-hidden="true"></span>' if info["status"] == "active" else ""
     note = f'<p class="sim-note" id="sim-note">{escape(info["note"])}</p>' if info["note"] else ""
     buttons = []
     if info["status"] in {"downloading", "active"}:
@@ -2154,9 +3063,9 @@ def _simulation(conn, account: str, _query: dict) -> dict:
     blob = json.dumps(info).replace("<", "\\u003c")
     body = (
         '<div class="sim-page">'
-        '<div class="card sim-progress"><h2>Progress</h2>'
+        '<div class="card sim-progress">'
         '<div class="sim-facts">'
-        f'<div><div class="k">Status</div><div class="v" id="sim-status">{status}</div></div>'
+        f'<div><div class="k">Status</div><div class="v" id="sim-status">{spinner}{status}</div></div>'
         f'<div><div class="k">Day</div><div class="v" id="sim-day">{day}</div></div>'
         f'<div><div class="k">Window</div><div class="v" id="sim-window">{window}</div></div>'
         f'<div><div class="k">Progress</div><div class="v" id="sim-step">{step}</div></div>'
@@ -2205,27 +3114,12 @@ def _closes(conn, symbol: str) -> tuple[str, str, str]:
         change = (last - previous) / previous * Decimal(100)
         tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
         return f"{last:.2f}", f"{change:+.2f}%", tone
-    rows = conn.execute(
-        """
-        SELECT ts, close, source FROM market_bars WHERE symbol = %s
-        ORDER BY ts DESC
-        LIMIT 40
-        """,
-        (symbol,),
-    ).fetchall()
-    real = [row for row in rows if row[2] != "seed"]
-    rows = real or rows
-    if not rows:
+    from athena_marketdata.pricing import quote_pair
+
+    last, previous = quote_pair(conn, symbol)
+    if last is None:
         return DASH, DASH, ""
-    last_ts, last = rows[0][0], Decimal(rows[0][1])
-    last_day = last_ts.date()
-    previous = None
-    for ts, close, _source in rows[1:]:
-        if ts.date() == last_day or Decimal(close) == 0:
-            continue
-        previous = Decimal(close)
-        break
-    if previous is None:
+    if previous is None or previous == 0:
         return f"{last:.2f}", DASH, ""
     change = (last - previous) / previous * Decimal(100)
     tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
@@ -2249,13 +3143,17 @@ def _pool_profile(conn, account: str, symbol: str) -> tuple[str, Decimal | None,
 
 
 def _save_pool_facts(conn, account: str, symbol: str, form: dict) -> dict:
+    partial = (form.get("partial") or [""])[0] == "row"
     name = " ".join((form.get("name") or [""])[0].split())[:80]
     thesis = " ".join((form.get("thesis") or [""])[0].split())[:240]
     classifiers = clean_classifiers((form.get("classifiers") or [""])[0])
     try:
         cap = _parse_cap((form.get("market_cap") or [""])[0])
     except ValueError:
-        return _universe(conn, account, {}, "Market cap needs a number, such as 5.31T or 188.2B.") | {"status": 400}
+        message = "Market cap needs a number, such as 5.31T or 188.2B."
+        if partial:
+            return _pool_patch(False, message, status=400)
+        return _universe(conn, account, {}, message) | {"status": 400}
     conn.execute(
         """
         INSERT INTO symbol_facts (symbol, name, market_cap)
@@ -2275,7 +3173,16 @@ def _save_pool_facts(conn, account: str, symbol: str, form: dict) -> dict:
         (account, symbol, classifiers, thesis),
     )
     conn.commit()
-    return _universe(conn, account, {}, f"Saved {symbol}.")
+    message = f"Saved {symbol}."
+    if partial:
+        current = load_active(conn, account)
+        return _pool_patch(
+            True,
+            message,
+            html=_pool_row(conn, account, current, symbol),
+            count=len(current.watchlist),
+        )
+    return _universe(conn, account, {}, message)
 
 
 def _sync_symbol(symbol: str) -> str:
@@ -2350,7 +3257,7 @@ def _edit_symbol(symbol: str, name: str, cap, classifiers: str, thesis: str, pri
 def _toggle(symbol: str, field: str, on: bool, green: bool = False) -> str:
     state = " on" if on else ""
     tone = " green" if green else ""
-    label = {"enabled": "Enabled", "long": "Long"}.get(field, field.upper())
+    label = {"enabled": "Enabled", "long": "Long", "may_buy": "May buy"}.get(field, field.upper())
     return (
         '<form method="post" action="/universe" style="display:inline">'
         f'<input type="hidden" name="symbol" value="{escape(symbol, quote=True)}">'
@@ -2826,15 +3733,28 @@ def _credential_help(provider: str) -> str:
     env = CREDENTIAL_ENV.get(provider, "")
     if not env:
         return ""
-    return f"Leave blank to keep the saved token. An empty stored value uses {env}."
+    return f"Clear the field to remove the token. With nothing saved, Athena uses {env}."
 
 
-def _credential_ready(current) -> dict[str, bool]:
-    ready = {}
+def _credential_masks(current) -> dict[str, str]:
+    masks = {}
     for provider in CREDENTIAL_FIELD:
         probe = current.model_copy(update={"ai": current.ai.model_copy(update={"provider": provider})})
-        ready[provider] = bool(deepseek_token(probe))
-    return ready
+        token = deepseek_token(probe)
+        masks[provider] = _mask_center(token) if token else ""
+    return masks
+
+
+def _credential_input(current) -> str:
+    shown = ""
+    if current.ai.provider != "DSH":
+        token = deepseek_token(current)
+        shown = _mask_center(token) if token else ""
+    value = escape(shown, quote=True)
+    return (
+        f'<input class="input" name="credential_token" type="text" autocomplete="off" '
+        f'spellcheck="false" value="{value}">'
+    )
 
 
 def _currency_options(current: str) -> str:
@@ -2897,11 +3817,15 @@ def _field(label: str, note: str, control: str) -> str:
     return f'<div class="settings-field"><label>{_q(label, note)}</label>{control}</div>'
 
 
-def _limit(label: str, name: str, value: int, note: str = "") -> str:
+def _limit(label: str, name: str, value: int | float, note: str = "", step: str = "1", preview: bool = False) -> str:
     title = _q(label, note) if note else escape(label)
+    shown = value
+    if isinstance(value, float):
+        shown = f"{value:.4f}".rstrip("0").rstrip(".")
+    marker = ' data-preview="threshold"' if preview else ""
     return (
         f'<div class="settings-field"><label>{title}</label>'
-        f'<input class="input" name="{name}" type="number" min="0" step="1" required value="{value}">'
+        f'<input class="input" name="{name}" type="number" min="0" step="{step}" required value="{shown}"{marker}>'
         "</div>"
     )
 
@@ -2981,18 +3905,24 @@ def _skill(conn, account: str, query: dict, note: str = "") -> dict:
         )
     else:
         secret = '<p>No key yet. Generate one on <a href="/settings">Settings</a>.</p>'
-    body = (
-        '<div class="card fill"><h2>Developer API</h2><div class="scroll-y skill-doc">'
+    side = (
+        '<div class="card skill-doc">'
+        "<h2>Developer API</h2>"
         "<p>This page is the contract for another program, such as fanit-cli, running on this machine. "
         "The console is local. Send the Developer key. A call returns a task id. Poll that id until it is done or failed. "
         "These calls read IB. They do not place orders.</p>"
-        f"<h3>Key</h3>{secret}"
-        "<h3>Base</h3><p class=\"mono\">http://127.0.0.1:8788</p>"
-        "<h3>Auth</h3><p>Header <span class=\"mono\">Authorization: Bearer &lt;key&gt;</span> "
-        "or <span class=\"mono\">X-Api-Key: &lt;key&gt;</span>. A missing or wrong key returns status failed.</p>"
-        + _skill_rest()
-        + "</div></div>"
+        f"{_row('Key', secret, 'The Developer key for this account. Generate it on Settings.')}"
+        f"{_row('Base', _tag('http://127.0.0.1:8788'), 'The local console address.')}"
+        f"{_row('Auth', _tag('Authorization: Bearer <key>'), 'Send this header on every call.')}"
+        + "</div>"
+        '<div class="card skill-doc"><h2>Rules</h2><ul>'
+        "<li>bar is 1 min, 5 mins, 15 mins, 30 mins, 1 hour, or 1 day. duration is an IB span such as 30 D or 1 Y.</li>"
+        "<li>Up to 20 symbols. Gateway down makes the whole task failed.</li>"
+        "<li>A symbol IB cannot find is status failed inside a done task, with error set.</li>"
+        "</ul></div>"
+        + _skill_try()
     )
+    body = f'<div class="skill-cols"><div class="skill-side">{side}</div><div class="skill-requests">{_skill_rest()}</div></div>'
     chips = [("ok", "KEY SET")] if key else [("warn", "NO KEY")]
     return _html("Skill", "How another app reads prices from Athena.", body, chips)
 
@@ -3027,6 +3957,105 @@ def _paint_json(text: str) -> str:
         parts.append(f'<span class="{kind}">{escape(token)}</span>')
     parts.append(escape(text[pos:]))
     return "".join(parts)
+
+
+_SKILL_PLAY = (
+    (
+        "bars",
+        "Bars",
+        "POST",
+        "/api/v1/bars",
+        """{
+  "symbols": ["NVDA", "IGV", "700"],
+  "bar": "1 day",
+  "duration": "30 D"
+}""",
+    ),
+    (
+        "day",
+        "Day",
+        "POST",
+        "/api/v1/day",
+        """{
+  "symbols": ["NVDA"],
+  "day": "2026-10-09"
+}""",
+    ),
+    (
+        "option",
+        "Option",
+        "POST",
+        "/api/v1/option",
+        """{
+  "symbols": [{
+    "symbol": "NVDA",
+    "expiry": "20261120",
+    "strike": 180,
+    "right": "P"
+  }],
+  "bar": "1 day",
+  "duration": "5 D"
+}""",
+    ),
+    (
+        "company",
+        "Company",
+        "POST",
+        "/api/v1/company",
+        """{
+  "symbols": ["NVDA", "700"]
+}""",
+    ),
+    ("task", "Task", "GET", "/api/v1/tasks/{task_id}", "ab12cd34ef56"),
+)
+
+
+def _skill_try() -> str:
+    options = "".join(
+        f'<option value="{escape(key, quote=True)}">{escape(label)}</option>'
+        for key, label, _method, _path, _body in _SKILL_PLAY
+    )
+    samples = {
+        key: {"method": method, "path": path, "body": body}
+        for key, _label, method, path, body in _SKILL_PLAY
+    }
+    first = _SKILL_PLAY[0][4]
+    first_url = "http://127.0.0.1:8788" + _SKILL_PLAY[0][3]
+    curl = escape(
+        "curl -s -X POST http://127.0.0.1:8788/api/v1/bars \\\n"
+        "  -H 'Authorization: Bearer <key>' \\\n"
+        "  -H 'Content-Type: application/json' \\\n"
+        "  -d '{\"symbols\":[\"NVDA\"],\"bar\":\"1 day\",\"duration\":\"5 D\"}'\n\n"
+        "curl -s -X POST http://127.0.0.1:8788/api/v1/day \\\n"
+        "  -H 'Authorization: Bearer <key>' \\\n"
+        "  -H 'Content-Type: application/json' \\\n"
+        "  -d '{\"symbols\":[\"NVDA\"],\"day\":\"2026-10-09\"}'\n\n"
+        "curl -s http://127.0.0.1:8788/api/v1/tasks/<task_id> \\\n"
+        "  -H 'Authorization: Bearer <key>'"
+    )
+    blob = json.dumps(samples).replace("<", "\\u003c")
+    return (
+        '<div class="card skill-doc">'
+        "<h2>Try</h2>"
+        '<div class="skill-try">'
+        '<div class="seg">'
+        '<button type="button" class="on" data-skill-tab="curl">Curl Sample</button>'
+        '<button type="button" data-skill-tab="play">Playground</button>'
+        "</div>"
+        f'<div data-skill-panel="curl"><pre class="json">{curl}</pre></div>'
+        '<div data-skill-panel="play" hidden>'
+        '<label class="skill-play-label">Request'
+        f'<select id="skill-play-kind">{options}</select></label>'
+        '<label class="skill-play-label">URL'
+        f'<input id="skill-play-url" readonly value="{escape(first_url, quote=True)}"></label>'
+        '<label class="skill-play-label">Body'
+        f'<textarea id="skill-play-body" spellcheck="false">{escape(first)}</textarea></label>'
+        '<button class="btn primary" type="button" id="skill-play-send">Submit</button>'
+        '<pre class="json" id="skill-play-out">Response shows here.</pre>'
+        "</div>"
+        f'<script type="application/json" id="skill-play-samples">{blob}</script>'
+        "</div></div>"
+    )
 
 
 def _skill_call(method: str, path: str) -> str:
@@ -3079,16 +4108,18 @@ def _skill_rest() -> str:
 }""",
         ),
     ]
-    parts = ["<p>Each call has its own URL. A POST returns a task id. Poll that id until it is done or failed.</p>"]
+    parts = []
     for title, path, note, sample in posts:
         parts.append(
-            f"<h3>{escape(title)}</h3>"
+            '<div class="card skill-doc">'
+            f"<h2>{escape(title)}</h2>"
             f"{_skill_call('POST', path)}"
             f"<p>{escape(note)}</p>"
             f"<pre class=\"json\">{_paint_json(sample)}</pre>"
+            "</div>"
         )
     parts.append(
-        "<h3>Task</h3>"
+        '<div class="card skill-doc"><h2>Task</h2>'
         + _skill_call("GET", "/api/v1/tasks/{task_id}")
         + "<p>Every POST above answers with this at once. It is not the prices.</p>"
         + f"<pre class=\"json\">{_paint_json('''{\n  \"ok\": true,\n  \"task_id\": \"ab12cd34ef56\",\n  \"status\": \"running\"\n}''')}</pre>"
@@ -3096,25 +4127,7 @@ def _skill_rest() -> str:
         + f"<pre class=\"json\">{_paint_json('''{\n  \"ok\": true,\n  \"task_id\": \"ab12cd34ef56\",\n  \"status\": \"done\",\n  \"result\": {\n    \"symbols\": [{\n      \"symbol\": \"NVDA\",\n      \"sec_type\": \"STK\",\n      \"status\": \"done\",\n      \"latest\": 181.0,\n      \"bars\": [{\"date\": \"2026-10-09\", \"time\": \"2026-10-09\", \"open\": 180.1, \"high\": 182.4, \"low\": 179.2, \"close\": 181.0, \"volume\": 1000}],\n      \"error\": \"\"\n    }]\n  },\n  \"error\": \"\"\n}''')}</pre>"
         + "<p>Company uses the same GET. The symbol object looks like this instead.</p>"
         + f"<pre class=\"json\">{_paint_json('''{\n  \"symbol\": \"NVDA\",\n  \"sec_type\": \"STK\",\n  \"status\": \"done\",\n  \"name\": \"NVIDIA Corp\",\n  \"market_cap\": 5530000000000,\n  \"exchange\": \"SMART\",\n  \"primary_exchange\": \"NASDAQ\",\n  \"currency\": \"USD\",\n  \"error\": \"\"\n}''')}</pre>"
-        + "<h3>Rules</h3><ul>"
-        "<li>bar is 1 min, 5 mins, 15 mins, 30 mins, 1 hour, or 1 day. duration is an IB span such as 30 D or 1 Y.</li>"
-        "<li>Up to 20 symbols. Gateway down makes the whole task failed.</li>"
-        "<li>A symbol IB cannot find is status failed inside a done task, with error set.</li>"
-        "</ul>"
-        "<h3>Try</h3><pre class=\"json\">"
-        + escape(
-            "curl -s -X POST http://127.0.0.1:8788/api/v1/bars \\\n"
-            "  -H 'Authorization: Bearer <key>' \\\n"
-            "  -H 'Content-Type: application/json' \\\n"
-            "  -d '{\"symbols\":[\"NVDA\"],\"bar\":\"1 day\",\"duration\":\"5 D\"}'\n\n"
-            "curl -s -X POST http://127.0.0.1:8788/api/v1/day \\\n"
-            "  -H 'Authorization: Bearer <key>' \\\n"
-            "  -H 'Content-Type: application/json' \\\n"
-            "  -d '{\"symbols\":[\"NVDA\"],\"day\":\"2026-10-09\"}'\n\n"
-            "curl -s http://127.0.0.1:8788/api/v1/tasks/<task_id> \\\n"
-            "  -H 'Authorization: Bearer <key>'"
-        )
-        + "</pre>"
+        + "</div>"
     )
     return "".join(parts)
 
@@ -3190,6 +4203,23 @@ def _symbol_names(conn, symbols: list[str]) -> dict[str, str]:
         (symbols,),
     ).fetchall()
     return {row[0]: row[1] or "" for row in rows}
+
+
+def _conflict_card(on: bool) -> str:
+    note = (
+        "On: any short blocks every new open on that symbol. "
+        "Off: a short put may sit beside shares and a covered call."
+    )
+    checked = " checked" if on else ""
+    badge = _tag("ON", "green") if on else _tag("OFF")
+    return (
+        '<div class="card"><h2>Strict conflict'
+        f'{_q_btn("Strict conflict", note)}</h2>'
+        '<div class="toggle-row"><div class="toggle-end">'
+        '<input type="hidden" name="strict_conflict" value="0">'
+        f'<input type="checkbox" name="strict_conflict" value="1"{checked}>'
+        f"{badge}</div></div></div>"
+    )
 
 
 def _switch(label: str, name: str, on: bool, note: str = "") -> str:

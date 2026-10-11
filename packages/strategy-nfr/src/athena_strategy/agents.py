@@ -5,28 +5,51 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
 
-from athena_settings.model import SettingsPayload, TacticFlags
-from athena_settings.prompts import RUN_ORDER, resolved_agents
+from athena_exec.halt import active_reason
+from athena_marketdata.pricing import Bar, daily_bars, last_daily_close
+from athena_settings.model import SettingsPayload, StrategySettings, TacticFlags
+from athena_settings.prompts import RUN_ORDER, range_names, resolved_agents
 from athena_settings.resolve import deepseek_token, scoring_model
-from athena_strategy.drafts import has_open_draft, open_quantity, stage_draft
+from athena_strategy.drafts import apply_ticket_block, has_open_draft, open_quantity, stage_draft
 from athena_strategy.dsh import chat
+from athena_strategy.indicators import Indicators, indicators_enabled, read_indicators, store_reading
 from athena_strategy.iv import tags_from_iv
 from athena_strategy.phases import _load
+from athena_strategy.schemas import parse_response, schema_line
+from athena_strategy.tags import (
+    CHANNEL_RISING,
+    NEWS_WASH,
+    PULLBACK,
+    TAG_REGISTRY,
+    kept_stored,
+    names_owned_by,
+    unknown_names,
+)
 
 log = logging.getLogger("athena.strategy")
 
 _TACTICS = {"BUY": "BUY", "CSP": "OPEN_CSP", "CC": "OPEN_CC", "STRANGLE": "OPEN_STRANGLE"}
+_MIN_BARS = 63
+_INVALID_RETRIES = 1
+_TAG_AGENTS = ("Location", "News")
 
 
-def fill_prompt(template: str, values: dict[str, str]) -> str:
+def fill_prompt(template: str, values: dict[str, Any]) -> str:
     text = template
     for key, value in values.items():
+        if not isinstance(value, str):
+            continue
         text = text.replace("{{" + key + "}}", value)
+    numbers = values.get("numbers")
+    if isinstance(numbers, str) and numbers and "{{numbers}}" not in template and "Numbers:" not in text:
+        text = text.rstrip() + "\nNumbers: " + numbers
     return text
 
 
@@ -41,29 +64,193 @@ def parse_json(text: str) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def run_signaled(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> list[str]:
-    """One signaled-entry pass. Returns new draft ids. A failed symbol does not stop the rest."""
-    created: list[str] = []
-    blocked = {item.upper() for item in settings.blocked_symbols}
+def run_observe(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> None:
+    """Location and News only. Writes the state and does not draft."""
     for symbol in settings.watchlist:
-        if symbol.upper() in blocked:
-            write_decision(
-                conn, account_id, symbol, "consolidator", "dropped", "skipped, symbol blocked",
-                {"items": [_step("", "dropped", "symbol blocked")]},
-            )
-            continue
         try:
-            created.extend(_run_symbol(conn, settings, account_id, symbol))
+            level, reason = eligible(conn, settings, account_id, symbol)
+            if level == "none":
+                write_decision(
+                    conn, account_id, symbol, "wheel", "no_data", reason,
+                    {"filter": reason, "items": []},
+                )
+                continue
+            _observe_symbol(conn, settings, account_id, symbol)
+        except Exception as exc:
+            log.error("observe failed symbol=%s error=%s", symbol, exc.__class__.__name__)
+            write_decision(
+                conn, account_id, symbol, "wheel", "dropped", exc.__class__.__name__,
+                {"items": [_step("", "dropped", exc.__class__.__name__)], "err": str(exc)[:500]},
+            )
+
+
+def _observe_symbol(conn, settings: SettingsPayload, account_id: str, symbol: str) -> None:
+    prompts = resolved_agents(settings)
+    flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+    context = _context(conn, settings, account_id, symbol, flags)
+    model = scoring_model(settings)
+    provider = settings.ai.provider
+    token = deepseek_token(settings)
+    answers: dict[str, dict] = {}
+    for name in ("Location", "News"):
+        prompt = prompts[name]
+        user = fill_prompt(prompt.execution, context)
+        payload, stop = _ask(
+            conn, account_id, name, symbol, model, provider, token, prompt.system, user, bool(prompt.reasoning),
+        )
+        if stop:
+            write_decision(
+                conn, account_id, symbol, "wheel", "invalid", stop,
+                {"items": [_step(name, "dropped", stop)]},
+            )
+            return
+        answers[name] = payload
+    write_decision(
+        conn, account_id, symbol, "wheel", "observed", "outside_draft_slot",
+        {"items": [_step(name, "ok", "") for name in ("Location", "News")], "tags": sorted(_tag_set(context, answers))},
+    )
+
+
+def run_signaled(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> list[str]:
+    """One signaled-entry pass. The wheel path is three agents. Off keeps the seven."""
+    from athena_strategy.wheel import state_machine_enabled
+
+    if not state_machine_enabled():
+        return run_legacy_signaled(conn, settings, account_id)
+    return _run_wheel_pass(conn, settings, account_id)
+
+
+def run_legacy_signaled(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> list[str]:
+    """The seven-agent pass. Location, News, four tactics, then the consolidator."""
+    created: list[str] = []
+    for symbol in settings.watchlist:
+        try:
+            level, reason = eligible(conn, settings, account_id, symbol)
+            if level == "none":
+                write_decision(
+                    conn, account_id, symbol, "consolidator", "no_data", reason,
+                    {"filter": reason, "items": []},
+                )
+                continue
+            names = RUN_ORDER if level == "full" else _TAG_AGENTS
+            limited = "" if level == "full" else reason
+            created.extend(_run_symbol(conn, settings, account_id, symbol, names, limited))
         except Exception as exc:
             log.error("signaled entry failed symbol=%s error=%s", symbol, exc.__class__.__name__)
             write_decision(
                 conn, account_id, symbol, "consolidator", "dropped", exc.__class__.__name__,
-                {"items": [_step("", "dropped", exc.__class__.__name__)]},
+                {"items": [_step("", "dropped", exc.__class__.__name__)], "err": str(exc)[:500]},
             )
     return created
 
 
-def _run_symbol(conn, settings: SettingsPayload, account_id: str, symbol: str) -> list[str]:
+def _run_wheel_pass(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> list[str]:
+    """Location, News, then one code ticket. Narrator may only explain or pick a listed strike."""
+    created: list[str] = []
+    for symbol in settings.watchlist:
+        try:
+            level, reason = eligible(conn, settings, account_id, symbol)
+            if level == "none":
+                write_decision(
+                    conn, account_id, symbol, "wheel", "no_data", reason,
+                    {"filter": reason, "items": []},
+                )
+                continue
+            created.extend(_run_wheel_symbol(conn, settings, account_id, symbol))
+        except Exception as exc:
+            log.error("wheel entry failed symbol=%s error=%s", symbol, exc.__class__.__name__)
+            write_decision(
+                conn, account_id, symbol, "wheel", "dropped", exc.__class__.__name__,
+                {"items": [_step("", "dropped", exc.__class__.__name__)], "err": str(exc)[:500]},
+            )
+    return created
+
+
+def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: str) -> list[str]:
+    from decimal import Decimal
+
+    from athena_strategy.wheel import decide_opening, execute_opening
+
+    prompts = resolved_agents(settings)
+    flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+    context = _context(conn, settings, account_id, symbol, flags)
+    model = scoring_model(settings)
+    provider = settings.ai.provider
+    token = deepseek_token(settings)
+    answers: dict[str, dict] = {}
+    for name in ("Location", "News"):
+        prompt = prompts[name]
+        user = fill_prompt(prompt.execution, context)
+        payload, stop = _ask(
+            conn, account_id, name, symbol, model, provider, token, prompt.system, user, bool(prompt.reasoning),
+        )
+        if stop:
+            write_decision(
+                conn, account_id, symbol, "wheel", "invalid", stop,
+                {"items": [_step(name, "dropped", stop)]},
+            )
+            return []
+        answers[name] = payload
+    tags = set(_tag_set(context, answers))
+    preview = decide_opening(conn, settings, account_id, symbol, tags)
+    menu = preview.call_lines or preview.put_lines
+    context["tags"] = ", ".join(sorted(tags)) or "none"
+    context["ticket"] = preview.reason or preview.quiet or "quiet"
+    context["strikes"] = ", ".join(str(line.strike) for line in menu) or "none"
+    prompt = prompts["Narrator"]
+    payload, _stop = _ask(
+        conn, account_id, "Narrator", symbol, model, provider, token,
+        prompt.system, fill_prompt(prompt.execution, context), bool(prompt.reasoning),
+    )
+    sentence = str((payload or {}).get("sentence") or "")
+    raw_strike = (payload or {}).get("strike")
+    strike = None
+    if raw_strike is not None:
+        try:
+            strike = Decimal(str(raw_strike))
+        except Exception:
+            strike = None
+    return execute_opening(conn, settings, account_id, symbol, tags, strike, sentence)
+
+
+def eligible(conn, settings: SettingsPayload, account_id: str, symbol: str) -> tuple[str, str]:
+    """How far this symbol may go before a model call. none, tag_only, or full."""
+    if active_reason(conn, account_id):
+        return "none", "halted"
+    blocked = {item.upper() for item in settings.blocked_symbols}
+    if symbol.upper() in blocked:
+        return "none", "symbol blocked"
+    if len(_bars(conn, symbol)) < _MIN_BARS:
+        return "none", "no_bars"
+    if not _has_chain(conn, symbol):
+        return "tag_only", "no_chain"
+    flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+    if not (flags.csp or flags.cc or flags.strangle):
+        return "tag_only", "options off"
+    return "full", ""
+
+
+def _has_chain(conn, symbol: str) -> bool:
+    from athena_strategy.screener import has_choices
+
+    name = symbol.upper()
+    if has_choices(conn, name):
+        return True
+    plan = conn.execute(
+        "SELECT 1 FROM option_plans WHERE symbol = %s LIMIT 1",
+        (name,),
+    ).fetchone()
+    return plan is not None
+
+
+def _run_symbol(
+    conn,
+    settings: SettingsPayload,
+    account_id: str,
+    symbol: str,
+    names: tuple[str, ...] = RUN_ORDER,
+    limited: str = "",
+) -> list[str]:
     prompts = resolved_agents(settings)
     flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
     context = _context(conn, settings, account_id, symbol, flags)
@@ -71,7 +258,7 @@ def _run_symbol(conn, settings: SettingsPayload, account_id: str, symbol: str) -
     model = scoring_model(settings)
     provider = settings.ai.provider
     token = deepseek_token(settings)
-    for name in RUN_ORDER:
+    for name in names:
         if name in {"CSP", "Purchase", "Strangle", "Call", "Consolidator"}:
             context["tags"] = ", ".join(_tag_set(context, answers)) or "none"
         if name == "Call":
@@ -80,28 +267,74 @@ def _run_symbol(conn, settings: SettingsPayload, account_id: str, symbol: str) -
             context["proposals"] = _proposal_block(answers)
         prompt = prompts[name]
         thinking = bool(prompt.reasoning)
-        result = chat(
-            prompt.system,
-            fill_prompt(prompt.execution, context),
-            model,
-            provider,
-            token,
-            thinking,
+        user = fill_prompt(prompt.execution, context)
+        payload, stop = _ask(
+            conn, account_id, name, symbol, model, provider, token, prompt.system, user, thinking,
         )
-        payload = parse_json(result["text"]) if not result["error"] else {"error": result["error"]}
+        if stop:
+            write_decision(
+                conn, account_id, symbol, "consolidator", "invalid", stop,
+                {"items": [_step(name, "dropped", stop)]},
+            )
+            return []
         answers[name] = payload
-        _record(
-            conn,
-            account_id,
-            name,
-            symbol,
-            model,
-            provider,
-            "on" if thinking and provider != "DSH" else "off",
-            result,
-            payload,
+    if limited:
+        write_decision(
+            conn, account_id, symbol, "consolidator", "no_data", limited,
+            {"filter": limited, "items": []},
         )
+        return []
     return _drafts(conn, settings, account_id, symbol, flags, answers, context)
+
+
+def _ask(conn, account_id, name, symbol, model, provider, token, system, user, thinking) -> tuple[dict, str]:
+    """One agent call, plus one retry when the reply is invalid. A transport error is not retried."""
+    result = chat(system, user, model, provider, token, thinking)
+    if result["error"]:
+        _keep(conn, account_id, name, symbol, model, provider, thinking, result, {"error": result["error"]}, "error")
+        return {"error": result["error"]}, ""
+    payload, status, stage = parse_response(name, result["text"])
+    if status == "ok":
+        _keep(conn, account_id, name, symbol, model, provider, thinking, result, payload or {}, "ok")
+        return payload or {}, ""
+    _keep(
+        conn, account_id, name, symbol, model, provider, thinking, result,
+        {"raw": result["text"], "stage": stage}, "invalid",
+    )
+    if _INVALID_RETRIES < 1:
+        return {}, f"{name} {stage}"
+    retry_user = user + "\n\nReply with JSON only, matching: " + schema_line(name)
+    second = chat(system, retry_user, model, provider, token, thinking)
+    if second["error"]:
+        _keep(
+            conn, account_id, name, symbol, model, provider, thinking, second,
+            {"error": second["error"]}, "error",
+        )
+        return {"error": second["error"]}, ""
+    payload, status, stage = parse_response(name, second["text"])
+    if status == "ok":
+        _keep(conn, account_id, name, symbol, model, provider, thinking, second, payload or {}, "ok")
+        return payload or {}, ""
+    _keep(
+        conn, account_id, name, symbol, model, provider, thinking, second,
+        {"raw": second["text"], "stage": stage}, "invalid",
+    )
+    return {}, f"{name} {stage}"
+
+
+def _keep(conn, account_id, name, symbol, model, provider, thinking, result, payload, call_status) -> None:
+    _record(
+        conn,
+        account_id,
+        name,
+        symbol,
+        model,
+        provider,
+        "on" if thinking and provider != "DSH" else "off",
+        result,
+        payload,
+        call_status,
+    )
 
 
 def _drafts(conn, settings, account_id, symbol, flags: TacticFlags, answers: dict[str, dict], context: dict) -> list[str]:
@@ -117,7 +350,7 @@ def _drafts(conn, settings, account_id, symbol, flags: TacticFlags, answers: dic
     items = choice.get("drafts") or []
     if not isinstance(items, list) or not items:
         trail["items"] = [_step("", "dropped", "no drafts")]
-        write_decision(conn, account_id, symbol, "consolidator", "quiet", "QUIET", trail)
+        write_decision(conn, account_id, symbol, "consolidator", "quiet", "no drafts", trail)
         return []
     steps = []
     for item in items:
@@ -130,8 +363,8 @@ def _drafts(conn, settings, account_id, symbol, flags: TacticFlags, answers: dic
         if tactic is None:
             steps.append(_step(label, "dropped", "unknown tactic"))
             continue
-        if tactic == "BUY" and (not flags.long or flags.intent != "accumulate"):
-            why = "Long is off" if not flags.long else "intent is not Accumulate"
+        if tactic == "BUY" and (not flags.long or flags.intent == "income"):
+            why = "Long is off" if not flags.long else "intent is Income"
             steps.append(_step("BUY", "dropped", why))
             continue
         if has_open_draft(conn, account_id, symbol, tactic):
@@ -145,6 +378,15 @@ def _drafts(conn, settings, account_id, symbol, flags: TacticFlags, answers: dic
         steps.append(step)
         if step["outcome"] == "kept" and step.get("draft_id"):
             created.append(step["draft_id"])
+    pending = [step["draft_id"] for step in steps if step.get("outcome") == "kept" and step.get("draft_id")]
+    ticket = apply_ticket_block(conn, settings, account_id, symbol, pending)
+    if ticket:
+        blocked_ids = set(pending)
+        for step in steps:
+            if step.get("draft_id") in blocked_ids and step.get("outcome") == "kept":
+                step["outcome"] = "blocked"
+                step["detail"] = ticket
+        created = [item for item in created if item not in blocked_ids]
     trail["items"] = steps
     outcome, summary = _trail_outcome(steps)
     write_decision(conn, account_id, symbol, "consolidator", outcome, summary, trail)
@@ -255,7 +497,7 @@ def _staged_step(label: str, staged: dict) -> dict:
 def _trail_context(context: dict, flags: TacticFlags, phase: str, choice: dict) -> dict:
     tags = context.get("tags") or "none"
     thinking = choice.get("thinking") if isinstance(choice.get("thinking"), str) else ""
-    return {
+    trail = {
         "phase": phase,
         "intent": flags.intent,
         "long": "on" if flags.long else "off",
@@ -264,19 +506,36 @@ def _trail_context(context: dict, flags: TacticFlags, phase: str, choice: dict) 
         "thinking": thinking,
         "items": [],
     }
+    if context.get("numbers"):
+        trail["numbers"] = context["numbers"]
+    if context.get("indicators"):
+        trail["indicators"] = context["indicators"]
+    if context.get("unknown_tags"):
+        trail["unknown_tags"] = context["unknown_tags"]
+    if context.get("otm_clamped"):
+        trail["otm_clamped"] = context["otm_clamped"]
+    if context.get("cc_block"):
+        trail["cc_block"] = context["cc_block"]
+    if context.get("delta_source"):
+        trail["delta_source"] = context["delta_source"]
+    return trail
 
 
 def _trail_outcome(steps: list[dict]) -> tuple[str, str]:
     if any(step.get("outcome") == "kept" for step in steps):
-        outcome = "drafted"
-    elif steps and all(step.get("outcome") == "dropped" and step.get("detail") == "no drafts" for step in steps):
-        outcome = "quiet"
-    else:
-        outcome = "dropped"
+        summary = ", ".join(
+            f"{step.get('tactic') or 'draft'} {step.get('outcome')}" for step in steps
+        ) or "QUIET"
+        return "drafted", summary
+    if not steps:
+        return "quiet", "QUIET"
+    if all(step.get("outcome") in {"dropped", "blocked"} for step in steps):
+        summary = ", ".join(str(step.get("detail") or step.get("outcome") or "") for step in steps)
+        return "quiet", summary or "QUIET"
     summary = ", ".join(
         f"{step.get('tactic') or 'draft'} {step.get('outcome')}" for step in steps
     ) or "QUIET"
-    return outcome, summary
+    return "dropped", summary
 
 
 def record_call(conn, account_id, agent, symbol, model, provider, thinking, result, payload) -> None:
@@ -293,8 +552,11 @@ def _simulated(conn, symbol: str) -> bool:
     return in_replay(conn, symbol)
 
 
-def _record(conn, account_id, agent, symbol, model, provider, thinking, result, payload) -> None:
-    status = "error" if result["error"] else "ok"
+def _record(conn, account_id, agent, symbol, model, provider, thinking, result, payload, call_status: str = "") -> None:
+    status = call_status or ("error" if result["error"] else "ok")
+    line = _result_line(agent, payload, result["error"])
+    if status == "invalid":
+        line = f"invalid {payload.get('stage') or 'schema'}"
     name = symbol.upper()
     conn.execute(
         """
@@ -307,7 +569,7 @@ def _record(conn, account_id, agent, symbol, model, provider, thinking, result, 
         (
             account_id, agent, name, model, provider, thinking,
             result["latency_ms"], result["tokens"], status,
-            _result_line(agent, payload, result["error"]),
+            line,
             Jsonb(payload or {"error": result["error"] or "empty"}),
             Jsonb(result["request"]) if isinstance(result.get("request"), dict) else None,
             _simulated(conn, name),
@@ -349,27 +611,40 @@ def _result_line(agent: str, payload: dict, error: str) -> str:
     )
 
 
-def _tag_set(context: dict[str, str], answers: dict[str, dict]) -> list[str]:
-    tags = [part for part in context["base_tags"].split(",") if part]
+def _tag_set(context: dict[str, Any], answers: dict[str, dict]) -> list[str]:
+    raw = [part for part in str(context.get("base_tags") or "").split(",") if part]
+    unknown = unknown_names(raw)
+    iv_owned = names_owned_by("iv")
+    indicator_owned = names_owned_by("indicators")
+    tags = [tag for tag in raw if tag in TAG_REGISTRY and tag not in iv_owned and not TAG_REGISTRY[tag].deprecated]
     location = answers.get("Location") or {}
-    for tag in location.get("tags") or []:
-        text = str(tag)
-        if text and text not in tags:
-            tags.append(text)
+    if location and not location.get("error"):
+        location_owned = names_owned_by("location")
+        tags = [tag for tag in tags if tag not in location_owned]
+        for tag in location.get("tags") or []:
+            text = str(tag)
+            if text in location_owned and text not in tags:
+                tags.append(text)
+            elif text and text not in TAG_REGISTRY:
+                unknown.extend(unknown_names([text]))
     news = answers.get("News") or {}
     if not news.get("error"):
-        tags = [tag for tag in tags if tag != "NEWS_WASH"]
-        if news.get("news_wash") and "NEWS_WASH" not in tags:
-            tags.append("NEWS_WASH")
-    tags = [tag for tag in tags if tag != "PULLBACK"]
-    if _pullback(context, tags):
-        tags.append("PULLBACK")
+        tags = [tag for tag in tags if tag not in names_owned_by("news")]
+        if news.get("news_wash") and NEWS_WASH not in tags:
+            tags.append(NEWS_WASH)
+    tags = [tag for tag in tags if tag not in indicator_owned]
+    for tag in str(context.get("indicator_tags") or "").split(","):
+        if tag and tag not in tags:
+            tags.append(tag)
+    if _pullback(context, tags) and PULLBACK not in tags:
+        tags.append(PULLBACK)
+    context["unknown_tags"] = unknown
     return tags
 
 
-def _pullback(context: dict[str, str], tags: list[str]) -> bool:
-    """A mega-cap dip in the bottom 35% of a rising 63-session channel."""
-    if "CHANNEL_RISING" not in tags:
+def _pullback(context: dict[str, Any], tags: list[str]) -> bool:
+    """A mega-cap dip in the deep part of a rising channel."""
+    if CHANNEL_RISING not in tags:
         return False
     codes = {part.strip() for part in (context.get("classifiers") or "").split(",") if part.strip()}
     if not codes & {"MAG7", "MEGA_CAP"}:
@@ -379,7 +654,9 @@ def _pullback(context: dict[str, str], tags: list[str]) -> bool:
     low = _decimal(context.get("low_63"))
     if last is None or high is None or low is None or high <= low:
         return False
-    return (last - low) / (high - low) <= Decimal("0.35")
+    raw = context.get("dip_deep_pos")
+    limit = Decimal(str(raw)) if raw else Decimal(str(StrategySettings().dip_deep_pos))
+    return (last - low) / (high - low) <= limit
 
 
 def _decimal(value: str | None) -> Decimal | None:
@@ -411,33 +688,59 @@ def _proposal_block(answers: dict[str, dict]) -> str:
     return "\n".join(lines)
 
 
-def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flags: TacticFlags) -> dict[str, str]:
+def kept_prompt(stored: set[str]) -> set[str]:
+    """Prompt base keeps price and location. IV aliases and indicator tags are recomputed."""
+    return kept_stored(stored, drop_owners=frozenset({"iv", "indicators"}))
+
+
+def _reading(conn, settings: SettingsPayload, account_id: str, symbol: str) -> Indicators | None:
+    if not indicators_enabled():
+        return None
+    reading = read_indicators(conn, settings, symbol)
+    store_reading(conn, account_id, symbol, reading)
+    return reading
+
+
+def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flags: TacticFlags) -> dict[str, Any]:
     bars = _bars(conn, symbol)
     last = _last_close(conn, symbol)
     shares = _shares(conn, account_id, symbol)
     plan = _plan(conn, symbol)
     _current, stored = _load(conn, account_id, symbol)
     iv_tags = tags_from_iv(conn, symbol, settings)
-    base = sorted((stored or set()) | iv_tags)
-    puts, calls = _priced_lines(conn, symbol, plan)
+    reading = _reading(conn, settings, account_id, symbol)
+    fresh = set() if reading is None else set(reading.tags)
+    base = sorted(kept_prompt(stored or set()) | iv_tags | fresh)
+    from athena_strategy.screener import prompt_sides
+
+    puts, calls, clamped, cc_block, delta_source = prompt_sides(
+        conn, settings, account_id, symbol, reading, plan, last, date.today(),
+    )
     risk = settings.risk
     return {
         "symbol": symbol.upper(),
         "last": _show(last),
-        "high_63": _show(_rail(bars, 0, 63)),
-        "low_63": _show(_rail(bars, 1, 63, high=False)),
-        "high_63_prior": _show(_prior_rail(bars, 0)),
-        "low_63_prior": _show(_prior_rail(bars, 1, high=False)),
-        "high_252": _show(_rail(bars, 0, 252)),
-        "low_252": _show(_rail(bars, 1, 252, high=False)),
+        "high_63": _show(_rail(bars, "high", 63)),
+        "low_63": _show(_rail(bars, "low", 63, high=False)),
+        "high_63_prior": _show(_prior_rail(bars, "high")),
+        "low_63_prior": _show(_prior_rail(bars, "low", high=False)),
+        "high_252": _show(_rail(bars, "high", 252)),
+        "low_252": _show(_rail(bars, "low", 252, high=False)),
         "headlines": _headlines(conn, symbol),
         "tags": "none",
         "base_tags": ",".join(base),
+        "numbers": "" if reading is None else reading.line(),
+        "indicator_tags": "" if reading is None else ",".join(sorted(reading.tags)),
+        "indicators": {} if reading is None else reading.payload(),
+        "dip_deep_pos": str(settings.strategy.dip_deep_pos),
         "intent": flags.intent,
         "long": "on" if flags.long else "off",
         "shares": _show(shares),
         "puts": puts,
         "calls": calls,
+        "otm_clamped": clamped or "",
+        "cc_block": cc_block or "",
+        "delta_source": delta_source or "",
         "purchase": "none",
         "classifiers": _classifiers(conn, account_id, symbol),
         "position_cap": _position_cap(risk.max_position_per_symbol),
@@ -447,41 +750,54 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
         "cash_reserve": str(risk.cash_reserve_pct),
         "flags": f"csp={'on' if flags.csp else 'off'} cc={'on' if flags.cc else 'off'} strangle={'on' if flags.strangle else 'off'}",
         "proposals": "none",
+        **range_names(_range_sessions(conn, symbol, bars)),
     }
 
 
-def _bars(conn, symbol: str) -> list[tuple]:
+def _range_sessions(conn, symbol: str, bars: list[Bar]) -> int:
+    from athena_marketdata.pricing import ib_daily_count
+    from athena_strategy.simbars import in_replay
+
+    if in_replay(conn, symbol):
+        return len(bars)
+    return ib_daily_count(conn, symbol)
+
+
+def _bars(conn, symbol: str) -> list[Bar]:
     from athena_strategy.simbars import in_replay, load_daily
 
     if in_replay(conn, symbol):
-        return [(row[0], row[1], row[2]) for row in load_daily(conn, symbol)[-273:]]
-    rows = conn.execute(
-        """
-        SELECT high, low, close FROM market_bars
-        WHERE symbol = %s
-        ORDER BY ts DESC
-        LIMIT 273
-        """,
-        (symbol.upper(),),
-    ).fetchall()
-    return list(reversed(rows))
+        found = []
+        for row in load_daily(conn, symbol)[-273:]:
+            found.append(
+                Bar(
+                    day=date.min,
+                    open=row[2],
+                    high=row[0],
+                    low=row[1],
+                    close=row[2],
+                    volume=row[3] if len(row) > 3 else Decimal(0),
+                )
+            )
+        return found
+    return daily_bars(conn, symbol, 273)
 
 
-def _rail(bars: list[tuple], index: int, sessions: int, high: bool = True):
+def _rail(bars: list[Bar], field: str, sessions: int, high: bool = True):
     window = bars[-sessions:]
     if not window:
         return None
-    values = [row[index] for row in window if row[index] is not None]
+    values = [getattr(row, field) for row in window if getattr(row, field) is not None]
     if not values:
         return None
     return max(values) if high else min(values)
 
 
-def _prior_rail(bars: list[tuple], index: int, high: bool = True):
+def _prior_rail(bars: list[Bar], field: str, high: bool = True):
     if len(bars) < 22:
         return None
     window = bars[:-21][-63:]
-    values = [row[index] for row in window if row[index] is not None]
+    values = [getattr(row, field) for row in window if getattr(row, field) is not None]
     if not values:
         return None
     return max(values) if high else min(values)
@@ -492,11 +808,7 @@ def _last_close(conn, symbol: str):
 
     if in_replay(conn, symbol):
         return last_close(conn, symbol)
-    row = conn.execute(
-        "SELECT close FROM market_bars WHERE symbol = %s ORDER BY ts DESC LIMIT 1",
-        (symbol.upper(),),
-    ).fetchone()
-    return None if row is None else row[0]
+    return last_daily_close(conn, symbol)
 
 
 def _shares(conn, account_id: str, symbol: str):
@@ -561,39 +873,6 @@ def _classifiers(conn, account_id: str, symbol: str) -> str:
     if row is None or not row[0]:
         return ""
     return row[0]
-
-
-def _priced_lines(conn, symbol: str, plan: dict | None) -> tuple[str, str]:
-    """Listed contracts that have an ask. The single plan is the fallback."""
-    rows = conn.execute(
-        """
-        SELECT expiry, contract_right, strike, limit_price
-        FROM option_choices
-        WHERE symbol = %s AND limit_price > 0
-        ORDER BY expiry, contract_right, strike
-        """,
-        (symbol.upper(),),
-    ).fetchall()
-    puts: list[str] = []
-    calls: list[str] = []
-    for expiry, right, strike, limit_price in rows:
-        line = f"{expiry} {'put' if right == 'P' else 'call'} {_show(strike)} limit {_show(limit_price)}"
-        if right == "P":
-            puts.append(line)
-        else:
-            calls.append(line)
-    if puts or calls:
-        return "\n".join(puts) or "none", "\n".join(calls) or "none"
-    return _listed(plan)
-
-
-def _listed(plan: dict | None) -> tuple[str, str]:
-    if plan is None:
-        return "none", "none"
-    expiry = plan["expiry"]
-    put = f"{expiry} put { _show(plan['put_strike']) } limit { _show(plan['put_limit']) }"
-    call = f"{expiry} call { _show(plan['call_strike']) } limit { _show(plan['call_limit']) }"
-    return put, call
 
 
 def _show(value) -> str:

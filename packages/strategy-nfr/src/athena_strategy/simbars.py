@@ -1,4 +1,4 @@
-"""Daily bars for a paper replay. Live reads stay on ib-daily."""
+"""Daily bars for a paper replay. Live reads go through pricing.daily_bars."""
 
 from __future__ import annotations
 
@@ -31,16 +31,13 @@ def load_daily(conn: psycopg.Connection, symbol: str) -> list[tuple]:
     symbol = symbol.upper()
     cursor = replay_cursor(conn, symbol)
     if cursor is None:
-        return list(
-            conn.execute(
-                """
-                SELECT high, low, close, volume FROM market_bars
-                WHERE symbol = %s AND source = 'ib-daily'
-                ORDER BY ts
-                """,
-                (symbol,),
-            ).fetchall()
-        )
+        from athena_marketdata.pricing import daily_bars
+
+        return [
+            (bar.high, bar.low, bar.close, bar.volume)
+            for bar in daily_bars(conn, symbol, 3000)
+        ]
+    # Replay exemption: this query reads sim_bars, not market_bars.
     return list(
         conn.execute(
             """

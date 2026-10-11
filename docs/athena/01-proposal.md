@@ -14,7 +14,7 @@ Goal horizon: refine this one strategy so a dedicated options income sleeve can 
 4. **Remote operable** — Feishu + Telegram for status and Approve/Reject; one-time web views for richer selections; ops agent can restart IB Gateway / Athena services.
 5. **Survive laptop lifestyle** — Engine runs on Windows box; Mac is for development and occasional control.
 6. **Durable state** — Local DB + local backups first; S3-compatible offsite sync second.
-7. **Honest data split** — iTick for realtime price movement; IB for history, execution, and scheduled account/position sync (with Mobile IB App time slots).
+7. **Honest data split** — IB daily bars for indicators, one day per row. A delayed print may update that day’s close and is the draft reference price. iTick is not part of the daily window. IB also executes and syncs positions inside Athena slots.
 
 ## Non-goals (MVP and near-term)
 

@@ -75,59 +75,78 @@ def manage_book(
         (account_id, replaying is not None),
     ).fetchall()
     created: list[str] = []
-    for symbol, quantity, avg_price, sec_type, expiry, right, strike, market_price in rows:
-        choice = management_tactic(
-            sec_type=sec_type,
-            quantity=quantity,
-            avg_price=avg_price,
-            market_price=market_price,
-            expiry=expiry,
-            today=day,
-            roll_dte=settings.strategy.roll_dte,
-            profit_take_pct=settings.strategy.profit_take_pct,
-        )
-        if choice is None:
+    grouped: dict[str, list] = {}
+    for row in rows:
+        grouped.setdefault(row[0], []).append(row)
+    for symbol, legs in grouped.items():
+        chosen = []
+        for symbol_name, quantity, avg_price, sec_type, expiry, right, strike, market_price in legs:
+            del symbol_name
+            choice = management_tactic(
+                sec_type=sec_type,
+                quantity=quantity,
+                avg_price=avg_price,
+                market_price=market_price,
+                expiry=expiry,
+                today=day,
+                roll_dte=settings.strategy.roll_dte,
+                profit_take_pct=settings.strategy.profit_take_pct,
+            )
+            if choice is None:
+                continue
+            chosen.append((choice, quantity, sec_type, expiry, right, strike, market_price or avg_price))
+        if not chosen:
             continue
-        tactic, reason = choice
-        if has_open_draft(conn, account_id, symbol, tactic):
-            _book(conn, account_id, symbol, "dropped", f"{tactic} already open", tactic, "dropped", "draft already open")
-            continue
-        contracts = max(1, int(abs(quantity)))
-        leg = _option_leg(conn, symbol, expiry, right, strike, market_price or avg_price) if sec_type == "OPT" else None
-        if sec_type == "OPT" and leg is None:
-            log.info("manage waits for a contract symbol=%s tactic=%s", symbol, tactic)
-            _book(conn, account_id, symbol, "dropped", f"{tactic} skipped", tactic, "dropped", "no contract")
-            continue
-        action = "BUY" if quantity < 0 else "SELL"
-        staged = stage_draft(
-            conn,
-            settings,
-            symbol,
-            tactic,
-            contracts,
-            reason,
-            "MANAGE",
-            account_id,
-            instrument=None if leg is None else "OPT",
-            limit_price=None if leg is None else leg[2],
-            expiry=None if leg is None else leg[0],
-            put_strike=strike if leg and right == "P" else None,
-            call_strike=strike if leg and right == "C" else None,
-            put_limit=leg[2] if leg and right == "P" else None,
-            call_limit=leg[2] if leg and right == "C" else None,
-            trading_class="" if leg is None else leg[3],
-            option_exchange="" if leg is None else leg[4],
-            multiplier="100" if leg is None else leg[5],
-            order_action="" if leg is None else action,
-        )
-        if staged["status"] == "pending":
-            log.info("manage account=%s symbol=%s tactic=%s", account_id, symbol, tactic)
-            created.append(staged["id"])
-            _book(conn, account_id, symbol, "drafted", f"{tactic} kept", tactic, "kept", staged["detail"], staged["id"])
-        elif staged["status"] == "blocked":
-            _book(conn, account_id, symbol, "dropped", f"{tactic} blocked", tactic, "blocked", staged["detail"], staged["id"])
-        else:
-            _book(conn, account_id, symbol, "dropped", f"{tactic} dropped", tactic, "dropped", staged["detail"])
+        rolls = [item for item in chosen if item[0][0] == "ROLL"]
+        closes = [item for item in chosen if item[0][0] != "ROLL"]
+        use = (rolls + closes)[:2]
+        ticket_reason = "manage_roll" if any(item[0][0] == "ROLL" for item in use) else "manage_close"
+        from athena_strategy.wheel import insert_manage_ticket
+
+        ticket_id = insert_manage_ticket(conn, account_id, symbol, ticket_reason, len(use))
+        for index, (choice, quantity, sec_type, expiry, right, strike, mark) in enumerate(use):
+            tactic, reason = choice
+            if has_open_draft(conn, account_id, symbol, tactic):
+                _book(conn, account_id, symbol, "dropped", f"{tactic} already open", tactic, "dropped", "draft already open")
+                continue
+            contracts = max(1, int(abs(quantity)))
+            leg = _option_leg(conn, symbol, expiry, right, strike, mark) if sec_type == "OPT" else None
+            if sec_type == "OPT" and leg is None:
+                log.info("manage waits for a contract symbol=%s tactic=%s", symbol, tactic)
+                _book(conn, account_id, symbol, "dropped", f"{tactic} skipped", tactic, "dropped", "no contract")
+                continue
+            action = "BUY" if quantity < 0 else "SELL"
+            staged = stage_draft(
+                conn,
+                settings,
+                symbol,
+                tactic,
+                contracts,
+                reason,
+                "MANAGE",
+                account_id,
+                instrument=None if leg is None else "OPT",
+                limit_price=None if leg is None else leg[2],
+                expiry=None if leg is None else leg[0],
+                put_strike=strike if leg and right == "P" else None,
+                call_strike=strike if leg and right == "C" else None,
+                put_limit=leg[2] if leg and right == "P" else None,
+                call_limit=leg[2] if leg and right == "C" else None,
+                trading_class="" if leg is None else leg[3],
+                option_exchange="" if leg is None else leg[4],
+                multiplier="100" if leg is None else leg[5],
+                order_action="" if leg is None else action,
+                ticket_id=ticket_id,
+                leg_index=index,
+            )
+            if staged["status"] == "pending":
+                log.info("manage account=%s symbol=%s tactic=%s", account_id, symbol, tactic)
+                created.append(staged["id"])
+                _book(conn, account_id, symbol, "drafted", f"{tactic} kept", tactic, "kept", staged["detail"], staged["id"])
+            elif staged["status"] == "blocked":
+                _book(conn, account_id, symbol, "dropped", f"{tactic} blocked", tactic, "blocked", staged["detail"], staged["id"])
+            else:
+                _book(conn, account_id, symbol, "dropped", f"{tactic} dropped", tactic, "dropped", staged["detail"])
     return created
 
 
