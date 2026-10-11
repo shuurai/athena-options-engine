@@ -88,7 +88,7 @@ html, body.console { height: 100%; overflow: hidden; }
 .stage > .note, .stage > .profiles { flex: none; }
 .stage > .book-stack { flex: 1 1 auto; min-height: 0; }
 .book-stack > .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.book-heat { flex: 1 1 auto; width: 100%; min-height: 0; height: 100%; display: block; }
+.book-heat { flex: 1 1 0; width: 100%; min-height: 0; display: block; overflow: hidden; }
 .stage > .fill, .stage > form.fill, .stage > .split, .stage > .sim-page { flex: 1 1 auto; min-height: 0; }
 .sim-page { display: flex; flex-direction: column; gap: 14px; }
 .sim-facts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 16px; margin: 4px 0 14px; }
@@ -3600,6 +3600,154 @@ _CLIENT_JS = r"""
       });
     }
   }
+  function paintBookHeat() {
+    const dataNode = document.getElementById("book-heat-data");
+    const svg = document.querySelector("svg.book-heat");
+    if (!dataNode || !svg) return;
+    let groups = [];
+    try { groups = JSON.parse(dataNode.textContent || "[]"); }
+    catch (err) { return; }
+    if (!groups.length) return;
+    const ns = "http://www.w3.org/2000/svg";
+    const font = "ui-monospace, monospace";
+    function worst(row, side) {
+      if (!row.length || side <= 0) return Infinity;
+      const total = row.reduce((sum, value) => sum + value, 0);
+      if (total <= 0) return Infinity;
+      const high = Math.max.apply(null, row);
+      const low = Math.min.apply(null, row);
+      const side2 = side * side;
+      return Math.max((side2 * high) / (total * total), (total * total) / (side2 * low));
+    }
+    function squarify(items, x, y, w, h) {
+      if (w <= 0 || h <= 0 || !items.length) return [];
+      const ranked = items.slice().sort((a, b) => b.area - a.area);
+      const total = ranked.reduce((sum, item) => sum + item.area, 0) || 1;
+      const areas = ranked.map((item) => (item.area / total) * (w * h));
+      const out = [];
+      let left = x, top = y, width = w, height = h, start = 0;
+      while (start < areas.length) {
+        const row = [];
+        let index = start;
+        while (index < areas.length) {
+          const candidate = row.concat([areas[index]]);
+          const side = Math.min(width, height);
+          const current = row.length ? worst(row, side) : Infinity;
+          if (!row.length || worst(candidate, side) <= current) {
+            row.push(areas[index]);
+            index += 1;
+          } else break;
+        }
+        const rowSum = row.reduce((sum, value) => sum + value, 0) || 1;
+        if (width >= height) {
+          const column = height ? rowSum / height : 0;
+          let cursor = top;
+          for (let step = 0; step < row.length; step += 1) {
+            const tileH = (row[step] / rowSum) * height;
+            out.push({ x: left, y: cursor, w: column, h: tileH, ref: ranked[start + step] });
+            cursor += tileH;
+          }
+          left += column;
+          width -= column;
+        } else {
+          const rowH = width ? rowSum / width : 0;
+          let cursor = left;
+          for (let step = 0; step < row.length; step += 1) {
+            const tileW = (row[step] / rowSum) * width;
+            out.push({ x: cursor, y: top, w: tileW, h: rowH, ref: ranked[start + step] });
+            cursor += tileW;
+          }
+          top += rowH;
+          height -= rowH;
+        }
+        start += row.length;
+      }
+      return out;
+    }
+    function fit(text, width, size) {
+      const room = Math.max(1, Math.floor(width / (size * 0.62)));
+      if (text.length <= room) return text;
+      return text.slice(0, Math.max(1, room - 1)) + "…";
+    }
+    function tip(tile) {
+      const lines = [tile.name];
+      if (tile.mark) lines.push("Mark " + tile.mark);
+      if (tile.pct == null) lines.push("P&L —");
+      else lines.push("P&L " + (tile.pct > 0 ? "+" : "") + tile.pct.toFixed(1) + "%");
+      return lines.join(String.fromCharCode(10));
+    }
+    function el(name, attrs) {
+      const node = document.createElementNS(ns, name);
+      Object.keys(attrs).forEach((key) => node.setAttribute(key, attrs[key]));
+      return node;
+    }
+    function text(x, y, value, fill, size, anchor) {
+      const node = el("text", {
+        x: x.toFixed(1), y: y.toFixed(1), fill: fill, "font-size": String(size), "font-family": font
+      });
+      if (anchor) node.setAttribute("text-anchor", anchor);
+      node.textContent = value;
+      return node;
+    }
+    let lastW = 0, lastH = 0;
+    function draw() {
+      const w = Math.floor(svg.clientWidth);
+      const h = Math.floor(svg.clientHeight);
+      if (w < 40 || h < 40 || (w === lastW && h === lastH)) return;
+      lastW = w;
+      lastH = h;
+      svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+      svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+      squarify(groups, 0, 0, w, h).forEach((block) => {
+        const group = block.ref;
+        svg.appendChild(el("rect", {
+          x: block.x.toFixed(1), y: block.y.toFixed(1),
+          width: block.w.toFixed(1), height: block.h.toFixed(1),
+          fill: "#10141a", stroke: "#3a4350"
+        }));
+        const header = block.h > 70 && block.w > 90 ? 22 : 0;
+        if (header) {
+          const sign = group.pct > 0 ? "+" : "";
+          svg.appendChild(text(block.x + 8, block.y + 15, group.label, "#e7ecf3", 11));
+          svg.appendChild(text(block.x + block.w - 8, block.y + 15, sign + group.pct.toFixed(1) + "%", group.ink, 11, "end"));
+        }
+        const innerW = block.w;
+        const innerH = block.h - header;
+        if (innerW <= 6 || innerH <= 6) return;
+        squarify(group.tiles, block.x, block.y + header, innerW, innerH).forEach((cell) => {
+          const tile = cell.ref;
+          const gapX = cell.x + 2, gapY = cell.y + 2;
+          const gapW = Math.max(0, cell.w - 4), gapH = Math.max(0, cell.h - 4);
+          const rect = el("rect", {
+            x: gapX.toFixed(1), y: gapY.toFixed(1),
+            width: gapW.toFixed(1), height: gapH.toFixed(1), fill: tile.fill
+          });
+          const title = document.createElementNS(ns, "title");
+          title.textContent = tip(tile);
+          rect.appendChild(title);
+          svg.appendChild(rect);
+          if (gapW <= 32 || gapH <= 22) return;
+          const size = Math.min(13, Math.max(9, Math.floor(gapW / 7)));
+          svg.appendChild(text(gapX + 6, gapY + size + 4, fit(tile.name, gapW - 8, size), tile.ink, size));
+          if (gapW <= 60 || gapH <= 44) return;
+          let cursor = gapY + size + 4 + size + 2;
+          if (tile.mark) {
+            svg.appendChild(text(gapX + 6, cursor, tile.mark, tile.ink, size));
+            cursor += size + 2;
+          }
+          if (tile.pct != null) {
+            const sign = tile.pct > 0 ? "+" : "";
+            svg.appendChild(text(gapX + 6, cursor, "Δ " + sign + tile.pct.toFixed(1) + "%", tile.ink, size));
+          }
+        });
+      });
+    }
+    draw();
+    requestAnimationFrame(draw);
+    if (window.ResizeObserver) new ResizeObserver(draw).observe(svg);
+  }
+  paintBookHeat();
   bootSim();
   pollTasks();
   setInterval(pollTasks, 1000);

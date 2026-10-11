@@ -1081,6 +1081,36 @@ def _heat_tip(tile: dict) -> str:
     return "\n".join(lines)
 
 
+def _heat_pack(groups: list[dict]) -> str:
+    """Tile facts for the browser. It lays these out in the card's real pixel box."""
+    packed = []
+    for group in groups:
+        tiles = []
+        for tile in group["tiles"]:
+            fill, ink = _heat_color(tile["pct"])
+            tiles.append({
+                "name": tile["name"],
+                "mark": tile["mark"],
+                "area": tile["area"],
+                "pct": tile["pct"],
+                "fill": fill,
+                "ink": ink,
+            })
+        ink = "#8b97a8"
+        if group["pct"] > 0.05:
+            ink = "#16c784"
+        elif group["pct"] < -0.05:
+            ink = "#f87171"
+        packed.append({
+            "label": group["label"],
+            "area": group["area"],
+            "pct": group["pct"],
+            "ink": ink,
+            "tiles": tiles,
+        })
+    return json.dumps(packed, separators=(",", ":")).replace("<", "\\u003c")
+
+
 def _position_heatmap(rows: list[dict], intents: dict[str, str]) -> str:
     """Nested treemap. Outer blocks are intent. Inner tiles are open positions."""
     groups = _heat_groups(rows, intents)
@@ -1149,7 +1179,8 @@ def _position_heatmap(rows: list[dict], intents: dict[str, str]) -> str:
                     f'font-family="{font}">Δ {sign}{tile["pct"]:.1f}%</text>'
                 )
     return (
-        f'<svg class="book-heat" viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img">'
+        f'<script type="application/json" id="book-heat-data">{_heat_pack(groups)}</script>'
+        f'<svg class="book-heat" viewBox="0 0 {width} {height}" role="img">'
         + "".join(parts)
         + "</svg>"
     )

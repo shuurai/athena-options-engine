@@ -1071,6 +1071,8 @@ class WheelDbTest(unittest.TestCase):
         self.assertIn(">Income</text>", body)
         self.assertIn(">Both</text>", body)
         self.assertIn(">Accumulate</text>", body)
+        self.assertNotIn('preserveAspectRatio="none"', body)
+        self.assertIn('id="book-heat-data"', body)
         self.assertIn('data-name="AAA"', body)
         self.assertIn(f'fill="{_heat_color(0)[0]}"', body)
         self.assertIn(f'fill="{_heat_color(10)[0]}"', body)
