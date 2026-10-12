@@ -1,9 +1,9 @@
 # 10 — Implementation gap review
 
 **主计划**：[00-plan-order.md](00-plan-order.md) ｜ **规格**：[../athena/03-strategy-news-frontrun.md](../athena/03-strategy-news-frontrun.md)
-**状态**：share buy, the always-on state machine, one manage ticket per name, a single count of assignment cash, one unclassified bucket, a block on a missing FX rate or mark, a per-ticket budget walk, completed daily bars for rails, a higher reason replacing a still-pending open, a risk-page wing ceiling, and a bid on the option menu are built. The rest of this booklet is still a review.
+**状态**：Done. This review is closed. The holes below are built, or left because they already match the spec.
 
-The landed path matches the strategy spec: code writes one opening ticket, phases do not, `RV_HIGH` is the vol gate, and `estimated_iv()` stays empty. The items below are the major holes and the improvisations worth doing next. Known design choices that already match the spec are listed at the end so they are not reopened by accident.
+The landed path matches the strategy spec: code writes one opening ticket, phases do not, `RV_HIGH` is the vol gate, and `estimated_iv()` stays empty. Two dates stay noted and are not open work in this booklet: a `chain_bs` rank after 20 same-method rows, and the March 2027 return to US daylight time. Known design choices that already match the spec are listed at the end so they are not reopened by accident.
 
 ## Holes that drop a legal order
 
@@ -48,7 +48,7 @@ Built. A paired `dip_long` is `BUY` then `OPEN_CSP` in [wheel.py](../../packages
 
 **One bad ticket blocks its whole priority band.** Built. `walk_cycle` still sorts closes and rolls, then `dip_long`, then `high_cc`, then the rest, and symbol order inside a rank. Each ticket is judged on the running book. A failure blocks that ticket only. A ticket that fits is absorbed before the next one is judged.
 
-## Strategy shortfalls still worth a later step
+## Strategy shortfalls
 
 **True IV is still not a reason to trade.** Built for the wing cap. `estimated_iv()` stays empty, and the RV multiple is still an assumption. The floor, the ceiling, the two RV band edges, and the wing factor are risk limits. A new book ceilings at 40%. A stored row keeps the ceiling it already saved. A ceiling of 0 removes the cap, so a high `RV20` follows vol, and a clamp still writes `floor` or `ceiling` on the audit. `chain_bs` stays a badge. Ranking richness from `chain_bs` waits until 20 same-method rows exist.
 
@@ -56,11 +56,11 @@ Built. A paired `dip_long` is `BUY` then `OPEN_CSP` in [wheel.py](../../packages
 
 **Rails move on today’s delayed close.** Built. `daily_bars` keeps completed `ib-daily` bars only. A delayed print does not replace that close and does not add an unfinished day, so `rail_pos`, drawdown, and `RV20` stay on the last completed session. `last_tradeable_price` is still the delayed print, and that is the limit price.
 
-**US hours will be wrong after 1 Nov 2026.** The stored Athena window is `21:30–04:00` HKT. The clock does not move to `22:30–05:00` when the US leaves daylight time. Add a dated pair of windows, or a single settings edit before that Sunday. Do not invent a second set of windows in code without a date.
+**US hours will be wrong after 1 Nov 2026.** Built for this Sunday. The stored leg stays `21:30–04:00`. Friday 30 Oct still ends Saturday 31 Oct at 04:00. From Monday 2 Nov 2026 that exact leg is read as `22:30–05:00`. HK cash and Mobile stay put. A stored window that is not that pair is left alone. The March 2027 return to daylight time is a later dated edit.
 
-**A flat book cannot open the two-leg short.** `signaled_strangle` requires at least 100 shares. `FLAT` can only `dip_csp` or `dip_long`. That is what the current spec says, and it is why the naked-call hole was closed. If a cash-secured put plus a covered call is the only two-leg short you want, leave this. If a flat short strangle is still a goal, it needs its own reason and the same cover rule does not apply to that put.
+**A flat book cannot open the two-leg short.** Left. This matches the spec. `signaled_strangle` requires at least 100 shares. `FLAT` can only `dip_csp` or `dip_long`. A flat short strangle would need its own reason, and the cover rule would not apply to that put.
 
-**A naked call cannot be repaired by a buy.** `NAKED_CALL` is dropped before `_choose`, even though the transition table allows `BUY`. The spec says open nothing. A later improvisation is a cover ticket of `100 − shares` with no new short, the same shape as `cover_gap`, so the alarm can be cleared by Approve instead of waiting for expiry.
+**A naked call cannot be repaired by a buy.** Left. This matches the spec. `NAKED_CALL` is dropped before `_choose`. The spec says open nothing. A later improvisation would be a cover ticket of `100 − shares` with no new short, the same shape as `cover_gap`.
 
 **The first opening of the day blocks a better one.** Built. Rank is `signaled_strangle`, then `high_cc`, then `cover_gap`, then `dip_long` and `dip_csp` tied. A strictly higher reason replaces a ticket whose drafts are still pending, and those drafts are blocked with `replaced by {reason}`. An approved draft, or an order that is queued, submitted, or filled, keeps the day. A blocked ticket does not. An equal rank leaves the pending ticket.
 

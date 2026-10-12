@@ -38,8 +38,9 @@ class RiskLimits(BaseModel):
 class IBSlots(BaseModel):
     """Hong Kong clock. Athena holds the HK cash sessions and the US cash session.
 
-    US regular hours are 21:30–04:00 while the US is on daylight time. The
-    morning half belongs to the previous evening, including Saturday.
+    US regular hours are 21:30–04:00 while the US is on daylight time.
+    From Monday 2 Nov 2026 that same stored leg is read as 22:30–05:00.
+    The morning half belongs to the previous evening, including Saturday.
     """
 
     athena_slots: str = "HKT 09:30-12:00, 13:00-16:00, 21:30-04:00"

@@ -125,7 +125,7 @@ The Volatility reading shows two badges, not inputs. `premium_ratio` is the mark
 
 | Key | Role |
 |-----|------|
-| `athena_slots` | Default `HKT 09:30-12:00, 13:00-16:00, 21:30-04:00`. HK cash, then the US regular session in Hong Kong time |
+| `athena_slots` | Default `HKT 09:30-12:00, 13:00-16:00, 21:30-04:00`. HK cash, then the US regular session in Hong Kong time. From Monday 2 Nov 2026 the stored `21:30-04:00` leg is read as `22:30-05:00` |
 | `mobile_slots` | Default `HKT 19:00-21:30`. Athena disconnects |
 | `reconnect_backoff_sec` | After Mobile disconnect |
 | `client_id` | Stable Athena client id |

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from athena_exec.halt import halt, resume
 from athena_exec.ops import gateway_open, ops_action
-from athena_exec.slots import HKT, covers, parse_windows
+from athena_exec.slots import HKT, covers, effective_windows, parse_windows
 from athena_settings import load_active
 from athena_settings.model import SettingsPayload
 from athena_settings.repository import save_settings
@@ -87,8 +87,8 @@ def sleeve(conn, account: str, now: datetime | None = None) -> dict:
 def schedule(now: datetime, athena_slots: str, mobile_slots: str) -> list[dict]:
     """Today's windows. Gaps between them are idle."""
     local = now.astimezone(HKT)
-    windows = [(start, end, "Athena") for start, end in _parse_slots(athena_slots)]
-    windows += [(start, end, "Mobile") for start, end in _parse_slots(mobile_slots)]
+    windows = [(start, end, "Athena") for start, end in effective_windows(athena_slots, local.date())]
+    windows += [(start, end, "Mobile") for start, end in effective_windows(mobile_slots, local.date())]
     windows.sort(key=lambda item: (item[0], item[1]))
     rows = []
     cursor = None

@@ -70,9 +70,9 @@ Default windows, Hong Kong time:
 |--------|--------|
 | 09:30–12:00 and 13:00–16:00 | Athena. HK cash. Lunch 12:00–13:00 stays idle |
 | 19:00–21:30 | Mobile |
-| 21:30–04:00 | Athena. US regular session while the US is on daylight time |
+| 21:30–04:00 | Athena. US regular session while the US is on daylight time. From Monday 2 Nov 2026 this stored leg is read as 22:30–05:00 |
 
-A window that ends earlier than it starts crosses midnight. The morning half belongs to the previous evening. Friday's US session stays open until Saturday 04:00. Monday before 04:00 stays closed, because Sunday has no US session. After 1 Nov 2026 the US cash session moves to 22:30–05:00. The stored windows do not switch by themselves.
+A window that ends earlier than it starts crosses midnight. The morning half belongs to the previous evening. Friday's US session stays open until Saturday 04:00. Monday before 04:00 stays closed, because Sunday has no US session. The stored string stays `21:30-04:00`. From Monday 2 Nov 2026 that exact leg is read as `22:30-05:00`.
 
 `observe_slots` default `always` watches on a Hong Kong weekday from 07:00 through midnight. `draft_slots` default `athena` writes a ticket only inside an Athena window, including that Saturday morning tail. Mobile wins when a clock matches both.
 

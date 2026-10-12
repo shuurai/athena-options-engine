@@ -1,11 +1,17 @@
 """Athena vs Mobile windows in Asia/Hong_Kong."""
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from athena_settings.model import IBSlots
 
 HKT = ZoneInfo("Asia/Hong_Kong")
+
+# The US regular session leaves daylight time on Sunday 1 Nov 2026.
+# Friday 30 Oct still ends Saturday 31 Oct at 04:00. Monday 2 Nov is the first standard session.
+US_STANDARD_FROM = date(2026, 11, 2)
+US_DAYLIGHT = (time(21, 30), time(4, 0))
+US_STANDARD = (time(22, 30), time(5, 0))
 
 
 def observe_allowed(now: datetime, slots: IBSlots, mode: str) -> bool:
@@ -43,6 +49,17 @@ def slot_state(now: datetime, slots: IBSlots) -> str:
     return "idle"
 
 
+def effective_windows(spec: str, day: date) -> list[tuple[time, time]]:
+    """Stored windows, with the daylight US leg moved on the dated Monday.
+
+    Only the exact 21:30-04:00 pair moves. Any other window stays as stored.
+    """
+    windows = parse_windows(spec)
+    if day < US_STANDARD_FROM:
+        return windows
+    return [US_STANDARD if window == US_DAYLIGHT else window for window in windows]
+
+
 def parse_windows(spec: str) -> list[tuple[time, time]]:
     """Start and end clocks. An end before the start is an overnight window."""
     text = spec.replace("HKT", " ").strip()
@@ -76,4 +93,4 @@ def covers(weekday: int, clock: time, start: time, end: time) -> bool:
 def _inside(now: datetime, spec: str) -> bool:
     clock = now.timetz().replace(tzinfo=None)
     weekday = now.weekday()
-    return any(covers(weekday, clock, start, end) for start, end in parse_windows(spec))
+    return any(covers(weekday, clock, start, end) for start, end in effective_windows(spec, now.date()))
