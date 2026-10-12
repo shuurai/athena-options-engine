@@ -7,6 +7,13 @@ from decimal import Decimal
 from athena_settings.model import RiskLimits
 
 _POSITION_SLACK = Decimal("1.1")
+UNCLASSIFIED_BUCKET = "UNCLASSIFIED"
+
+
+def bucket_names(raw) -> list[str]:
+    """A name with no classifier shares one bucket, so the cap still applies."""
+    names = [str(item).strip() for item in (raw or []) if str(item).strip()]
+    return names or [UNCLASSIFIED_BUCKET]
 
 
 def allowed_open(
@@ -124,6 +131,7 @@ class CycleBook:
     rates: dict = field(default_factory=dict)
     buckets: dict = field(default_factory=dict)
     assignment: Decimal = Decimal(0)
+    secured: Decimal = Decimal(0)
     symbols: dict = field(default_factory=dict)
 
     def clone(self) -> "CycleBook":
@@ -137,6 +145,7 @@ class CycleBook:
             dict(self.rates),
             dict(self.buckets),
             self.assignment,
+            self.secured,
             dict(self.symbols),
         )
 
@@ -146,41 +155,26 @@ class CycleBook:
         self.orders = other.orders
         self.buckets = dict(other.buckets)
         self.assignment = other.assignment
+        self.secured = other.secured
         self.symbols = dict(other.symbols)
 
 
 def walk_cycle(tickets: list[dict], book: CycleBook, limits: RiskLimits) -> list[tuple[dict, str | None, int]]:
-    """Sort by action, then accept a whole priority band or block every ticket in it.
+    """Sort by action, then judge each ticket against the running book.
 
-    A band that fits updates the running book. A band that does not fit blocks
-    every ticket in it, so symbol order cannot pick a winner.
+    A ticket that fits is absorbed. A ticket that fails is blocked alone.
+    Rank order stays: closes, then a dip with shares, then a covered call.
+    Symbol order inside a rank decides who is judged first.
     """
     ordered = sorted(tickets, key=lambda ticket: (cycle_rank(str(ticket.get("reason") or "")), str(ticket.get("symbol") or "")))
     judged: list[tuple[dict, str | None, int]] = []
-    index = 0
     order = 1
-    while index < len(ordered):
-        rank = cycle_rank(str(ordered[index].get("reason") or ""))
-        band = []
-        while index < len(ordered) and cycle_rank(str(ordered[index].get("reason") or "")) == rank:
-            band.append(ordered[index])
-            index += 1
-        trial = book.clone()
-        failed = None
-        for ticket in band:
-            failed = _cycle_reason(ticket, limits, trial)
-            if failed:
-                break
-            _absorb(trial, ticket, limits)
-        if failed:
-            for ticket in band:
-                judged.append((ticket, failed, order))
-                order += 1
-            continue
-        book.take(trial)
-        for ticket in band:
-            judged.append((ticket, None, order))
-            order += 1
+    for ticket in ordered:
+        failed = _cycle_reason(ticket, limits, book)
+        judged.append((ticket, failed, order))
+        order += 1
+        if failed is None:
+            _absorb(book, ticket, limits)
     return judged
 
 
@@ -196,8 +190,9 @@ def block_ticket_reason(
 ) -> str | None:
     """None when the pending legs of one ticket fit together.
 
-    Money is compared in the book currency. A missing FX rate skips that check.
-    A cycle book checks the running remainder instead of the stored snapshot.
+    Money is compared in the book currency. A missing FX rate or mark blocks
+    the ticket and names what is missing. A cycle book checks the running
+    remainder instead of the stored snapshot.
     """
     if not legs:
         return None
@@ -229,8 +224,10 @@ def block_ticket_reason(
             cash_known = False
             break
         need += part
+    missing = None
     if cash_known and need > 0 and cash is not None and nav is not None and nav > 0:
-        booked = _to_book(need, currency, base, rates)
+        booked, gap = _require_book(need, currency, base, rates)
+        missing = gap or missing
         if booked is not None and (cash - booked) / nav * Decimal(100) < limits.cash_reserve_pct:
             return "I2: ticket breaches cash_reserve_pct"
 
@@ -242,8 +239,11 @@ def block_ticket_reason(
             symbol_known = False
             break
         added += part
-    if symbol_known and nav is not None and nav > 0:
-        booked = _to_book(held + added, currency, base, rates)
+    if not symbol_known and _needs_mark(legs):
+        missing = missing or "missing mark"
+    elif symbol_known and nav is not None and nav > 0:
+        booked, gap = _require_book(held + added, currency, base, rates)
+        missing = missing or gap
         if booked is not None and booked / nav * Decimal(100) > limits.max_symbol_pct_nav:
             return "I2: ticket breaches max_symbol_pct_nav"
 
@@ -257,7 +257,8 @@ def block_ticket_reason(
                 break
             estimate += part * Decimal(limits.margin_rate) / Decimal(100)
     if margin_known and nav is not None and nav > 0:
-        booked = _to_book(estimate, currency, base, rates)
+        booked, gap = _require_book(estimate, currency, base, rates)
+        missing = missing or gap
         if booked is not None:
             cap = nav * Decimal(limits.max_short_opt_margin_pct) / Decimal(100)
             if (margin + booked) / nav * Decimal(100) > limits.max_short_opt_margin_pct:
@@ -271,7 +272,7 @@ def block_ticket_reason(
         fresh = sum(int(leg.get("orders") or 1) for leg in legs)
         if int(orders_today) + fresh > limits.max_orders_per_day:
             return "I2: ticket breaches max_orders_per_day"
-    return None
+    return missing
 
 
 def _cash_need(leg: dict) -> Decimal | None:
@@ -314,14 +315,34 @@ def _margin_notional(leg: dict) -> Decimal | None:
 
 
 def _to_book(amount: Decimal, source: str, base: str, rates: dict) -> Decimal | None:
-    if not source or not base:
-        return None
-    if source == base:
-        return amount
+    booked, _gap = _require_book(amount, source, base, rates)
+    return booked
+
+
+def book_amount(amount: Decimal, source: str, base: str, rates: dict) -> tuple[Decimal | None, str | None]:
+    """Amount in the book currency. The reason names a rate the book does not have."""
+    return _require_book(amount, source, base, rates)
+
+
+def _require_book(amount: Decimal, source: str, base: str, rates: dict) -> tuple[Decimal | None, str | None]:
+    if not source or not base or source == base:
+        if source and base and source == base:
+            return amount, None
+        return None, None
     rate = _fx(source, rates)
     if rate is None:
-        return None
-    return amount * rate
+        return None, f"missing fx rate {source}"
+    return amount * rate, None
+
+
+def _needs_mark(legs: list[dict]) -> bool:
+    for leg in legs:
+        if leg.get("tactic") in {"BUY", "CLOSE", "ROLL"}:
+            continue
+        price = leg.get("price")
+        if price is None or Decimal(price) <= 0:
+            return True
+    return False
 
 
 def _fx(code: str, rates: dict) -> Decimal | None:
@@ -343,25 +364,31 @@ def _decimal(value) -> Decimal | None:
 
 
 def _cycle_reason(ticket: dict, limits: RiskLimits, book: CycleBook) -> str | None:
-    """None when this ticket fits the running book. Missing money is skipped."""
+    """None when this ticket fits the running book. A missing rate or mark blocks it."""
     legs = ticket.get("legs") or []
     currency = str(ticket.get("currency") or book.currency or "")
     symbol = str(ticket.get("symbol") or "")
-    names = [str(item) for item in (ticket.get("classifiers") or []) if str(item).strip()]
+    names = bucket_names(ticket.get("classifiers"))
+    missing = None
     cash_need = _sum_legs(legs, _cycle_cash)
     if cash_need is not None and cash_need > 0 and book.cash is not None and book.nav is not None and book.nav > 0:
-        booked = _to_book(cash_need, currency, book.base, book.rates)
+        booked, gap = _require_book(cash_need, currency, book.base, book.rates)
+        missing = gap or missing
         if booked is not None and (book.cash - booked) / book.nav * Decimal(100) < limits.cash_reserve_pct:
             return "cycle cash reserve"
     added = _sum_legs(legs, lambda leg: _cycle_symbol(leg))
     held = book.symbols.get(symbol, Decimal(0))
-    if added is not None and book.nav is not None and book.nav > 0:
-        booked = _to_book(held + added, currency, book.base, book.rates)
+    if added is None and _needs_mark(legs):
+        missing = missing or "missing mark"
+    elif added is not None and book.nav is not None and book.nav > 0:
+        booked, gap = _require_book(held + added, currency, book.base, book.rates)
+        missing = missing or gap
         if booked is not None and booked / book.nav * Decimal(100) > limits.max_symbol_pct_nav:
             return "cycle symbol cap"
     margin_add = _sum_legs(legs, lambda leg: _cycle_margin(leg, limits))
     if margin_add is not None and book.margin is not None and book.nav is not None and book.nav > 0:
-        booked = _to_book(margin_add, currency, book.base, book.rates)
+        booked, gap = _require_book(margin_add, currency, book.base, book.rates)
+        missing = missing or gap
         if booked is not None and (book.margin + booked) / book.nav * Decimal(100) > limits.max_short_opt_margin_pct:
             return "cycle margin"
     if book.orders is not None:
@@ -370,7 +397,8 @@ def _cycle_reason(ticket: dict, limits: RiskLimits, book: CycleBook) -> str | No
             return "cycle orders"
     bucket_add = _sum_legs(legs, _bucket_amount)
     if bucket_add is not None and bucket_add > 0 and book.nav is not None and book.nav > 0:
-        booked = _to_book(bucket_add, currency, book.base, book.rates)
+        booked, gap = _require_book(bucket_add, currency, book.base, book.rates)
+        missing = missing or gap
         if booked is not None:
             for name in names:
                 used = book.buckets.get(name, Decimal(0)) + booked
@@ -379,24 +407,29 @@ def _cycle_reason(ticket: dict, limits: RiskLimits, book: CycleBook) -> str | No
                     return f"cycle bucket {name} at {pct:.0f}%"
     assign_add = _sum_legs(legs, lambda leg: _assignment_amount(leg, limits))
     if assign_add is not None and book.nav is not None and book.nav > 0 and book.cash is not None:
-        booked_assign = _to_book(assign_add, currency, book.base, book.rates)
-        booked_cash = Decimal(0) if cash_need in (None, 0) else _to_book(cash_need or Decimal(0), currency, book.base, book.rates)
+        booked_assign, assign_gap = _require_book(assign_add, currency, book.base, book.rates)
+        booked_cash, cash_gap = (
+            (Decimal(0), None)
+            if cash_need in (None, 0)
+            else _require_book(cash_need or Decimal(0), currency, book.base, book.rates)
+        )
+        missing = missing or assign_gap or cash_gap
         if booked_assign is not None and booked_cash is not None:
-            cash_after = book.cash - booked_cash
-            assign_after = book.assignment + booked_assign
+            cash_after = book.cash + book.secured - booked_cash - book.assignment
             floor = book.nav * Decimal(str(limits.min_cash_after_assign_pct)) / Decimal(100)
-            if cash_after - assign_after < floor:
+            if cash_after < floor:
                 return "assignment would breach min cash"
+            assign_after = book.assignment + booked_assign
             if assign_after / book.nav * Decimal(100) > limits.max_assign_pct_nav:
                 return "cycle assignment cap"
-    return None
+    return missing
 
 
 def _absorb(book: CycleBook, ticket: dict, limits: RiskLimits) -> None:
     legs = ticket.get("legs") or []
     currency = str(ticket.get("currency") or book.currency or "")
     symbol = str(ticket.get("symbol") or "")
-    names = [str(item) for item in (ticket.get("classifiers") or []) if str(item).strip()]
+    names = bucket_names(ticket.get("classifiers"))
     cash_need = _sum_legs(legs, _cycle_cash)
     if cash_need is not None and book.cash is not None:
         booked = _to_book(cash_need, currency, book.base, book.rates)
@@ -425,6 +458,7 @@ def _absorb(book: CycleBook, ticket: dict, limits: RiskLimits) -> None:
         booked = _to_book(assign_add, currency, book.base, book.rates)
         if booked is not None:
             book.assignment += booked
+            book.secured += booked
 
 
 def _sum_legs(legs: list[dict], one) -> Decimal | None:

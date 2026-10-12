@@ -83,7 +83,7 @@ zeptun-ai-v4/
     control-web/            # Vercel: one-time approve/select UI
     ops-agent/              # restart services, health endpoints
   packages/
-    strategy-nfr/           # News Front-Running phases + tactic rules
+    strategy-nfr/           # phases, indicators, screener, wheel, cycle budget
     settings/               # schema, validation, versioning
     risk/                   # pre-trade / post-trade guards
     marketdata/             # iTick + IB hist clients
@@ -120,7 +120,7 @@ Aligned with the original PRD loop, adapted for HITL:
 
 `INIT → IDLE → SCAN → DECIDE → AWAIT_APPROVE → EXEC → WAIT → IDLE`
 
-- At default privilege, `DECIDE` emits **draft actions**, not orders.
+- At default privilege, `DECIDE` emits a wheel ticket, not an order. The model does not choose the open.
 - `AWAIT_APPROVE` is async: loop continues scanning; drafts expire per Settings.
 - `EXEC` only after Approve (or auto if privilege allows and risk passes).
 
@@ -151,9 +151,10 @@ Recommended remote access: Tailscale (or similar) so Vercel/bots call a private 
 | `chain_marks` | At-the-money mids appended on a live slot. Not read yet |
 | `rv_marks` | Daily `RV20`, method `close_log_252` |
 | `iv_marks` | Old premium-ratio rows, tagged with `method`. No implied vol is written |
-| `symbol_phases` | Phase, tags, and `indicators` numbers |
-| `decision_trails` / `ai_calls` | What the pass decided, and each model reply |
-| `drafts` | Proposed actions. Pending until Approve |
+| `symbol_phases` | Phase, tags, `indicators`, and a snapshot of wheel `state` |
+| `tickets` | One ordered opening or management batch. Legs point at it from `drafts` |
+| `decision_trails` / `ai_calls` | What the pass decided, and each model reply. Location, News, and Narrator are the live agents |
+| `drafts` | Proposed legs. Pending until Approve |
 | `orders` / `fills` | Execution audit |
 | `positions` | Snapshots from IB sync |
 | `settings_versions` | Audited config |

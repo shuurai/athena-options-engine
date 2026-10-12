@@ -59,7 +59,7 @@ After each successful local backup:
 ATHENA_S3_SYNC_ENABLED=true
 
 # Endpoint: local MinIO now; replace host later for real S3/R2 without code changes
-ATHENA_S3_ENDPOINT=http://127.0.0.1:9000
+ATHENA_S3_ENDPOINT=http://127.0.0.1:9100
 ATHENA_S3_REGION=us-east-1
 ATHENA_S3_BUCKET=athena-backups
 ATHENA_S3_PREFIX=athena/windows-box/
@@ -75,7 +75,7 @@ When you provide a real remote endpoint later, change `ATHENA_S3_ENDPOINT` / key
 
 #### Local MinIO sketch (`deploy/windows`)
 
-- Container: `minio/minio server /data` with console on 9001  
+- Container: `minio/minio server /data`, S3 API on host port 9100. The console stays inside the container and is not published on the host.  
 - Create bucket `athena-backups` once  
 - Persist MinIO data volume on the same disk as local backups if possible  
 

@@ -17,7 +17,7 @@ from athena_orchestrator.money import DASH, cash_rows, convert, ledger, marked, 
 from athena_orchestrator.pages import PROFILES, _audit_result_tag, _audit_status_tag, _audit_tr, _position_nlv_stat, sim_targets
 from athena_orchestrator.runtime import begin, cycle_view, finish, mark, note_cycle, note_loop, wait
 from athena_orchestrator.sim import _add_months, duration_for
-from athena_risk import allowed_open, block_reason, block_ticket_reason
+from athena_risk import CycleBook, allowed_open, block_reason, block_ticket_reason, book_amount
 from athena_settings.model import AISettings, AgentPrompt, IBSlots, RiskLimits, SettingsPayload, TacticFlags, standard_payload
 from athena_settings.prompts import default_agents, range_names, resolved_agents
 from athena_settings.repository import SettingsVersion, format_settings, save_settings, set_knob
@@ -61,7 +61,7 @@ from athena_strategy.agents import (
     _trail_outcome,
     fill_prompt,
     parse_json,
-    run_signaled,
+    run_legacy_signaled,
 )
 from athena_strategy.classifiers import clean_classifiers
 from athena_strategy.indicators import compute, realized_vol
@@ -235,6 +235,89 @@ class RiskTest(unittest.TestCase):
         self.assertEqual(
             block_ticket_reason([strangle], wide, booked, Decimal(0)),
             "I2: ticket breaches max_orders_per_day",
+        )
+
+    def test_a_missing_rate_or_mark_blocks_the_ticket(self) -> None:
+        limits = _limits(
+            cash_reserve_pct=0,
+            max_symbol_pct_nav=100,
+            max_short_opt_margin_pct=100,
+            max_bucket_pct_nav=100,
+            max_assign_pct_nav=100,
+        )
+        leg = {
+            "tactic": "OPEN_CSP",
+            "contracts": 1,
+            "limit": Decimal("1"),
+            "put_strike": Decimal("1"),
+            "call_strike": None,
+            "multiplier": Decimal("1"),
+            "orders": 1,
+            "price": Decimal("10"),
+            "delta": None,
+        }
+        book = CycleBook(
+            nav=Decimal("100000"),
+            cash=Decimal("100000"),
+            margin=Decimal("0"),
+            orders=0,
+            base="HKD",
+            currency="HKD",
+        )
+        self.assertEqual(
+            block_ticket_reason([leg], limits, {}, book=book, symbol="ZZT", currency="USD"),
+            "missing fx rate USD",
+        )
+        blank, reason = book_amount(Decimal("30"), "USD", "HKD", {})
+        self.assertIsNone(blank)
+        self.assertEqual(reason, "missing fx rate USD")
+        converted, reason = book_amount(Decimal("30"), "USD", "HKD", {"USD": Decimal("7.8")})
+        self.assertEqual(converted, Decimal("234"))
+        self.assertIsNone(reason)
+        priced = CycleBook(
+            nav=Decimal("1000"),
+            cash=Decimal("1000"),
+            margin=Decimal("0"),
+            orders=0,
+            base="HKD",
+            currency="HKD",
+            rates={"USD": Decimal("7.8")},
+        )
+        cap = _limits(
+            cash_reserve_pct=0,
+            max_symbol_pct_nav=20,
+            max_short_opt_margin_pct=100,
+            max_bucket_pct_nav=100,
+            max_assign_pct_nav=100,
+        )
+        sized = {**leg, "price": Decimal("30")}
+        self.assertEqual(
+            block_ticket_reason([sized], cap, {}, book=priced, symbol="ZZT", currency="USD"),
+            "cycle symbol cap",
+        )
+        same = CycleBook(
+            nav=Decimal("1000"),
+            cash=Decimal("1000"),
+            margin=Decimal("0"),
+            orders=0,
+            base="USD",
+            currency="USD",
+        )
+        self.assertIsNone(
+            block_ticket_reason([sized], cap, {}, book=same, symbol="ZZT", currency="USD"),
+        )
+        unmarked = {**leg, "price": None}
+        usd = CycleBook(
+            nav=Decimal("100000"),
+            cash=Decimal("100000"),
+            margin=Decimal("0"),
+            orders=0,
+            base="USD",
+            currency="USD",
+        )
+        self.assertEqual(
+            block_ticket_reason([unmarked], limits, {}, book=usd, symbol="ZZT", currency="USD"),
+            "missing mark",
         )
 
     def test_position_cap_blocks_when_the_open_does_not_fit(self) -> None:
@@ -501,6 +584,10 @@ class AgentsTest(unittest.TestCase):
         })
         self.assertIn("tag green", quiet_row)
         self.assertIn(">QUIET<", _audit_result_tag("Quiet", "ok"))
+        self.assertIn(">NEWS_WASH<", _audit_result_tag("News wash", "ok"))
+        self.assertIn(">INVALID_SCHEMA<", _audit_result_tag("invalid schema", "invalid"))
+        self.assertIn(">CHANNEL_RISING,UPPER_RAIL<", _audit_result_tag("CHANNEL_RISING, UPPER_RAIL", "ok"))
+        self.assertIn("tag red", _audit_status_tag("invalid"))
         self.assertIn("tag red", _audit_status_tag("error"))
         self.assertIn(">OK<", _audit_status_tag("ok"))
         tags = _tag_set({"base_tags": _legacy("L")}, {"Location": {"tags": ["LOWER_RAIL"]}, "News": {"news_wash": True}})
@@ -604,13 +691,11 @@ class AgentsTest(unittest.TestCase):
         self.assertIn("a share purchase may be drafted in the same pass", consolidator)
 
     def test_signaled_pass_does_not_call_the_model_when_patched(self) -> None:
-        os.environ["ATHENA_STATE_MACHINE"] = "off"
-        self.addCleanup(os.environ.pop, "ATHENA_STATE_MACHINE", None)
         settings = standard_payload().model_copy(update={"watchlist": ["ZZT", "BLOCK"], "blocked_symbols": ["BLOCK"]})
         with patch("athena_strategy.agents.write_decision") as written, patch(
             "athena_strategy.agents._run_symbol", side_effect=RuntimeError("boom")
         ), patch("athena_strategy.agents.eligible", return_value=("full", "")):
-            created = run_signaled(None, settings, "ZZTEST")
+            created = run_legacy_signaled(None, settings, "ZZTEST")
         self.assertEqual(created, [])
         self.assertEqual(written.call_count, 2)
         texts = [
@@ -643,6 +728,19 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(status, "ok")
         self.assertEqual(stage, "")
         self.assertEqual(payload["tags"], ["LOWER_RAIL"])
+        payload, status, stage = parse_response("Location", '{"tags":["LOWER_RAIL","252_LOW"]}')
+        self.assertEqual(status, "ok")
+        self.assertEqual(payload["tags"], ["LOWER_RAIL", "LOW_52W"])
+        payload, status, _stage = parse_response(
+            "Location", '{"tags":["CHANNEL_RISING","UPPER_RAIL","RANGE_HIGH"]}'
+        )
+        self.assertEqual(status, "ok")
+        self.assertEqual(payload["tags"], ["CHANNEL_RISING", "UPPER_RAIL", "HIGH_RANGE"])
+        payload, status, _stage = parse_response("Location", '{"tags":["RANGE_LOW"]}')
+        self.assertEqual(status, "ok")
+        self.assertEqual(payload["tags"], ["LOW_RANGE"])
+        _payload, status, stage = parse_response("Location", '{"tags":["NOT_A_TAG"]}')
+        self.assertEqual((status, stage), ("invalid", "schema"))
         _payload, status, stage = parse_response("Location", "not json")
         self.assertEqual((status, stage), ("invalid", "parse"))
         _payload, status, stage = parse_response("CSP", '{"quiet": true, "strike": 9}')

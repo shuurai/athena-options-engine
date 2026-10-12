@@ -5,8 +5,8 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from athena_exec.options import bs_delta, discovery_params, target_otm_pct
-from athena_settings.model import standard_payload
+from athena_exec.options import bs_delta, discovery_params, rv_multiple, target_otm_pct
+from athena_settings.model import SettingsPayload, standard_payload
 from athena_settings.model import TacticFlags
 from athena_strategy.agents import _trail_context
 from athena_strategy.screener import (
@@ -161,7 +161,33 @@ class ScreenerMathTest(unittest.TestCase):
             avg_price=None,
             earnings_in=None,
         )
+        self.assertIsNotNone(line)
         self.assertEqual(line.liquidity, "unknown")
+
+    def _priced(self, bid: Decimal | None, limit: int = 20):
+        return build_line(
+            Choice(NEAR, "P", Decimal("92"), Decimal("2"), bid),
+            symbol="ZZT",
+            spot=Decimal("100"),
+            today=TODAY,
+            sigma=None,
+            source="otm_band",
+            multiplier=Decimal(100),
+            avg_price=None,
+            earnings_in=None,
+            max_spread_pct=limit,
+        )
+
+    def test_a_tight_bid_stays_quoted(self) -> None:
+        line = self._priced(Decimal("1.9"))
+        self.assertIsNotNone(line)
+        self.assertEqual(line.liquidity, "quoted")
+
+    def test_a_wide_spread_leaves_the_menu(self) -> None:
+        self.assertIsNone(self._priced(Decimal("1")))
+        kept = self._priced(Decimal("1"), 0)
+        self.assertIsNotNone(kept)
+        self.assertEqual(kept.liquidity, "quoted")
 
     def test_rv_tiers_pick_different_put_distances(self) -> None:
         settings = _settings()
@@ -226,6 +252,39 @@ class ScreenerMathTest(unittest.TestCase):
         ceiling, high_note = target_otm_pct(Decimal("200"), settings.strategy, 45)
         self.assertEqual(ceiling, Decimal(settings.strategy.otm_ceiling_pct))
         self.assertEqual(high_note, "ceiling")
+
+    def test_a_stored_row_keeps_its_ceiling_until_risk_saves_one(self) -> None:
+        raw = standard_payload().model_dump()
+        raw["strategy"]["otm_ceiling_pct"] = 20
+        raw["risk"].pop("otm_ceiling_pct")
+        raw["risk"].pop("otm_floor_pct")
+        loaded = SettingsPayload.model_validate(raw)
+        self.assertEqual(loaded.risk.otm_ceiling_pct, 20)
+        self.assertEqual(loaded.risk.otm_floor_pct, raw["strategy"]["otm_floor_pct"])
+
+    def test_a_high_rv_follows_vol_when_the_ceiling_is_open(self) -> None:
+        settings = _settings()
+        clamped, note = target_otm_pct(Decimal("200"), settings, 90)
+        self.assertEqual(note, "ceiling")
+        self.assertEqual(clamped, Decimal(settings.risk.otm_ceiling_pct))
+        opened = settings.model_copy(update={"risk": settings.risk.model_copy(update={"otm_ceiling_pct": 0})})
+        width, open_note = target_otm_pct(Decimal("200"), opened, 90)
+        self.assertIsNone(open_note)
+        self.assertGreater(width, Decimal("40"))
+
+    def test_the_rv_band_and_the_wing_factor_come_from_risk(self) -> None:
+        settings = _settings()
+        self.assertEqual(rv_multiple(Decimal("32"), settings), Decimal("1.35"))
+        high_band = settings.model_copy(
+            update={"risk": settings.risk.model_copy(update={"rv_band_high_pct": 30})}
+        )
+        self.assertEqual(rv_multiple(Decimal("32"), high_band), Decimal("1.05"))
+        wider = settings.model_copy(update={"risk": settings.risk.model_copy(update={"wing_z": 1.0})})
+        base, base_note = target_otm_pct(Decimal("30"), settings, 35)
+        doubled, wide_note = target_otm_pct(Decimal("30"), wider, 35)
+        self.assertIsNone(base_note)
+        self.assertIsNone(wide_note)
+        self.assertLess(abs(doubled - base * 2), Decimal("0.05"))
         old = "strangle_" + "otm_pct"
         root = Path(__file__).resolve().parents[3]
         hits = []

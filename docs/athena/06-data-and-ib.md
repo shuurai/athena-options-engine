@@ -31,7 +31,7 @@ Until profitable enough for extra IB market data subscriptions: lean on iTick fo
 
 Not a separate SaaS product named iTicksDB in-repo — a **local** Postgres/Timescale (name in code: `store`) fed by iTick + IB.
 
-Core tables: `market_bars`, `option_choices`, `option_plans`, `chain_marks`, `rv_marks`, `iv_marks`, `symbol_phases` (tags plus `indicators`), `decision_trails`, `ai_calls`, positions, drafts, news_events, settings_versions, approvals, orders/fills.
+Core tables: `market_bars`, `option_choices`, `option_plans`, `chain_marks`, `rv_marks`, `iv_marks`, `symbol_phases` (tags, `indicators`, wheel snapshot), `tickets`, `decision_trails`, `ai_calls`, positions, drafts, news_events, settings_versions, approvals, orders/fills.
 
 Retention sketch: ticks short; bars long; chain snapshots append-only; audit forever. `chain_marks` cannot be backfilled.
 
@@ -64,11 +64,22 @@ flowchart LR
   M2 --> A2
 ```
 
+Default windows, Hong Kong time:
+
+| Window | Owner |
+|--------|--------|
+| 09:30–12:00 and 13:00–16:00 | Athena. HK cash. Lunch 12:00–13:00 stays idle |
+| 19:00–21:30 | Mobile |
+| 21:30–04:00 | Athena. US regular session while the US is on daylight time |
+
+A window that ends earlier than it starts crosses midnight. The morning half belongs to the previous evening. Friday's US session stays open until Saturday 04:00. Monday before 04:00 stays closed, because Sunday has no US session. After 1 Nov 2026 the US cash session moves to 22:30–05:00. The stored windows do not switch by themselves.
+
+`observe_slots` default `always` watches on a Hong Kong weekday from 07:00 through midnight. `draft_slots` default `athena` writes a ticket only inside an Athena window, including that Saturday morning tail. Mobile wins when a clock matches both.
+
 Behaviors:
 
-- Before Mobile slot: cancel/avoid new Athena API work; finish or park orders per Settings  
-- On unexpected disconnect: exponential backoff reconnect **only inside Athena slots**  
-- Heartbeat every N seconds while connected  
+- Before a Mobile slot: avoid new Athena API work
+- On unexpected disconnect: reconnect only inside an Athena slot
 - Never fight Mobile for the session during Mobile slots  
 
 ### Sync jobs (Athena slots)
@@ -122,7 +133,7 @@ Reuse ideas from fanit `itick.ts` / live pricing:
 
 ## Open config (before first live order)
 
-- [x] Account model = **configure any** `ATHENA_IB_ACCOUNT_ID`  
-- Set the active account id in env/Settings for your Windows box  
-- Finalize weekday slot calendar (timezone Asia/Hong_Kong or US/Eastern for US options hours)  
+- [x] Account model = **configure any** `ATHENA_IB_ACCOUNT_ID`
+- [x] Slot calendar = HK cash plus the US regular session, Hong Kong clock, with the overnight rule above
+- Set the active account id in env/Settings for your Windows box
 - Confirm Gateway port (4001 live / 4002 paper Gateway) vs Athena software `ATHENA_TRADING_MODE` 

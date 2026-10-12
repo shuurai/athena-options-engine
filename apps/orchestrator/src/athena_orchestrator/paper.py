@@ -21,9 +21,8 @@ from athena_bots import notify_draft, notify_expired, notify_fill
 from athena_bots.public_url import control_page_url
 from athena_exec.slots import draft_allowed, observe_allowed, slot_state
 from athena_strategy import evaluate_watchlist, issue_link
-from athena_strategy.agents import run_legacy_signaled, run_observe, run_signaled
+from athena_strategy.agents import run_observe, run_signaled
 from athena_strategy.wheel import slot_split_enabled
-from athena_strategy.wheel import state_machine_enabled
 from athena_strategy.drafts import expire_pending
 from athena_strategy.iv import record_iv_marks
 from athena_strategy.mock import prepare_mock_orders
@@ -121,22 +120,20 @@ def run_paper_cycle(conn: psycopg.Connection) -> None:
         mark(5, "running")
         if control_flag(settings, account, "trading", True):
             draft_ids = evaluate_watchlist(conn, settings, account)
+            draft_ids.extend(manage_book(conn, settings, account))
             now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
             if slot_split_enabled():
                 if draft_allowed(now, settings.ib, settings.strategy.draft_slots):
-                    signaled = run_signaled if state_machine_enabled() else run_legacy_signaled
-                    draft_ids.extend(signaled(conn, settings, account))
-                elif observe_allowed(now, settings.ib, settings.strategy.observe_slots) and state_machine_enabled():
+                    draft_ids.extend(run_signaled(conn, settings, account))
+                elif observe_allowed(now, settings.ib, settings.strategy.observe_slots):
                     run_observe(conn, settings, account)
             elif slot_state(now, settings.ib) == "athena":
-                signaled = run_signaled if state_machine_enabled() else run_legacy_signaled
-                draft_ids.extend(signaled(conn, settings, account))
+                draft_ids.extend(run_signaled(conn, settings, account))
         else:
             draft_ids = []
         phase_count += len(settings.watchlist)
         mark(6, "running")
         if control_flag(settings, account, "trading", True):
-            draft_ids.extend(manage_book(conn, settings, account))
             draft_ids = apply_cycle_budget(conn, settings, account, draft_ids)
         draft_count += len(draft_ids)
         for draft_id in draft_ids:
@@ -215,9 +212,8 @@ def _replay_cycle(conn: psycopg.Connection, books: list, gates: dict) -> None:
         draft_ids = []
         if control_flag(settings, account, "trading", True):
             draft_ids = evaluate_watchlist(conn, scoped, account)
-            signaled = run_signaled if state_machine_enabled() else run_legacy_signaled
-            draft_ids.extend(signaled(conn, scoped, account))
             draft_ids.extend(manage_book(conn, scoped, account, day))
+            draft_ids.extend(run_signaled(conn, scoped, account))
             draft_ids = apply_cycle_budget(conn, scoped, account, draft_ids)
         phase_count += len(names)
         draft_count += len(draft_ids)

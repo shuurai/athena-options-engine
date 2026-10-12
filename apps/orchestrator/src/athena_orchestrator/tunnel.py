@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 log = logging.getLogger("athena")
 
-_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+_URL = re.compile(r"https://(?!api\.)[a-z0-9-]+\.trycloudflare\.com")
 _proc: subprocess.Popen[str] | None = None
 
 

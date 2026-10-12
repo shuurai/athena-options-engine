@@ -8,7 +8,7 @@ from decimal import Decimal
 import psycopg
 
 from athena_settings.model import SettingsPayload
-from athena_strategy.drafts import _queue_order, has_open_draft, propose
+from athena_strategy.drafts import has_open_draft, propose
 
 log = logging.getLogger("athena.strategy")
 
@@ -30,7 +30,7 @@ def mock_input(conn: psycopg.Connection, symbol: str) -> tuple[set[str], int | N
 
 
 def prepare_mock_orders(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> None:
-    """Queue a far paper strangle once, then leave send_order off."""
+    """Leave one pending strangle draft when send_order is on, then turn that flag off."""
     rows = conn.execute(
         """
         SELECT symbol FROM mock_signals
@@ -80,18 +80,9 @@ def prepare_mock_orders(conn: psycopg.Connection, settings: SettingsPayload, acc
         )
         if not draft_id:
             continue
-        conn.execute("UPDATE drafts SET status = 'approved' WHERE id = %s", (draft_id,))
-        _queue_order(conn, draft_id, symbol, "OPEN_STRANGLE", 1, account_id)
-        conn.execute(
-            """
-            INSERT INTO approvals (draft_id, actor, decision, account_id)
-            VALUES (%s, 'mock', 'approve', %s)
-            """,
-            (draft_id, account_id),
-        )
         _clear_send(conn, symbol)
         conn.commit()
-        log.info("mock order queued symbol=%s draft=%s put=%s call=%s", symbol, draft_id, put_far, call_far)
+        log.info("mock draft waiting symbol=%s draft=%s", symbol, draft_id)
 
 
 def _far(limit: Decimal) -> Decimal:

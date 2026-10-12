@@ -94,8 +94,8 @@ def _standing_agents() -> dict[str, AgentPrompt]:
                 "63-session low: {{low_63}}\n"
                 "63-session high 21 sessions ago: {{high_63_prior}}\n"
                 "63-session low 21 sessions ago: {{low_63_prior}}\n"
-                "{{range_sessions}}-session high: {{high_252}}\n"
-                "{{range_sessions}}-session low: {{low_252}}"
+                "{{range_label}} high, tag {{range_high_tag}}: {{high_252}}\n"
+                "{{range_label}} low, tag {{range_low_tag}}: {{low_252}}"
             ),
         ),
         "News": AgentPrompt(

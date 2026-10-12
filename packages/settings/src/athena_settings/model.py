@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Privilege = Literal["all_orders", "opens_only", "auto_within_risk", "paper_only"]
 GlobalCurrency = Literal["HKD", "USD", "AUD", "CNY", "JPY", "CAD"]
@@ -27,6 +27,12 @@ class RiskLimits(BaseModel):
     max_assign_pct_nav: int = 40
     min_cash_after_assign_pct: int = 10
     assign_delta: float = 0.30
+    otm_floor_pct: int = 3
+    otm_ceiling_pct: int = 40
+    rv_band_high_pct: int = 45
+    rv_band_mid_pct: int = 25
+    wing_z: float = 0.5
+    max_spread_pct: int = 20
 
 
 class IBSlots(BaseModel):
@@ -271,6 +277,24 @@ class SettingsPayload(BaseModel):
     retain_local_days: int = 14
     cycle_minutes: int = 5
     sim_symbols: list[str] = Field(default_factory=lambda: list(SIM_SYMBOLS))
+
+    @model_validator(mode="before")
+    @classmethod
+    def _keep_stored_wing(cls, data):
+        """An old row stores the wing on strategy. Keep that ceiling until the risk form saves one."""
+        if not isinstance(data, dict):
+            return data
+        risk = data.get("risk")
+        strategy = data.get("strategy")
+        if not isinstance(risk, dict):
+            return data
+        if not isinstance(strategy, dict):
+            strategy = {}
+        for key in ("otm_floor_pct", "otm_ceiling_pct"):
+            if key not in risk and key in strategy:
+                risk[key] = strategy[key]
+        data["risk"] = risk
+        return data
 
 
 def standard_payload() -> SettingsPayload:

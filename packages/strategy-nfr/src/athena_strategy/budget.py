@@ -8,7 +8,7 @@ from decimal import Decimal
 from athena_exec.broker import stock_venue
 from athena_exec.options import bs_delta
 from athena_marketdata.pricing import last_tradeable_price
-from athena_risk import CycleBook, _to_book, budget_enabled, walk_cycle
+from athena_risk import CycleBook, _to_book, bucket_names, budget_enabled, walk_cycle
 from athena_settings.model import SettingsPayload
 from athena_strategy.drafts import _chain_multiplier
 from athena_strategy.indicators import compute, load_bars
@@ -182,7 +182,7 @@ def _baseline(conn, settings: SettingsPayload, account_id: str) -> CycleBook:
         qty = Decimal(quantity)
         mult = Decimal(multiplier or (100 if sec_type == "OPT" else 1))
         currency = stock_venue(symbol)[1]
-        names = _classifiers(conn, account_id, symbol)
+        names = bucket_names(_classifiers(conn, account_id, symbol))
         amount = Decimal(0)
         if sec_type == "OPT" and right == "P" and qty < 0 and strike is not None:
             amount = abs(qty) * Decimal(strike) * mult

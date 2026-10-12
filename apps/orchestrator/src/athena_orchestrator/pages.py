@@ -817,6 +817,17 @@ def _book_buckets(conn, account: str, settings) -> list[tuple[str, float, str]]:
 
 
 def _bucket_count(conn, account: str, name: str) -> int:
+    from athena_risk import UNCLASSIFIED_BUCKET
+
+    if name == UNCLASSIFIED_BUCKET:
+        row = conn.execute(
+            """
+            SELECT count(*) FROM symbol_phases
+            WHERE account_id = %s AND (classifiers IS NULL OR classifiers = '')
+            """,
+            (account,),
+        ).fetchone()
+        return int(row[0])
     rows = conn.execute(
         "SELECT classifiers FROM symbol_phases WHERE account_id = %s AND classifiers <> ''",
         (account,),
@@ -1561,11 +1572,9 @@ def _volatility_card(risk, strategy) -> str:
         f"{_limit('Min RV percentile new short', 'min_rv', risk.min_rv_pctl_new_short, 'This follows the current profile. A new short is blocked when the symbol RV20 percentile is below this. Fewer than 20 samples does not pass.')}"
         f"{_limit('Chain band %', 'chain_band_pct', strategy.chain_band_pct, 'How wide a strike menu to fetch. This is discovery, not the strike that gets sold. The sold strike follows the delta target.')}"
         f"{_limit('Strangle delta target', 'strangle_delta_target', strategy.strangle_delta_target, 'Strangle legs prefer this delta. Changing it moves the distance for every symbol.', step='0.01')}"
-        f"{_limit('OTM floor %', 'otm_floor_pct', strategy.otm_floor_pct, 'The narrowest distance the volatility width may use.')}"
-        f"{_limit('OTM ceiling %', 'otm_ceiling_pct', strategy.otm_ceiling_pct, 'The widest distance the volatility width may use.')}"
-        f"{_limit('RV multiple high', 'iv_rv_multiple_hi', strategy.iv_rv_multiple_hi, 'Assumption, not a measurement. Used only to pick a strike when realized vol is 45% or higher.', step='0.01')}"
-        f"{_limit('RV multiple mid', 'iv_rv_multiple_mid', strategy.iv_rv_multiple_mid, 'Assumption, not a measurement. Used only to pick a strike when realized vol is 25% to 45%.', step='0.01')}"
-        f"{_limit('RV multiple low', 'iv_rv_multiple_lo', strategy.iv_rv_multiple_lo, 'Assumption, not a measurement. Used only to pick a strike when realized vol is below 25%.', step='0.01')}"
+        f"{_limit('RV multiple high', 'iv_rv_multiple_hi', strategy.iv_rv_multiple_hi, 'Assumption, not a measurement. Used when realized vol is at or above the high band.', step='0.01')}"
+        f"{_limit('RV multiple mid', 'iv_rv_multiple_mid', strategy.iv_rv_multiple_mid, 'Assumption, not a measurement. Used when realized vol is at or above the mid band and below the high band.', step='0.01')}"
+        f"{_limit('RV multiple low', 'iv_rv_multiple_lo', strategy.iv_rv_multiple_lo, 'Assumption, not a measurement. Used when realized vol is below the mid band.', step='0.01')}"
         "</div></div>"
     )
 
@@ -1700,8 +1709,8 @@ def _vol_table(conn, settings) -> str:
         target = None
         sigma = None
         if reading.rv20 is not None and reading.rv20 > 0:
-            target, _clamp = target_otm_pct(reading.rv20, settings.strategy, settings.strategy.dte_target)
-            sigma = rv_multiple(reading.rv20, settings.strategy) * reading.rv20
+            target, _clamp = target_otm_pct(reading.rv20, settings, settings.strategy.dte_target)
+            sigma = rv_multiple(reading.rv20, settings) * reading.rv20
         listed = listed_otm_pct(
             last_tradeable_price(conn, symbol),
             [(choice.right, choice.strike) for choice in load_choices(conn, symbol)],
@@ -1847,6 +1856,12 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Max assignment % NAV', 'max_assign', risk.max_assign_pct_nav, 'Short puts that are likely to be assigned may not exceed this share of net liquidation.')}"
         f"{_limit('Min cash after assignment %', 'min_cash_after', risk.min_cash_after_assign_pct, 'Cash left after those likely assignments, as a percent of net liquidation.')}"
         f"{_limit('Assignment delta', 'assign_delta', risk.assign_delta, 'A short put counts as a likely assignment when its absolute delta is at least this. Delta is a proxy, not a probability.', step='0.01')}"
+        f"{_limit('OTM floor %', 'otm_floor_pct', risk.otm_floor_pct, 'The narrowest distance the volatility width may use.')}"
+        f"{_limit('OTM ceiling %', 'otm_ceiling_pct', risk.otm_ceiling_pct, 'The widest distance the volatility width may use. Zero removes the cap so the width follows realized vol.')}"
+        f"{_limit('RV band high %', 'rv_band_high_pct', risk.rv_band_high_pct, 'Realized vol at or above this uses the high RV multiple.')}"
+        f"{_limit('RV band mid %', 'rv_band_mid_pct', risk.rv_band_mid_pct, 'Realized vol at or above this, and below the high band, uses the mid RV multiple.')}"
+        f"{_limit('Wing factor', 'wing_z', risk.wing_z, 'Scales the distance. 0.50 is about a 0.28 delta. An assumption, not a measurement.', step='0.01')}"
+        f"{_limit('Max spread %', 'max_spread_pct', risk.max_spread_pct, 'A quoted strike wider than this, as a percent of the mid, stays off the menu. Zero keeps every quoted strike.')}"
         "</div></div>"
         '<div class="risk-stack risk-span-1">'
         '<div class="card"><h2>Approval privilege'
@@ -2155,6 +2170,27 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
         return _risk(conn, account, {}, "Budget percents must be 0 to 100.") | {"status": 400}
     if not 0.01 <= assign_delta <= 0.9:
         return _risk(conn, account, {}, "Assignment delta must be 0.01 to 0.9.") | {"status": 400}
+    try:
+        wing_floor = _kept_int(form, "otm_floor_pct", current.risk.otm_floor_pct)
+        wing_ceiling = _kept_int(form, "otm_ceiling_pct", current.risk.otm_ceiling_pct)
+        band_high = _kept_int(form, "rv_band_high_pct", current.risk.rv_band_high_pct)
+        band_mid = _kept_int(form, "rv_band_mid_pct", current.risk.rv_band_mid_pct)
+        wing_z = _kept_float(form, "wing_z", current.risk.wing_z)
+        max_spread = _kept_int(form, "max_spread_pct", current.risk.max_spread_pct)
+    except ValueError:
+        return _risk(conn, account, {}, "Wing limits must be numbers.") | {"status": 400}
+    if not 0 <= max_spread <= 100:
+        return _risk(conn, account, {}, "Max spread must be 0 to 100.") | {"status": 400}
+    if not 1 <= wing_floor <= 30:
+        return _risk(conn, account, {}, "OTM floor must be 1 to 30.") | {"status": 400}
+    if not 0 <= wing_ceiling <= 80:
+        return _risk(conn, account, {}, "OTM ceiling must be 0 to 80.") | {"status": 400}
+    if wing_ceiling and wing_floor >= wing_ceiling:
+        return _risk(conn, account, {}, "OTM floor must be below the ceiling.") | {"status": 400}
+    if not 1 <= band_mid < band_high <= 200:
+        return _risk(conn, account, {}, "RV mid band must be below the high band, and both must be 1 to 200.") | {"status": 400}
+    if not 0.1 <= wing_z <= 1.5:
+        return _risk(conn, account, {}, "Wing factor must be 0.1 to 1.5.") | {"status": 400}
     symbol, cash, halt, contracts, rv_floor, dte = values
     profile = next(
         (name for name, preset in PROFILES.items() if preset == (symbol, cash, halt, contracts, rv_floor, dte, position, orders, margin, blackout)),
@@ -2179,6 +2215,12 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
         max_assign_pct_nav=assign_cap,
         min_cash_after_assign_pct=cash_after,
         assign_delta=assign_delta,
+        otm_floor_pct=wing_floor,
+        otm_ceiling_pct=wing_ceiling,
+        rv_band_high_pct=band_high,
+        rv_band_mid_pct=band_mid,
+        wing_z=wing_z,
+        max_spread_pct=max_spread,
     )
     payload.privilege = current.privilege
     strategy_ranges = {
@@ -2186,8 +2228,6 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
         "profit_take_pct": (1, 100),
         "ivr_high": (1, 100),
         "chain_band_pct": (1, 80),
-        "otm_floor_pct": (1, 30),
-        "otm_ceiling_pct": (1, 50),
         "screener_top_n": (1, 10),
         "dte_min": (1, 90),
         "dte_target": (1, 120),
@@ -2202,8 +2242,6 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
             return _risk(conn, account, {}, f"{key} must be {low} to {high}.") | {"status": 400}
     if not strategy_numbers["dte_min"] <= strategy_numbers["dte_target"] <= strategy_numbers["dte_max"]:
         return _risk(conn, account, {}, "DTE min, target, and max must stay in order.") | {"status": 400}
-    if strategy_numbers["otm_floor_pct"] >= strategy_numbers["otm_ceiling_pct"]:
-        return _risk(conn, account, {}, "OTM floor must be below the ceiling.") | {"status": 400}
     float_ranges = {
         "csp_delta_lo": (0.01, 0.9),
         "csp_delta_target": (0.01, 0.9),
@@ -2241,8 +2279,8 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
         update={
             "ivr_high": strategy_numbers["ivr_high"],
             "chain_band_pct": strategy_numbers["chain_band_pct"],
-            "otm_floor_pct": strategy_numbers["otm_floor_pct"],
-            "otm_ceiling_pct": strategy_numbers["otm_ceiling_pct"],
+            "otm_floor_pct": wing_floor,
+            "otm_ceiling_pct": wing_ceiling,
             "screener_top_n": strategy_numbers["screener_top_n"],
             "roll_dte": strategy_numbers["roll_dte"],
             "profit_take_pct": strategy_numbers["profit_take_pct"],
@@ -2537,10 +2575,11 @@ def _audit_tr(row: dict) -> str:
 
 
 def _audit_shown(text: str) -> str:
-    """Quiet is a status word. The table and the stored line use the same spelling."""
-    if (text or "").strip().lower() == "quiet":
-        return "QUIET"
-    return text or ""
+    """Every result badge is capitals, with underscores where the stored line has spaces."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    return raw.upper().replace(" ", "_").replace(",_", ",")
 
 
 _AUDIT_AGENTS = {
@@ -2560,6 +2599,7 @@ _AUDIT_STATUS = {
     "quiet": ("QUIET", ""),
     "drafted": ("DRAFTED", "green"),
     "dropped": ("DROPPED", "red"),
+    "invalid": ("INVALID", "red"),
 }
 
 
@@ -2591,7 +2631,7 @@ def _audit_result_tag(result: str, status: str) -> str:
     key = shown.strip().lower()
     if key == "quiet":
         kind = ""
-    elif state in {"error", "dropped"}:
+    elif state in {"error", "dropped", "invalid"}:
         kind = "red"
     elif "wash" in key:
         kind = "amber"
@@ -4166,7 +4206,7 @@ def _skill_rest() -> str:
 def _book_card() -> str:
     return (
         '<div class="card danger"><h2><span>Book'
-        + _q_btn("Book", "Liquidate deletes simulated positions and sends one limit close for each real position. Flush wipes this account after you type I CONFIRM and wait out the countdown.")
+        + _q_btn("Book", "Liquidate deletes simulated positions and sends one limit close for each real position. The confirm modal is the consent. Flush wipes this account after you type I CONFIRM and wait out the countdown.")
         + "</span></h2>"
         '<div class="row-actions">'
         '<button class="btn danger" type="button" data-cmd="liquidate">Liquidate All</button>'

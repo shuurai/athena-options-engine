@@ -4,7 +4,11 @@
 
 Athena runs **exactly one** strategy product: the **News Front-Running Cycle (NFR)**.
 
-CSP, CC, Strangle, Hold, Roll, and Close are **tactics**. Phases P1–P5 stay as news-cycle context. They do not pick an open. Location and News write one tag set. CSP, Strangle, Purchase, and Call each read it. The consolidator, with thinking on, chooses the drafts. Income or Accumulate, and Long, are per symbol on Universe. Nothing is sent until Approve.
+CSP, CC, Strangle, Hold, Roll, and Close are **tactics**. Phases P1–P5 stay as news-cycle context. They do not pick an open.
+
+Code picks the open. `wheel.decide_opening` is the only opening decision. It reads the book, the indicator numbers, and the symbol flags, then writes at most one ticket. Location and News may add tags. Narrator may explain the ticket or swap one listed strike. A strike that is not on the menu drops the leg and the audit says `narrator_overruled`. Nothing is sent until Approve.
+
+The wheel is the only opening path. `ATHENA_STATE_MACHINE` cannot turn it off.
 
 Refine this cycle for 5–10 years. Improvisation = Settings versions + rule comments, not new strategy packages.
 
@@ -30,7 +34,7 @@ Athena’s job: **detect phase**, show a short strike menu with numbers, draft s
 | **P4 Repair** | T+1 … T+3 | Price stabilizes after the event | Close or reduce; CSP or CC by location |
 | **P5 Euphoria** | T+5 … T+10 | Price into the top of the channel | Prefer **CC** only when the shares cover it |
 
-Windows are **Settings parameters**, not hard-coded forever.
+Windows are **Settings parameters**, not hard-coded forever. A phase name does not choose the ticket. The wheel does.
 
 ```mermaid
 stateDiagram-v2
@@ -91,15 +95,39 @@ Code ranks the chain. The model sees at most three puts and three calls, each wi
 - Bid, open interest, volume, and a vendor IV column exist on `option_choices` and stay empty until the broker sends them. Liquidity on the menu is `unknown`.
 - `ATHENA_SCREENER=off` restores the old free-text lines.
 
-## Tactic selection (inside NFR)
+## Wheel
 
-| Situation | Tactic | Notes |
-|-----------|--------|-------|
-| Listed strangle rows, and no option already open | OPEN_STRANGLE | Both legs come from the menu |
-| Listed put, cash reserve holds | OPEN_CSP | One short put per name |
-| Listed call, and the shares cover it | OPEN_CC | Strike at least the share cost. See the cover rule below |
-| No listed edge | HOLD | Default |
-| DTE at or under `roll_dte`, or `profit_take_pct` captured | ROLL or CLOSE | Position management. Still pending until Approve |
+The state is recomputed from shares and short option counts. `symbol_phases.tactic` stays `HOLD`. `state` and `leg_counts` are a snapshot of that count, not a second source.
+
+| Alias | Book |
+|-------|------|
+| `FLAT` | No shares, no short option |
+| `ODD_LOT` | 1–99 shares, no short option |
+| `LONG` | At least 100 shares, no short option |
+| `SHORT_PUT` | One short put, no shares |
+| `ODD_PUT` | 1–99 shares and one short put |
+| `ASSIGNED` | At least 100 shares and one short put |
+| `LONG_CALL` | At least 100 shares and one short call |
+| `WHEELING` | At least 100 shares, one short put, and one short call |
+| `STRANGLE` | No shares, one short put, and one short call |
+| `NAKED_CALL` | A short call the shares do not cover |
+| `MULTI_CONFLICT` | More than one short put or more than one short call, or any other mix |
+
+`NAKED_CALL` and `MULTI_CONFLICT` write `dropped` and open nothing. Athena does not flatten them. A close still comes only from the roll or profit-take rule.
+
+One name gets at most one opening ticket per day. The legs are ordered. A signaled strangle is put, then call. There is no tactic named `OPEN_STRANGLE`.
+
+| Reason | When | Legs |
+|--------|------|------|
+| `signaled_strangle` | `NEWS_WASH` and `RV_HIGH`, the strangle flag is on, and at least 100 shares. Both menu sides exist. This wins over a covered call and a dip. | `OPEN_CSP`, then `OPEN_CC` |
+| `high_cc` | Close is at or above `cc_rail_pos` (0.80), the call flag is on, and the shares cover the contracts. Strike is at least `avg_price`. This wins over a dip when both are true. | `OPEN_CC` |
+| `cover_gap` | The close is in that high band, the call flag is on, and the shares are an odd lot. The order buys `100 − shares`. It does not attach a call. The contract cap does not apply to this stock order. | `BUY` |
+| `dip_long` | A dip, and this name may buy shares. If `RV_HIGH` and a put is listed, the put is the second leg. Share size is `open_quantity`. | `BUY`, or `BUY` then `OPEN_CSP` |
+| `dip_csp` | A dip, the put flag is on, and this name may not buy shares. `RV_HIGH` is not required. | `OPEN_CSP` |
+
+A dip needs `TREND_STRONG`, `RECLAIM`, and a drawdown between the 5% and 15% band. Earnings nearby blocks a dip and a new call.
+
+Share purchases follow `may_buy` when that flag is set. When it is empty, a buy is allowed only if Long is on and the intent is not Income. Income can still open `dip_csp`.
 
 ### Cover and conflict
 
@@ -111,22 +139,28 @@ These run before a draft can be pending. They use the same account and the same 
 - A short put and a covered call may both exist. That is the wheel. `strict_conflict` on restores the old rule that any short blocks every new open. Default is off.
 - After each leg is legal, the ticket is checked as one cash need: share buys at their limits, plus each short put’s strike times the multiplier. If that need breaks `cash_reserve_pct`, every leg on the ticket is blocked. Missing cash or NAV marks skip that check. They are not invented. New short margin uses `margin_rate` (default 20%).
 
-## Position management (automated drafts)
+## Position management
 
-Even with Approve-all, Athena **drafts** management actions on the 5-minute loop:
+Management is one ticket per name, at most two legs, reason `manage_roll` or `manage_close`.
 
-- DTE below threshold → propose roll/close  
-- ≥ X% of max profit → propose take-profit close  
-- Breach of risk / phase invalidation → propose flatten  
-- Assignment / unexpected fill (Mobile ad-hoc) → reconcile + alert  
+- DTE at or under `roll_dte` drafts a roll.
+- Premium captured at or above `profit_take_pct` drafts a close.
 
-You Approve each draft at default privilege.
+Both stay pending until Approve. The cycle drafts that ticket before a new open. A name with a pending roll or close does not also receive an opening ticket in that pass. A fill Athena did not draft is stored as external and reconciled on the next sync.
+
+## Cycle budget
+
+After the drafts for one pass exist, `ATHENA_PORTFOLIO_BUDGET` (default on) walks them once. The order is closes and rolls, then `dip_long`, then `high_cc`, then every other reason. A priority band is kept or blocked as a whole, so symbol order does not pick a winner.
+
+The walk checks cash reserve, estimated short margin (`margin_rate`), the daily order cap, `max_bucket_pct_nav` (35), assignment exposure (`max_assign_pct_nav` 40, using a delta proxy and `assign_delta` 0.30), and cash left after that assignment (`min_cash_after_assign_pct` 10). A new short put’s strike is counted once in that cash-after-assignment test. A block reason is written on every leg of the ticket.
+
+## Book
+
+`/book` is read only. It plots `RV20` against premium yield. It does not estimate a return and it does not draw a market line. The position map groups open stock and option rows by intent. A name with no flag is Income. Tile size is absolute market value. Color is open profit or loss, grey when the change is under 0.05%, capped at ±25%.
 
 ## Universe / watchlist
 
-- Start small: names you are willing to own (align with fanit wheel “must-hold” discipline).
-- NFR can temporarily elevate a name onto the watchlist when news density spikes; graduation to trade still needs liquidity + IV + Approve.
-- Avoid US ADR delisting-risk names for CSP unless Settings override (learn from income-wheel rules).
+Each name has intent `income`, `both`, or `accumulate`, plus the CSP, CC, and strangle flags. Intent is also the outer group on the book map. A deny-list symbol produces no draft.
 
 ## Parameterization (owned by Settings)
 
@@ -138,7 +172,9 @@ Examples (full list in [04-settings-and-risk.md](04-settings-and-risk.md)):
 - Chain band, delta targets, and the 3%–20% distance clamp  
 - The three RV multiples, labeled as an assumption  
 - DTE band, profit-take %, roll DTE  
-- Max contracts per name, cash reserve for a short put  
+- Max contracts per name, cash reserve, bucket cap, and assignment cap
+- Observe window and draft window
+- Per-name intent and `may_buy`  
 
 ## Improvisation workflow
 
@@ -149,6 +185,9 @@ Examples (full list in [04-settings-and-risk.md](04-settings-and-risk.md)):
 
 ## What we deliberately do not build
 
-- Parallel “CSP strategy product” vs “CC strategy product” codebases  
-- Auto-trading every MAG7 headline without phase + Approve  
+- Parallel “CSP strategy product” vs “CC strategy product” codebases
+- A model that can approve its own open, or veto a ticket the wheel already refused
+- Implied-vol tags. `chain_marks` is collected. `estimated_iv()` stays empty until a later consumption step. The RV multiple is not called IV
+- A portfolio optimizer. No mean-variance, Sharpe, risk parity, or covariance matrix
+- Auto-trading every headline without the wheel and Approve
 - Weeklies-only scalping as core (optional later param, not MVP focus)  

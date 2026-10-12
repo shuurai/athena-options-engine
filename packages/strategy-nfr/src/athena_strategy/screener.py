@@ -59,7 +59,7 @@ def sigma_for(conn, settings: SettingsPayload, symbol: str, today: date, rv20) -
     if measured is not None and measured > 0:
         return float(measured), "iv"
     if rv20 is not None and rv20 > 0:
-        multiple = rv_multiple(Decimal(rv20), settings.strategy)
+        multiple = rv_multiple(Decimal(rv20), settings)
         return float(multiple * Decimal(rv20) / _HUNDRED), "rv_mult"
     return None, "otm_band"
 
@@ -76,12 +76,15 @@ def build_line(
     avg_price: Decimal | None,
     earnings_in: int | None,
     rank_key: tuple = (),
+    max_spread_pct: int = 20,
 ) -> ScreenerLine | None:
-    """One priced row. A missing ask never becomes a line."""
+    """One priced row. A missing ask never becomes a line. A wide spread does not either."""
     if choice.ask is None or choice.ask <= 0 or spot <= 0:
         return None
     dte = (choice.expiry - today).days
     if dte <= 0 or choice.strike <= 0:
+        return None
+    if _spread_wide(choice, max_spread_pct):
         return None
     if choice.right == "P":
         otm = (spot - choice.strike) / spot * _HUNDRED
@@ -119,6 +122,19 @@ def build_line(
         liquidity=liquidity,
         rank_key=rank_key,
     )
+
+
+def _spread_wide(choice: Choice, max_spread_pct: int) -> bool:
+    """True when both sides exist and the spread is above the limit. Zero turns this off."""
+    if not max_spread_pct or choice.bid is None or choice.bid <= 0 or choice.ask is None:
+        return False
+    if choice.bid >= choice.ask:
+        return False
+    mid = (choice.ask + choice.bid) / Decimal(2)
+    if mid <= 0:
+        return False
+    spread = (choice.ask - choice.bid) / mid * _HUNDRED
+    return spread > Decimal(max_spread_pct)
 
 
 def _gap(line: ScreenerLine, target: Decimal, target_otm: Decimal) -> Decimal:
@@ -180,6 +196,7 @@ def rank_choices(
             multiplier=multiplier,
             avg_price=avg_price,
             earnings_in=earnings_in,
+            max_spread_pct=settings.risk.max_spread_pct,
         )
         if line is not None and line.otm_pct > 0:
             lines.append(line)
@@ -334,8 +351,8 @@ def stock_basis(conn, account_id: str, symbol: str) -> Decimal | None:
 
 def _width(settings: SettingsPayload, rv20: Decimal | None, dte: int) -> tuple[Decimal, str | None]:
     if rv20 is None or rv20 <= 0 or dte <= 0:
-        return Decimal(settings.strategy.otm_floor_pct), None
-    return target_otm_pct(rv20, settings.strategy, dte)
+        return Decimal(settings.risk.otm_floor_pct), None
+    return target_otm_pct(rv20, settings, dte)
 
 
 def candidates(

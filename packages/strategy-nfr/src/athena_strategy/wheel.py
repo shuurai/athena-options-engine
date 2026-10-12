@@ -30,6 +30,14 @@ from athena_strategy.tags import (
 )
 
 _OPENING_REASONS = ("dip_long", "dip_csp", "high_cc", "cover_gap", "signaled_strangle")
+_OPENING_RANK = {
+    "signaled_strangle": 0,
+    "high_cc": 1,
+    "cover_gap": 2,
+    "dip_long": 3,
+    "dip_csp": 3,
+}
+_FROZEN_ORDERS = {"queued", "submitted", "filled"}
 _ACTIONS = ("BUY", "OPEN_CSP", "OPEN_CC", "OPEN_STRANGLE", "CLOSE", "ROLL")
 
 # None means the action is legal. A string is the refusal code.
@@ -120,8 +128,8 @@ _TRANSITIONS = {
 
 
 def state_machine_enabled() -> bool:
-    flag = os.environ.get("ATHENA_STATE_MACHINE", "on").strip().lower()
-    return flag not in {"0", "off", "false", "no"}
+    """The wheel is the only opening path. The environment flag cannot turn it off."""
+    return True
 
 
 @dataclass(frozen=True)
@@ -165,6 +173,7 @@ class Opening:
     overruled: bool
     put_lines: tuple[ScreenerLine, ...] = ()
     call_lines: tuple[ScreenerLine, ...] = ()
+    replaces: str = ""
 
 
 def coverable_contracts(shares: Decimal) -> int:
@@ -447,15 +456,24 @@ def decide_opening(
         return replace(empty, outcome="dropped", summary="halted", quiet="halted")
     if name in {"NAKED_CALL", "MULTI_CONFLICT"}:
         return replace(empty, outcome="dropped", summary=name, quiet=name)
+    if _manage_pending(conn, account_id, symbol, _symbol_in_replay(conn, account_id, symbol)):
+        return replace(empty, quiet="manage_pending", summary="manage_pending")
     reading = read_indicators(conn, settings, symbol)
     if reading.rail_pos is None and reading.drawdown_pct is None:
         return replace(empty, outcome="quiet", summary="no_data", quiet="no_data")
-    if _opening_today(conn, account_id, symbol, _symbol_in_replay(conn, account_id, symbol)):
+    simulated = _symbol_in_replay(conn, account_id, symbol)
+    hold = _opening_hold(conn, account_id, symbol, simulated)
+    if hold is not None and hold[0] == "frozen":
         return replace(empty, quiet="opening_already_today", summary="opening_already_today")
     flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
     day = today or date.today()
     spot = last_tradeable_price(conn, symbol)
-    return _choose(conn, settings, account_id, symbol, state, reading, extra, flags, spot, day, narrator_strike)
+    chosen = _choose(conn, settings, account_id, symbol, state, reading, extra, flags, spot, day, narrator_strike)
+    if hold is None:
+        return chosen
+    if chosen.outcome != "drafted" or _opening_rank(chosen.reason) >= _opening_rank(hold[2]):
+        return replace(empty, quiet="opening_already_today", summary="opening_already_today")
+    return replace(chosen, replaces=hold[1])
 
 
 def _choose(
@@ -597,8 +615,6 @@ def _choose(
     chosen, overruled = _apply_strike(chosen, put_lines, call_lines, narrator_strike)
     if not chosen or not any(leg.tactic in {"OPEN_CSP", "OPEN_CC", "BUY"} for leg in chosen):
         return Opening(name, name, "", "narrator_overruled", "dropped", "narrator_overruled", (), True)
-    if overruled and not any(leg.tactic in {"OPEN_CSP", "OPEN_CC"} for leg in chosen):
-        return Opening(name, name, "", "narrator_overruled", "dropped", "narrator_overruled", (), True)
     after = project_alias(state, chosen)
     return Opening(
         name,
@@ -689,22 +705,97 @@ def _apply_strike(
     return tuple(rebuilt), False
 
 
-def _opening_today(conn, account_id: str, symbol: str, simulated: bool) -> bool:
+def _manage_pending(conn, account_id: str, symbol: str, simulated: bool) -> bool:
+    """A roll or close already waiting for this name. A new open waits for the next pass."""
     row = conn.execute(
         """
-        SELECT 1 FROM tickets
-        WHERE account_id = %s AND symbol = %s AND simulated = %s
-          AND reason = ANY(%s)
-          AND created_at::date = CURRENT_DATE
+        SELECT 1 FROM drafts AS d
+        JOIN tickets AS t ON t.id = d.ticket_id
+        WHERE d.account_id = %s AND d.symbol = %s AND d.status = 'pending'
+          AND t.simulated = %s
+          AND t.reason IN ('manage_roll', 'manage_close')
         LIMIT 1
         """,
-        (account_id, symbol.upper(), simulated, list(_OPENING_REASONS)),
+        (account_id, symbol.upper(), simulated),
     ).fetchone()
     return row is not None
 
 
+def _opening_rank(reason: str) -> int:
+    return _OPENING_RANK.get(reason, len(_OPENING_RANK))
+
+
+def _opening_hold(conn, account_id: str, symbol: str, simulated: bool) -> tuple[str, str, str] | None:
+    """A live opening from today. Frozen wins. A blocked ticket does not hold the day."""
+    rows = conn.execute(
+        """
+        SELECT t.id, t.reason, d.status, o.status
+        FROM tickets AS t
+        LEFT JOIN drafts AS d ON d.ticket_id = t.id
+        LEFT JOIN orders AS o ON o.draft_id = d.id
+        WHERE t.account_id = %s AND t.symbol = %s AND t.simulated = %s
+          AND t.reason = ANY(%s)
+          AND t.created_at::date = CURRENT_DATE
+          AND t.status <> 'blocked'
+        """,
+        (account_id, symbol.upper(), simulated, list(_OPENING_REASONS)),
+    ).fetchall()
+    pending: tuple[int, str, str] | None = None
+    for ticket_id, reason, draft_status, order_status in rows:
+        if draft_status == "approved" or order_status in _FROZEN_ORDERS:
+            return ("frozen", "", "")
+        if draft_status == "pending":
+            rank = _opening_rank(reason)
+            if pending is None or rank < pending[0]:
+                pending = (rank, ticket_id, reason)
+    if pending is None:
+        return None
+    return ("pending", pending[1], pending[2])
+
+
+def _replace_pending(conn, ticket_id: str, reason: str) -> None:
+    text = f"replaced by {reason}"
+    conn.execute(
+        """
+        UPDATE drafts SET status = 'blocked', reason = %s
+        WHERE ticket_id = %s AND status = 'pending'
+        """,
+        (text, ticket_id),
+    )
+    conn.execute("UPDATE tickets SET status = 'blocked' WHERE id = %s", (ticket_id,))
+    conn.commit()
+
+
 def _short_leg(opening: Opening) -> bool:
     return any(leg.tactic in {"OPEN_CSP", "OPEN_CC", "OPEN_STRANGLE"} for leg in opening.legs)
+
+
+def _share_legs(opening: Opening) -> tuple[LegPlan, ...]:
+    return tuple(leg for leg in opening.legs if leg.tactic == "BUY")
+
+
+def _short_floor(reading: Indicators, settings: SettingsPayload) -> tuple[str, str] | None:
+    """Why a new short is refused. A missing sample is not a low percentile."""
+    if reading.rv_pctl is None:
+        return "no_data", "rv_samples"
+    if reading.rv_pctl < settings.risk.min_rv_pctl_new_short:
+        return "dropped", "rv_percentile"
+    return None
+
+
+def _removed_put(conn, account_id: str, symbol: str, opening: Opening, outcome: str, summary: str) -> None:
+    """The put leaves the ticket. Its audit row is not a draft."""
+    from athena_strategy.agents import write_decision
+
+    write_decision(
+        conn, account_id, symbol, "wheel", outcome, summary,
+        {
+            "state": opening.alias,
+            "state_after": opening.alias,
+            "reason": opening.reason,
+            "items": [{"tactic": "OPEN_CSP", "outcome": outcome, "detail": summary, "draft_id": ""}],
+        },
+    )
 
 
 def execute_opening(
@@ -719,17 +810,27 @@ def execute_opening(
     """Write one opening ticket, or a trail when the day stays quiet."""
     opening = decide_opening(conn, settings, account_id, symbol, tags, narrator_strike)
     phase = _phase(conn, account_id, symbol)
+    if opening.outcome == "drafted" and opening.overruled and _share_legs(opening) and not _short_leg(opening):
+        _removed_put(conn, account_id, symbol, opening, "dropped", "narrator_overruled")
+        opening = replace(opening, overruled=False)
     if opening.outcome == "drafted" and opening.legs and _short_leg(opening):
         reading = read_indicators(conn, settings, symbol)
-        if reading.rv_pctl is None:
-            opening = replace(opening, outcome="no_data", summary="rv_samples", legs=())
-        elif reading.rv_pctl < settings.risk.min_rv_pctl_new_short:
-            opening = replace(opening, outcome="quiet", summary="rv_percentile", legs=())
+        floor = _short_floor(reading, settings)
+        if floor:
+            buys = _share_legs(opening)
+            if buys:
+                state = wheel_state(conn, account_id, symbol)
+                _removed_put(conn, account_id, symbol, opening, floor[0], floor[1])
+                opening = replace(opening, legs=buys, state_after=project_alias(state, buys))
+            else:
+                opening = replace(opening, outcome=floor[0], summary=floor[1], legs=())
     if dry_run_enabled() and opening.outcome == "drafted" and opening.legs:
         opening = replace(opening, outcome="observed", summary=f"would ticket: {opening.reason}", legs=())
     if opening.outcome != "drafted" or not opening.legs:
         _trail(conn, account_id, symbol, opening, sentence, [])
         return []
+    if opening.replaces:
+        _replace_pending(conn, opening.replaces, opening.reason)
     ticket_id = "ticket_" + secrets.token_hex(4)
     simulated = _symbol_in_replay(conn, account_id, symbol)
     _insert_ticket(

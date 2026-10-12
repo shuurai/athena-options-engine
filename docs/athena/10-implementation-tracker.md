@@ -3,7 +3,7 @@
 Checklist for building Athena. Architecture stays in [02-architecture.md](02-architecture.md). This file only tracks work.
 
 **Status values:** `not_started` · `in_progress` · `done` · `blocked` · `deferred`  
-**Last updated:** 2026-10-11
+**Last updated:** 2026-10-12
 
 ## Current product rules
 
@@ -14,6 +14,10 @@ These are the live rules for price, safety, audit, indicators, and the strike me
 - Audit outcomes are `drafted`, `quiet`, `no_data`, `invalid`, `observed`, and `dropped`. A bad model reply is retried once. Fewer than 63 daily bars is `no_data`.
 - `HIGH_IV` is not produced. The volatility tags are `RV_HIGH` and `RV_LOW`. `estimated_iv()` is empty. At-the-money mids are stored on `chain_marks` and not read.
 - The strike menu is ranked by a delta target. The fetch width is `chain_band_pct` (25). The old fixed distance cut is not read. The RV multiple is an assumption, not implied volatility.
+- The wheel is the only opening decision. Reasons are `signaled_strangle`, `high_cc`, `cover_gap`, `dip_long`, and `dip_csp`. `NAKED_CALL` and `MULTI_CONFLICT` open nothing. `symbol_phases.tactic` stays `HOLD`.
+- After the drafts, the cycle budget walks closes and rolls, then `dip_long`, then `high_cc`, then the rest. A band is kept or blocked together. Caps are bucket 35, assignment 40, cash after assignment 10.
+- `/book` plots `RV20` against premium yield. It does not draw a market line. Positions are grouped by intent.
+- Athena windows are HK cash 09:30–12:00 and 13:00–16:00, plus US regular 21:30–04:00 HKT. Mobile is 19:00–21:30. Friday's US session stays open until Saturday 04:00. Monday before 04:00 stays closed. Lunch stays idle. Drafts use the Athena window. Observe default is weekdays from 07:00.
 
 A row is `in_progress` before the code changes. The matching check in the test tracker starts as `pending`.  
 **Next:** Tailscale and the Vercel host stay deferred.
@@ -30,7 +34,7 @@ A row is `in_progress` before the code changes. The matching check in the test t
 - Redis waits until approve tokens need it. Phase 1 does not use it.
 - Console web: local operator pages first. The one-time phone page is already live. Vercel waits on Tailscale.
 - Bots later: Python long-poll on the box. Feishu after Telegram.
-- Live quotes: iTick. IB: history, positions, orders, inside Athena slots.
+- Live quotes: the newest IB delayed print. IB also supplies daily bars, positions, and orders, inside Athena slots. iTick is outside the daily window.
 - Backup later: local files, then MinIO via the S3 env vars.
 - Settings: versioned Postgres rows. Env vars are secrets and bootstrap only.
 - IB account: `ATHENA_IB_PAPER_ACCOUNT_ID` in paper mode, `ATHENA_IB_ACCOUNT_IDS` in live mode. fanit sync is later.
@@ -39,7 +43,7 @@ A row is `in_progress` before the code changes. The matching check in the test t
 
 | Item | Status | Needed by |
 |------|--------|-----------|
-| Weekday Athena vs Mobile slot hours | `done` | Monday–Friday HKT: 09:30 and 13:00 are Athena, 20:00 is Mobile, 12:30 lunch is idle. Saturday and Sunday stay idle. |
+| Weekday Athena vs Mobile slot hours | `done` | HK cash 09:30–12:00 and 13:00–16:00, US regular 21:30–04:00 HKT, Mobile 19:00–21:30. Lunch is idle. Saturday 02:00 is still Friday's US session. Monday 02:00 is idle. |
 | Telegram bot token and allowlist | `done` | `@athena_hk_bot` sends the draft. Allowlisted Approve and Reject update the paper draft. |
 | Tailscale on the Windows box | `not_started` | Phase 2, before Vercel calls the box |
 | Feishu app credentials | `deferred` | After Telegram works |

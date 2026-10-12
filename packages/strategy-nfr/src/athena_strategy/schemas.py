@@ -11,6 +11,15 @@ from athena_strategy.tags import CHANNEL_RISING, names_owned_by
 from athena_strategy.types import NEWS_TYPE_CODES
 
 LOCATION_TAGS = names_owned_by("location")
+# The model copies the range field names. These are the same location tags.
+_LOCATION_ALIAS = {
+    "RANGE_HIGH": "HIGH_RANGE",
+    "RANGE_LOW": "LOW_RANGE",
+    "252_HIGH": "HIGH_52W",
+    "252_LOW": "LOW_52W",
+    "HIGH_252": "HIGH_52W",
+    "LOW_252": "LOW_52W",
+}
 _TACTICS = frozenset({"BUY", "CSP", "CC", "STRANGLE"})
 _PRICE_KEYS = frozenset(
     {
@@ -63,8 +72,7 @@ def _object(text: str) -> dict | None:
 
 def _matches(agent: str, payload: dict) -> bool:
     if agent == "Location":
-        tags = payload.get("tags")
-        return isinstance(tags, list) and all(isinstance(tag, str) and tag in LOCATION_TAGS for tag in tags)
+        return _location_tags(payload)
     if agent == "News":
         return _news(payload)
     if agent in {"CSP", "Call"}:
@@ -78,6 +86,25 @@ def _matches(agent: str, payload: dict) -> bool:
     if agent == "Narrator":
         return _narrator(payload)
     return False
+
+
+def _location_tags(payload: dict) -> bool:
+    """Keep legal location tags. A renamed range tag maps to the registry name."""
+    tags = payload.get("tags")
+    if not isinstance(tags, list):
+        return False
+    kept: list[str] = []
+    for tag in tags:
+        if not isinstance(tag, str):
+            return False
+        name = _LOCATION_ALIAS.get(tag.strip(), tag.strip())
+        if name not in LOCATION_TAGS or name in kept:
+            continue
+        kept.append(name)
+    if tags and not kept:
+        return False
+    payload["tags"] = kept
+    return True
 
 
 def _narrator(payload: dict) -> bool:

@@ -412,6 +412,7 @@ def _run_simulate(task_id: str, database_url: str, account: str, run_id: str, sy
 
 
 def _run_liquidate(task_id: str, database_url: str, account: str) -> None:
+    """The Liquidate modal is the consent. Send the closes. Do not wait for Approve."""
     import asyncio
 
     from athena_orchestrator.sim import delete_simulated_positions, real_positions

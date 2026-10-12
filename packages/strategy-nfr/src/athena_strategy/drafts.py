@@ -9,7 +9,7 @@ from decimal import Decimal
 import psycopg
 
 from athena_exec.halt import active_reason, note_reject_streak
-from athena_risk import allowed_open, block_reason, block_ticket_reason
+from athena_risk import allowed_open, block_reason, block_ticket_reason, book_amount
 from athena_settings import load_active
 from athena_settings.model import SettingsPayload
 
@@ -454,7 +454,10 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
         (account_id,),
     ).fetchone()
     mark = conn.execute(
-        "SELECT cash, margin FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
+        """
+        SELECT cash, margin, base_currency, fx_rates
+        FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
+        """,
         (account_id,),
     ).fetchone()
     earnings = conn.execute(
@@ -478,17 +481,38 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
         offsets = [(row[0] - today).days for row in earnings]
         nearest = min(offsets, key=lambda days: (abs(days), days))
     dte = None if expiry is None else (expiry - today).days
+    symbol_value, fx_reason = _symbol_value_in_book(conn, account_id, symbol, mark)
     found.update(
         {
             "nav": None if nav is None else nav[0],
-            "symbol_value": _symbol_value(conn, account_id, symbol),
+            "symbol_value": symbol_value,
             "cash": None if mark is None else mark[0],
             "margin": None if mark is None else mark[1],
             "dte": dte,
             "earnings_in_days": nearest,
         }
     )
+    if fx_reason:
+        found["fx_reason"] = fx_reason
     return found
+
+
+def _symbol_value_in_book(conn, account_id: str, symbol: str, mark) -> tuple[Decimal | None, str | None]:
+    """Existing symbol notional in the book currency."""
+    raw = _symbol_value(conn, account_id, symbol)
+    if raw is None:
+        return None, None
+    value = Decimal(raw)
+    base = "" if mark is None or not mark[2] else str(mark[2])
+    if not base:
+        return value, None
+    from athena_exec.broker import stock_venue
+
+    source = stock_venue(symbol)[1]
+    rates = {}
+    if mark[3]:
+        rates = {str(key): Decimal(str(item)) for key, item in mark[3].items()}
+    return book_amount(value, source, base, rates)
 
 
 def _symbol_value(conn, account_id: str, symbol: str):
@@ -534,13 +558,16 @@ def open_quantity(
     symbol: str,
     multiplier: str,
 ) -> int:
-    """Contracts for a new open. One when the money cap is off or the price is missing."""
+    """Contracts for a new open. One when the money cap is off.
+
+    A missing price is not one contract. The position cap cannot be checked.
+    """
     limits = settings.risk
     if limits.max_position_per_symbol <= 0:
         return 1
     price = last_tradeable_price(conn, symbol)
-    if price is None:
-        return 1
+    if price is None or price <= 0:
+        return 0
     mult = Decimal(multiplier or "100")
     if mult <= 0:
         mult = Decimal(100)
@@ -600,7 +627,9 @@ def _exposure(conn: psycopg.Connection, account_id: str, symbol: str, price: Dec
 
 def _position_inputs(conn, account_id: str, symbol: str, multiplier: str) -> dict:
     price = last_tradeable_price(conn, symbol)
-    if price is None:
+    if price is None or price <= 0:
+        if load_active(conn, account_id).risk.max_position_per_symbol > 0:
+            return {"mark_reason": "missing mark"}
         return {}
     mult = Decimal(multiplier or "100")
     if mult <= 0:
@@ -719,15 +748,18 @@ def stage_draft(
     )
     if blocked is None:
         extra = _position_inputs(conn, account_id, symbol, multiplier) if opening else {}
-        blocked = block_reason(
-            contracts,
-            settings.risk,
-            opening=opening,
-            needs_cash=tactic in {"OPEN_CSP", "BUY"},
-            enforce_contract_cap=enforce_contract_cap,
-            **_guard_inputs(conn, account_id, symbol, expiry, opening),
-            **extra,
-        )
+        guard = _guard_inputs(conn, account_id, symbol, expiry, opening)
+        blocked = extra.pop("mark_reason", None) or guard.pop("fx_reason", None)
+        if blocked is None:
+            blocked = block_reason(
+                contracts,
+                settings.risk,
+                opening=opening,
+                needs_cash=tactic in {"OPEN_CSP", "BUY"},
+                enforce_contract_cap=enforce_contract_cap,
+                **guard,
+                **extra,
+            )
     status = "blocked" if blocked else "pending"
     return _insert_draft(
         conn, symbol, tactic, contracts, status, blocked or reason, phase, account_id,
@@ -804,7 +836,9 @@ def apply_amend(conn: psycopg.Connection, draft_id: str, fields: dict) -> None:
         new_contracts = int(fields["contracts"])
         opening = tactic in {"OPEN_STRANGLE", "OPEN_CSP", "OPEN_CC", "BUY"}
         extra = _position_inputs(conn, account_id, symbol, multiplier or "100") if opening else {}
-        reason = block_reason(new_contracts, settings.risk, opening=opening, **extra)
+        reason = extra.pop("mark_reason", None)
+        if reason is None:
+            reason = block_reason(new_contracts, settings.risk, opening=opening, **extra)
         if reason:
             raise AmendError(reason)
         updates["contracts"] = new_contracts
@@ -1098,7 +1132,8 @@ def _queue_order(
     elif limit_price is None or limit_price <= 0:
         status = "blocked"
         block_reason = "draft has no limit price"
-    _insert_order(conn, draft_id, account_id, symbol, tactic, "BUY", contracts, limit_price, status, block_reason, None, None, "", "", "", multiplier or "100")
+    action = order_action if order_action in {"BUY", "SELL"} else "BUY"
+    _insert_order(conn, draft_id, account_id, symbol, tactic, action, contracts, limit_price, status, block_reason, None, None, "", "", "", multiplier or "100")
 
 
 def _insert_order(

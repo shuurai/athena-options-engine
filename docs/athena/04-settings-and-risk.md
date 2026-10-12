@@ -48,6 +48,9 @@ Everything parametric: Settings.
 | `min_rv_pctl_new_short` | 40–50 | A new short needs this percentile of the symbol's own `RV20`. Fewer than 20 samples does not pass. |
 | `margin_rate` | 20 | Percent of notional used when a new short’s margin is estimated |
 | `strict_conflict` | off | On means any existing short blocks every new open. Off allows a short put and a covered call on the same name |
+| `max_bucket_pct_nav` | 35 | One classifier bucket, as a percent of NAV |
+| `max_assign_pct_nav` | 40 | Assignment exposure cap. The proxy uses `assign_delta` (0.30) |
+| `min_cash_after_assign_pct` | 10 | Cash that must remain after that assignment |
 | `min_dte_new` | 7 | Avoid gamma junk |
 | `earnings_blackout_days` | 7 | No new around earnings (unless NFR exception flag) |
 | `reject_streak_halt` | 3 | Pause after IB rejects |
@@ -60,9 +63,12 @@ Named profiles fill those limits. They do not change privilege.
 | standard | 20% | 30% | 3 | 50 | 7 |
 | income | 25% | 25% | 2 | 45 | 14 |
 | aggressive | 35% | 15% | 4 | 30 | 7 |
+| paper | 25% | 20% | 5 | 40 | 21 |
 | test | 80% | 5% | 12 | 0 | 1 |
 
-**test** is for the paper account. It is the same Approve path and the same Athena slot. It does not send an order while the slot is idle. It also drops the sample minimum to 1, so a rank can exist before 20 marks. Switching back to standard restores the standard knobs and the sample minimum of 20. With no calendar event, names stay P1 HOLD.
+The selectable cards are defensive, standard, income, aggressive, and paper. **paper** is the acceptance book: Approve still applies, the short floor is 40, and the position cap is 20,000 in the ticker currency. **test** can still be stored on an old row. It is not a card. A card fills the ten exposure fields. Bucket, assignment, and `strict_conflict` are not part of that identity. Any other mix is `custom`.
+
+**test**, when a row still has it, is the same Approve path and the same Athena slot. It does not send an order while the slot is idle. It also drops the sample minimum to 1, so a rank can exist before 20 marks. Switching back to standard restores the standard knobs and the sample minimum of 20.
 
 Risk Guard runs on every draft, independent of privilege:
 
@@ -85,8 +91,10 @@ Risk Guard runs on every draft, independent of privilege:
 | `csp_delta_target` / `csp_delta_lo` / `csp_delta_hi` | 0.25 / 0.10 / 0.40 |
 | `cc_delta_target` | 0.30. The call strike must also clear the share cost |
 | `strangle_delta_target` | 0.28 |
-| `otm_floor_pct` / `otm_ceiling_pct` | 3 / 20. The distance target is clamped here, and the clamp is audited |
-| `iv_rv_multiple_hi` / `_mid` / `_lo` | 1.05 / 1.35 / 1.80 by `RV20` band. An assumption for picking a strike. Not implied volatility |
+| `otm_floor_pct` / `otm_ceiling_pct` | Risk limits. 3 / 40 on a new book. The distance target is clamped here, and the clamp is audited. A ceiling of 0 removes the cap so the width follows realized vol. A stored row keeps the ceiling it already saved |
+| `rv_band_high_pct` / `rv_band_mid_pct` | Risk limits. 45 / 25. These pick which assumed multiple sizes the wing |
+| `wing_z` | Risk limit. 0.50. Scales the distance. An assumption, not a measurement |
+| `iv_rv_multiple_hi` / `_mid` / `_lo` | 1.05 / 1.35 / 1.80 by the RV band. An assumption for picking a strike. Not implied volatility |
 | `dte_min` / `dte_target` / `dte_max` | 21 / 35 / 60 |
 | `profit_take_pct` | 50. Percent of premium that drafts a close |
 | `roll_dte` | 21 |
@@ -95,8 +103,13 @@ Risk Guard runs on every draft, independent of privilege:
 | `drawdown_band_high_pct` / `drawdown_band_low_pct` | 15 / 5 |
 | `dip_deep_pos` / `dip_reclaim_pos` | 0.35 / 0.45 inside `dip_window_sessions` (5) |
 | `regime_index` | `SPY`, over `regime_lookback` sessions (63) |
+| `cc_rail_pos` | 0.80. The close must sit at least here before a covered call |
+| `observe_slots` | `always`. Weekdays from 07:00 HKT through midnight. `athena` and `athena+mobile` follow the slot clock, so the Saturday morning US tail can be watched |
+| `draft_slots` | `athena`. A ticket is written only inside an Athena window |
 
-The old name `strangle_otm_pct` is not read. There is no separate strike-buffer percent.
+The old name `strangle_otm_pct` is not read. The old name `min_iv_rank_new_short` is not shown. The live field is `min_rv_pctl_new_short`.
+
+The Volatility reading shows two badges, not inputs. `premium_ratio` is the mark written today: planned put credit plus call credit, divided by the stock price. `chain_bs` is the future chain method. It cannot be selected, and nothing reads `chain_marks` yet.
 
 ### 3. Preference / UX
 
@@ -112,8 +125,8 @@ The old name `strangle_otm_pct` is not read. There is no separate strike-buffer 
 
 | Key | Role |
 |-----|------|
-| `athena_slots` | Cron/windows when Athena may hold API connection |
-| `mobile_slots` | Windows reserved for Mobile IB App (Athena disconnects / idle) |
+| `athena_slots` | Default `HKT 09:30-12:00, 13:00-16:00, 21:30-04:00`. HK cash, then the US regular session in Hong Kong time |
+| `mobile_slots` | Default `HKT 19:00-21:30`. Athena disconnects |
 | `reconnect_backoff_sec` | After Mobile disconnect |
 | `client_id` | Stable Athena client id |
 | `account_ids` | List; `active_account_id` for MVP |
@@ -124,8 +137,9 @@ See [06-data-and-ib.md](06-data-and-ib.md).
 
 | Key | Role |
 |-----|------|
-| `watchlist` | Symbols + tags overrides |
+| `watchlist` | Symbols Athena may draft |
 | `blocked_symbols` | Hard deny |
+| `tactic_flags` | Per name: `csp`, `cc`, `strangle`, `intent` (`income` / `both` / `accumulate`), `long`, and optional `may_buy` |
 | `allow_csp_adr` | Default false (delisting caution) |
 
 ### 6. Backup / ops
@@ -136,6 +150,21 @@ See [06-data-and-ib.md](06-data-and-ib.md).
 | `s3_sync_enabled` | bool |
 | `s3_prefix` | athena/prod/… |
 | `retain_local_days` | Retention |
+
+## Switches
+
+These are environment flags, not settings versions. Default on, except dry run.
+
+| Flag | Default | Off means |
+|------|---------|-----------|
+| `ATHENA_STATE_MACHINE` | always on | The flag does not restore the seven-agent pass |
+| `ATHENA_SCREENER` | on | The strike menu is the old free-text lines |
+| `ATHENA_INDICATORS` | on | The pass does not read the indicator numbers |
+| `ATHENA_MAY_BUY` | on | An explicit `may_buy` is ignored. A buy needs Long on and an intent other than Income |
+| `ATHENA_SLOT_SPLIT` | on | There is no observe-only pass. A signaled ticket is written only while the clock is in an Athena window |
+| `ATHENA_PORTFOLIO_BUDGET` | on | The cycle walk does not block tickets |
+| `ATHENA_PANEL` | on | `/book` says charts are off |
+| `ATHENA_DRY_RUN` | off | On writes the trail as `observed` and does not leave a pending ticket |
 
 ## Validation rules
 

@@ -8,7 +8,7 @@ Goal horizon: refine this one strategy so a dedicated options income sleeve can 
 
 ## Goals
 
-1. **One strategy, deep refinement** — News Front-Running Cycle; tactics are CSP / CC / Strangle / Hold / Roll / Close.
+1. **One strategy, deep refinement** — News Front-Running Cycle. The wheel writes CSP, CC, share, roll, and close tickets. Phases stay as context.
 2. **Automate the boring, gate the dangerous** — Sync, monitoring, draft orders, rolls candidates, risk checks automated; execution gated by Settings privilege (default: approve every order action).
 3. **Remove impulse** — No silent live orders at default privilege. Comments and improvisation happen via bots / control pages / settings versions, not ad-hoc IB clicks mid-panic.
 4. **Remote operable** — Feishu + Telegram for status and Approve/Reject; one-time web views for richer selections; ops agent can restart IB Gateway / Athena services.
@@ -25,6 +25,8 @@ Goal horizon: refine this one strategy so a dedicated options income sleeve can 
 - Hard dependency on Nautilus Trader for MVP
 - Full WeChat / Rednote / TikTok scraping on day one (hooks only; ToS-safe sources first)
 - Extra IB market data subscriptions until the sleeve is profitable enough to justify them
+- Implied-vol tags. Chain mids may be stored. They are not a reason to open
+- A portfolio optimizer. Caps and the read-only book are the combination view
 
 ## Human-in-the-loop philosophy
 
@@ -33,7 +35,7 @@ Athena proposes; you dispose — until Settings explicitly raise privilege.
 | Layer | Machine | Human |
 |-------|---------|-------|
 | Scan / tags / phases | Auto every ~5 minutes | Review summaries |
-| Draft actions | Auto | Approve / Reject / Amend |
+| Opening ticket | Code, from the book and the numbers | Approve / Reject / Amend. Narrator may only rephrase or pick a listed strike |
 | Risk limits | Enforce always | Tune via Settings |
 | Privilege level | Applies rules | Change only via protected Settings flow |
 | Ad-hoc Mobile IB trades | Detected on next sync | Expected in reserved slots; Athena reconciles |
@@ -83,5 +85,5 @@ Athena target: Athena drafts from news + tags + positions → you Approve on pho
 ## Risks (product)
 
 - Single IB API session contention with Mobile App — mitigated by sync slots and reconnect policy
-- News false positives driving bad strangles — mitigated by HITL + IV/liquidity filters
+- News false positives driving bad strangles — mitigated by the wheel, realized-vol tags, and Approve
 - Over-automation temptation — privilege defaults stay strict; Settings changes audited

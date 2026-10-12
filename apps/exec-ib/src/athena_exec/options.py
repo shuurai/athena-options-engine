@@ -62,36 +62,59 @@ def discovery_params(strategy) -> tuple[int, int]:
     return 8, int(strategy.chain_band_pct)
 
 
-def rv_multiple(rv20_pct: Decimal, strategy) -> Decimal:
+def _wing(source):
+    """Floor, ceiling, band edges, width factor, and the assumed multiples.
+
+    A settings payload carries the wing on risk. A strategy object still answers
+    the older callers. The multiples stay an assumption, not a measured vol.
+    """
+    risk = getattr(source, "risk", None)
+    strategy = getattr(source, "strategy", source)
+    holder = risk if risk is not None else source
+    floor = getattr(holder, "otm_floor_pct", getattr(strategy, "otm_floor_pct", 3))
+    ceiling = getattr(holder, "otm_ceiling_pct", getattr(strategy, "otm_ceiling_pct", 20))
+    high = getattr(holder, "rv_band_high_pct", 45)
+    mid = getattr(holder, "rv_band_mid_pct", 25)
+    factor = getattr(holder, "wing_z", 0.5)
+    multiples = strategy if hasattr(strategy, "iv_rv_multiple_hi") else holder
+    return floor, ceiling, high, mid, factor, multiples
+
+
+def rv_multiple(rv20_pct: Decimal, source) -> Decimal:
     """Assumed premium over realized vol. Not a measured implied vol."""
-    if rv20_pct >= 45:
-        return Decimal(str(strategy.iv_rv_multiple_hi))
-    if rv20_pct >= 25:
-        return Decimal(str(strategy.iv_rv_multiple_mid))
-    return Decimal(str(strategy.iv_rv_multiple_lo))
+    _floor, _ceiling, high, mid, _factor, multiples = _wing(source)
+    if rv20_pct >= high:
+        return Decimal(str(multiples.iv_rv_multiple_hi))
+    if rv20_pct >= mid:
+        return Decimal(str(multiples.iv_rv_multiple_mid))
+    return Decimal(str(multiples.iv_rv_multiple_lo))
 
 
-def target_otm_pct(rv20_pct: Decimal, strategy, dte: int) -> tuple[Decimal, str | None]:
-    """Percent out of the money for this name and expiry. The note is floor or ceiling."""
-    sigma = rv_multiple(rv20_pct, strategy) * (rv20_pct / Decimal(100))
+def target_otm_pct(rv20_pct: Decimal, source, dte: int) -> tuple[Decimal, str | None]:
+    """Percent out of the money for this name and expiry. The note is floor or ceiling.
+
+    A ceiling of zero leaves the width on realized vol.
+    """
+    floor, ceiling, _high, _mid, factor, _multiples = _wing(source)
+    sigma = rv_multiple(rv20_pct, source) * (rv20_pct / Decimal(100))
     years = Decimal(dte) / Decimal(365)
-    raw = Decimal("0.5") * sigma * years.sqrt() * Decimal(100)
-    floor = Decimal(strategy.otm_floor_pct)
-    ceiling = Decimal(strategy.otm_ceiling_pct)
-    if raw < floor:
-        return floor, "floor"
-    if raw > ceiling:
-        return ceiling, "ceiling"
+    raw = Decimal(str(factor)) * sigma * years.sqrt() * Decimal(100)
+    floor_pct = Decimal(floor)
+    if raw < floor_pct:
+        return floor_pct, "floor"
+    if ceiling and raw > Decimal(ceiling):
+        return Decimal(ceiling), "ceiling"
     return raw, None
 
 
-def plan_otm_pct(strategy, rv20_pct: Decimal | None, dte: int) -> Decimal:
+def plan_otm_pct(source, rv20_pct: Decimal | None, dte: int) -> Decimal:
     """Distance for the single fallback pair when a chain has no asks."""
     if not wide_band():
         return Decimal(10)
+    floor, _ceiling, _high, _mid, _factor, _multiples = _wing(source)
     if rv20_pct is None or rv20_pct <= 0 or dte <= 0:
-        return Decimal(strategy.otm_floor_pct)
-    width, _note = target_otm_pct(rv20_pct, strategy, dte)
+        return Decimal(floor)
+    width, _note = target_otm_pct(rv20_pct, source, dte)
     return width
 
 

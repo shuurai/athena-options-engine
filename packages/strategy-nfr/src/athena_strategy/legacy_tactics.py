@@ -1,4 +1,4 @@
-"""Previous opening rules. Used only when ATHENA_STATE_MACHINE is off."""
+"""Previous opening rules. The cycle does not call this module."""
 
 from athena_strategy.tags import OVERBOUGHT, OVERSOLD, SUPPORT_TOUCH
 

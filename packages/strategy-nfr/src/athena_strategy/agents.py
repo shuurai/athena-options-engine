@@ -112,11 +112,7 @@ def _observe_symbol(conn, settings: SettingsPayload, account_id: str, symbol: st
 
 
 def run_signaled(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> list[str]:
-    """One signaled-entry pass. The wheel path is three agents. Off keeps the seven."""
-    from athena_strategy.wheel import state_machine_enabled
-
-    if not state_machine_enabled():
-        return run_legacy_signaled(conn, settings, account_id)
+    """One signaled-entry pass. Location, News, then the wheel ticket."""
     return _run_wheel_pass(conn, settings, account_id)
 
 

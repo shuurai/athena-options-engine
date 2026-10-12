@@ -297,6 +297,33 @@ class IbBroker:
         )
         return [detail.contract.strike for detail in details]
 
+    def option_quote(
+        self,
+        symbol: str,
+        expiry: date,
+        strike: Decimal,
+        right: str,
+        trading_class: str,
+        exchange: str,
+        multiplier: str = "100",
+    ) -> tuple[Decimal | None, Decimal | None]:
+        """Delayed ask and bid from one ticker. The bid is the positive bid only."""
+        if self._ib is None:
+            return None, None
+        currency = "HKD" if symbol.isdigit() else "USD"
+        contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
+        if not self._ib.qualifyContracts(contract):
+            return None, None
+        self._ib.reqMarketDataType(3)
+        ticker = self._ib.reqMktData(contract, "", False, False)
+        self._ib.sleep(2)
+        ask = _ask(ticker)
+        bid = _positive(ticker.bid)
+        self._ib.cancelMktData(contract)
+        if ask is None and currency == "USD":
+            ask = _cboe_close(self._ib, symbol, expiry, strike, right, trading_class, multiplier)
+        return ask, bid
+
     def option_ask(
         self,
         symbol: str,
@@ -308,22 +335,10 @@ class IbBroker:
         multiplier: str = "100",
     ) -> Decimal | None:
         """Delayed ask. A sell limit at the ask rests instead of crossing the bid."""
-        if self._ib is None:
-            return None
-        currency = "HKD" if symbol.isdigit() else "USD"
-        contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
-        if not self._ib.qualifyContracts(contract):
-            return None
-        self._ib.reqMarketDataType(3)
-        ticker = self._ib.reqMktData(contract, "", False, False)
-        self._ib.sleep(2)
-        price = _ask(ticker)
-        self._ib.cancelMktData(contract)
-        if price is not None:
-            return price
-        if currency != "USD":
-            return None
-        return _cboe_close(self._ib, symbol, expiry, strike, right, trading_class, multiplier)
+        ask, _bid = self.option_quote(
+            symbol, expiry, strike, right, trading_class, exchange, multiplier,
+        )
+        return ask
 
     def qualifies_stock(self, symbol: str) -> bool:
         """True when IB accepts this stock symbol on its venue."""

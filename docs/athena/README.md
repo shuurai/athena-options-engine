@@ -1,11 +1,11 @@
 # Athena Options Engine — Proposal Index
 
 **Status:** Paper and live use the same order path. `paper` trades `ATHENA_IB_PAPER_ACCOUNT_ID`. `live` trades each id in `ATHENA_IB_ACCOUNT_IDS`. Each account keeps its own book.  
-**Last updated:** 2026-10-11  
+**Last updated:** 2026-10-12  
 **Supersedes for implementation intent:** [../athena_options_engine_prd.md](../athena_options_engine_prd.md) (historical input)  
 **Next:** One small approved live order once Gateway and `ATHENA_IB_ACCOUNT_ID` are set. Task list: [10-implementation-tracker.md](10-implementation-tracker.md). Roadmap: [09-roadmap.md](09-roadmap.md).
 
-Athena is a **Windows-first**, human-in-the-loop options engine that refines **one** strategy for the next 5–10 years: the **News Front-Running Cycle**. CSP / CC / Strangle / Hold / Roll / Close are tactics inside that strategy, not separate products.
+Athena is a **Windows-first**, human-in-the-loop options engine that refines **one** strategy for the next 5–10 years: the **News Front-Running Cycle**. The wheel writes the tickets. CSP, CC, a share buy, Hold, Roll, and Close are tactics inside that strategy, not separate products.
 
 Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local backup first; S3-compatible blob sync as secondary.
 
@@ -15,8 +15,13 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 
 | Topic | Decision |
 |-------|----------|
-| Strategy | News Front-Running Cycle only |
-| Tactics | CSP, CC, Strangle, Hold, Roll, Close |
+| Strategy | News Front-Running Cycle only. The wheel writes the ticket. Phases do not |
+| Tactics | CSP, CC, share buy, Hold, Roll, Close. A two-leg short is a ticket, not a stored `OPEN_STRANGLE` |
+| Openings | `signaled_strangle`, `high_cc`, `cover_gap`, `dip_long`, `dip_csp`. Code decides. Narrator cannot invent a strike |
+| Volatility | `RV_HIGH` / `RV_LOW` from `RV20`. No implied-vol tag. `chain_marks` is stored and not read |
+| Strike menu | Delta target from `RV20` times an assumed multiple. Fetch width is `chain_band_pct` (25) |
+| Combination | Cycle budget after the drafts: closes, `dip_long`, `high_cc`, then the rest. `/book` is read only |
+| Slots | HK cash 09:30–12:00 and 13:00–16:00, US regular 21:30–04:00 HKT, Mobile 19:00–21:30. Friday's US session runs until Saturday 04:00 |
 | Default human gate | Every open / roll / close needs Approve |
 | Privilege | Configurable in Settings (`all_orders` default → can raise/lower) |
 | Settings | First-class versioned store (risk, prefs, strategy params, IB slots, notify) |
@@ -69,7 +74,7 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 | 1 Monorepo skeleton (orchestrator, settings, store) | **Done** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
 | 2 Paper HITL + slot clock + one-time Approve | **Done** — see [10-implementation-tracker.md](10-implementation-tracker.md). Daily bars are IB. Seed bars are not written. |
 | 3 Live approve-gated exec | **Gate done.** No live order until Gateway and the account id are set. |
-| 4 NFR + news depth | **In progress** — see [10-implementation-tracker.md](10-implementation-tracker.md) |
+| 4 NFR + news depth | **Done in code** — wheel, screener, budget, and the risk page. Implied-vol consumption is not built. See [03-strategy-news-frontrun.md](03-strategy-news-frontrun.md) |
 | Console web | **Local pages are up** on port 8788. Vercel waits on Tailscale. See [10-implementation-tracker.md](10-implementation-tracker.md). |
 
 ---

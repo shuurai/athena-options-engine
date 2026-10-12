@@ -76,10 +76,10 @@ sequenceDiagram
 
 ### Draft card contents
 
-- Symbol, tactic, phase/tags, strength/confidence  
-- Proposed strike(s), expiry, qty, limit premium  
-- Risk check summary (pass/fail reasons)  
-- Buttons: Approve / Reject / Open details  
+- Symbol, tactic, phase/tags, and the wheel reason (`dip_long`, `dip_csp`, `high_cc`, `cover_gap`, `signaled_strangle`, `manage_roll`, `manage_close`)
+- Proposed strike(s), expiry, qty, limit premium. A strike amend must be a row already on the menu
+- Risk check summary, including a cycle-budget block
+- Buttons: Approve / Reject / Open details
 - Link: one-time control page (amend fields then confirm)  
 
 ## Decision trail
@@ -111,7 +111,7 @@ Allowed amend fields (Settings-configurable): qty, limit price, strike choice fr
 | `/reject <id> [reason]` | Reject |
 | `/halt` | Pause all trading |
 | `/resume` | Resume (if privilege allows) |
-| `/slots` | Show IB Athena vs Mobile windows |
+| `/slots` | HK cash windows, the US session through Saturday 04:00, and Mobile. Lunch stays idle |
 | `/settings get <domain>` | Read settings |
 | `/settings propose …` | Propose change → confirm flow |
 | `/ops gateway restart` | Ops agent restart IB Gateway |

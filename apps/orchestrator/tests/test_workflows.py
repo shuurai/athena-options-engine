@@ -16,7 +16,7 @@ from athena_exec.halt import halt as book_halt
 from athena_exec.session import _submit_queued
 from athena_settings.model import TacticFlags, standard_payload
 from athena_store.migrate import apply_migrations, connect
-from athena_strategy.agents import run_signaled
+from athena_strategy.agents import run_legacy_signaled
 from athena_strategy.drafts import decide
 from athena_strategy.iv import estimated_iv, record_iv_marks, tags_from_iv
 from athena_strategy.manage import manage_book, management_tactic
@@ -45,8 +45,6 @@ def setUpModule() -> None:
 
 class WorkflowTest(unittest.TestCase):
     def setUp(self) -> None:
-        self._machine = os.environ.get("ATHENA_STATE_MACHINE")
-        os.environ["ATHENA_STATE_MACHINE"] = "off"
         self.conn = connect(_url())
         apply_migrations(self.conn)
         self.paper = patch("athena_orchestrator.sim.trading_mode", return_value="paper")
@@ -58,10 +56,6 @@ class WorkflowTest(unittest.TestCase):
         self._wipe()
         self.paper.stop()
         self.conn.close()
-        if self._machine is None:
-            os.environ.pop("ATHENA_STATE_MACHINE", None)
-        else:
-            os.environ["ATHENA_STATE_MACHINE"] = self._machine
 
     def _wipe(self) -> None:
         drafts = "SELECT id FROM drafts WHERE account_id = %s"
@@ -340,6 +334,142 @@ class WorkflowTest(unittest.TestCase):
         status = self.conn.execute("SELECT status FROM orders WHERE draft_id = %s", ("zz_halt",)).fetchone()
         self.assertEqual(status[0], "queued")
 
+    def test_approve_queues_the_stock_or_option_side(self) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id,
+                instrument, limit_price, order_action, simulated
+            )
+            VALUES
+                ('zz_sell', %s, 'CLOSE', 10, 'pending', 'close', 'MANAGE', %s, 'STK', 12.5, 'SELL', false),
+                ('zz_buy', %s, 'BUY', 1, 'pending', 'open', 'P1', %s, 'STK', 12.5, '', false)
+            """,
+            (SYMBOL, ACCOUNT, SYMBOL, ACCOUNT),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id,
+                instrument, expiry, put_strike, put_limit, multiplier, simulated
+            )
+            VALUES (
+                'zz_put', %s, 'OPEN_CSP', 1, 'pending', 'open', 'P1', %s,
+                'OPT', %s, 90, 1.25, '100', false
+            )
+            """,
+            (SYMBOL, ACCOUNT, date.today() + timedelta(days=30)),
+        )
+        self.conn.commit()
+        pending = self.conn.execute(
+            "SELECT count(*) FROM orders WHERE draft_id = 'zz_put'",
+        ).fetchone()
+        self.assertEqual(pending[0], 0)
+        for draft_id in ("zz_sell", "zz_buy", "zz_put"):
+            decide(self.conn, draft_id, "approve", "tester", {"tester"})
+        rows = self.conn.execute(
+            "SELECT draft_id, action, status FROM orders WHERE account_id = %s ORDER BY draft_id",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(
+            rows,
+            [
+                ("zz_buy", "BUY", "queued"),
+                ("zz_put", "SELL", "queued"),
+                ("zz_sell", "SELL", "queued"),
+            ],
+        )
+
+    def test_liquidate_sends_the_closes(self) -> None:
+        expiry = date(2026, 12, 18)
+        self.conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, market_price, multiplier, simulated
+            )
+            VALUES
+                (%s, %s, 10, 12, 'STK', 12.5, 1, false),
+                (%s, %s, 1, 11, 'STK', 11, 1, true)
+            """,
+            (ACCOUNT, SYMBOL, ACCOUNT, SYMBOL),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, expiry, contract_right,
+                strike, market_price, multiplier, simulated
+            )
+            VALUES (%s, %s, -1, 1, 'OPT', %s, 'P', 90, 1.2, 100, false)
+            """,
+            (ACCOUNT, SYMBOL, expiry),
+        )
+        self.conn.commit()
+        broker = Mock()
+        broker.connect.return_value = True
+        broker.last_price.return_value = Decimal("12.5")
+        broker.option_chain.return_value = ([], [], "ZZT", "SMART", "100")
+        with patch("athena_orchestrator.tasks.IbBroker", return_value=broker):
+            from athena_orchestrator.tasks import _run_liquidate
+
+            _run_liquidate("zz-liq", os.environ["DATABASE_URL"], ACCOUNT)
+        broker.place_limit.assert_called_once_with(ACCOUNT, SYMBOL, "SELL", 10, Decimal("12.5"))
+        broker.place_option_limit.assert_called_once_with(
+            ACCOUNT, SYMBOL, expiry, Decimal("90"), "P", "ZZT", "SMART", "BUY", 1, Decimal("1.2"), Decimal("100"),
+        )
+        drafts = self.conn.execute(
+            "SELECT 1 FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        simulated = self.conn.execute(
+            "SELECT count(*) FROM positions WHERE account_id = %s AND simulated = true",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(drafts, [])
+        self.assertEqual(simulated[0], 0)
+
+    def test_mock_send_order_stays_a_pending_draft(self) -> None:
+        from athena_strategy.mock import prepare_mock_orders
+
+        self.conn.execute(
+            """
+            INSERT INTO option_plans (
+                symbol, expiry, put_strike, call_strike, put_limit, call_limit,
+                trading_class, option_exchange
+            )
+            VALUES (%s, %s, 90, 110, 1, 1, 'ZZT', 'SMART')
+            """,
+            (SYMBOL, date.today() + timedelta(days=30)),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO mock_signals (symbol, tags, send_order, active)
+            VALUES (%s, 'NEWS_WASH', true, true)
+            ON CONFLICT (symbol) DO UPDATE SET send_order = true, active = true
+            """,
+            (SYMBOL,),
+        )
+        self.conn.commit()
+        try:
+            prepare_mock_orders(self.conn, standard_payload().model_copy(update={"watchlist": [SYMBOL]}), ACCOUNT)
+            draft = self.conn.execute(
+                "SELECT status FROM drafts WHERE account_id = %s",
+                (ACCOUNT,),
+            ).fetchone()
+            orders = self.conn.execute(
+                "SELECT 1 FROM orders WHERE account_id = %s",
+                (ACCOUNT,),
+            ).fetchall()
+            flag = self.conn.execute(
+                "SELECT send_order FROM mock_signals WHERE symbol = %s",
+                (SYMBOL,),
+            ).fetchone()
+            self.assertEqual(draft[0], "pending")
+            self.assertEqual(orders, [])
+            self.assertFalse(flag[0])
+        finally:
+            self.conn.execute("DELETE FROM mock_signals WHERE symbol = %s", (SYMBOL,))
+            self.conn.commit()
+
     def test_open_csp_is_stored_as_hold_and_a_short_option_rolls(self) -> None:
         self.conn.execute(
             """
@@ -539,12 +669,11 @@ class WorkflowTest(unittest.TestCase):
         self._print(afternoon, "ib-delayed", "181", "181", "181")
         self._print(day, "seed", "100", "100", "100")
         bars = daily_bars(self.conn, SYMBOL, 63)
-        self.assertEqual([bar.day for bar in bars], [date(2026, 1, 5), date(2026, 1, 6)])
+        self.assertEqual([bar.day for bar in bars], [date(2026, 1, 5)])
         self.assertEqual(bars[0].low, Decimal("190.01"))
         self.assertEqual(bars[0].high, Decimal("195"))
-        self.assertEqual(bars[0].close, Decimal("200"))
-        self.assertEqual(bars[1].close, Decimal("181"))
-        self.assertEqual(last_daily_close(self.conn, SYMBOL), Decimal("181"))
+        self.assertEqual(bars[0].close, Decimal("192"))
+        self.assertEqual(last_daily_close(self.conn, SYMBOL), Decimal("192"))
         self.assertEqual(last_tradeable_price(self.conn, SYMBOL), Decimal("181"))
 
     def test_missing_itick_quote_writes_nothing(self) -> None:
@@ -933,7 +1062,7 @@ class WorkflowTest(unittest.TestCase):
 
         apply_migrations(self.conn)
         with patch("athena_strategy.agents.chat", side_effect=_chat):
-            return run_signaled(self.conn, settings or self._audit_settings(), ACCOUNT)
+            return run_legacy_signaled(self.conn, settings or self._audit_settings(), ACCOUNT)
 
     def _trail(self) -> tuple:
         return self.conn.execute(
@@ -1037,7 +1166,7 @@ class WorkflowTest(unittest.TestCase):
 
         apply_migrations(self.conn)
         with patch("athena_strategy.agents.chat", side_effect=_chat):
-            run_signaled(self.conn, self._audit_settings(), ACCOUNT)
+            run_legacy_signaled(self.conn, self._audit_settings(), ACCOUNT)
         self.assertEqual(calls["n"], 0)
         self.assertEqual(self._trail(), ("no_data", "no_bars"))
         self.assertEqual(self._calls(), [])
@@ -1049,7 +1178,7 @@ class WorkflowTest(unittest.TestCase):
         book_halt(self.conn, ACCOUNT, "test halt")
         self.conn.commit()
         with patch("athena_strategy.agents.chat") as chat:
-            run_signaled(self.conn, self._audit_settings(), ACCOUNT)
+            run_legacy_signaled(self.conn, self._audit_settings(), ACCOUNT)
         self.assertEqual(chat.call_count, 0)
         self.assertEqual(self._trail(), ("no_data", "halted"))
         self.conn.execute("DELETE FROM halts WHERE account_id = %s", (ACCOUNT,))
@@ -1057,7 +1186,7 @@ class WorkflowTest(unittest.TestCase):
         self.conn.commit()
         blocked = standard_payload().model_copy(update={"watchlist": [SYMBOL], "blocked_symbols": [SYMBOL]})
         with patch("athena_strategy.agents.chat") as chat:
-            run_signaled(self.conn, blocked, ACCOUNT)
+            run_legacy_signaled(self.conn, blocked, ACCOUNT)
         self.assertEqual(chat.call_count, 0)
         self.assertEqual(self._trail(), ("no_data", "symbol blocked"))
         self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
@@ -1070,7 +1199,7 @@ class WorkflowTest(unittest.TestCase):
             "tokens": 1,
             "request": {},
         }) as chat:
-            run_signaled(self.conn, off, ACCOUNT)
+            run_legacy_signaled(self.conn, off, ACCOUNT)
         self.assertEqual(chat.call_count, 2)
         self.assertEqual(self._trail(), ("no_data", "options off"))
         self.assertTrue(all(row[1] == "ok" for row in self._calls()))
@@ -1167,6 +1296,33 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], [date(2026, 11, 6), date(2026, 11, 20), date(2026, 12, 4)])
         self.assertTrue(all(row[1] > 0 for row in rows))
         self.assertEqual(set(asked), {date(2026, 11, 6), date(2026, 11, 20), date(2026, 12, 4)})
+
+    def test_a_chain_quote_stores_the_bid(self) -> None:
+        from athena_exec.session import _store_choices
+
+        apply_migrations(self.conn)
+        today = date(2026, 10, 11)
+        settings = standard_payload()
+
+        class _Quote:
+            def expiry_strikes(self, symbol, expiry, trading_class, exchange):
+                return [90.0, 110.0]
+
+            def option_quote(self, symbol, expiry, strike, right, trading_class, exchange, multiplier="100"):
+                return Decimal("2"), Decimal("1.9")
+
+        _store_choices(
+            self.conn, _Quote(), SYMBOL, ["20261120"], today, Decimal("100"),
+            "ZZT", "SMART", "100", settings.strategy, None,
+        )
+        row = self.conn.execute(
+            """
+            SELECT limit_price, bid, open_interest, volume
+            FROM option_choices WHERE symbol = %s LIMIT 1
+            """,
+            (SYMBOL,),
+        ).fetchone()
+        self.assertEqual(row, (Decimal("2"), Decimal("1.9"), None, None))
 
     def test_universe_toggle_returns_the_row(self) -> None:
         import json

@@ -1,8 +1,8 @@
 """The only production reader of market_bars.
 
-Rails, RSI, and IV marks use one bar per calendar day. A later ib-delayed
-print can update that day's close. It does not replace the ib-daily high
-or low. last_tradeable_price is for display and draft reference only.
+Rails, drawdown, and RV20 use completed ib-daily bars. An ib-delayed print
+does not replace that close and does not add an unfinished day. The delayed
+print stays the limit price.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ class Bar:
 
 
 def daily_bars(conn: psycopg.Connection, symbol: str, n: int) -> list[Bar]:
-    """Merged ib-daily and ib-delayed bars, oldest first, at most n days."""
+    """Completed ib-daily bars, oldest first, at most n days."""
     if n <= 0:
         return []
     rows = conn.execute(
@@ -44,7 +44,7 @@ def daily_bars(conn: psycopg.Connection, symbol: str, n: int) -> list[Bar]:
 
 
 def last_daily_close(conn: psycopg.Connection, symbol: str) -> Decimal | None:
-    """Close of the newest merged day. Not a raw hourly print."""
+    """Close of the newest completed daily bar. Not the delayed print."""
     bars = daily_bars(conn, symbol, 1)
     if not bars:
         return None
@@ -229,16 +229,17 @@ def _merge(rows: list[tuple]) -> list[Bar]:
     bars: list[Bar] = []
     for day in sorted(grouped):
         group = grouped[day]
-        latest = max(group, key=lambda row: row[0])
         daily = [row for row in group if row[6] == "ib-daily"]
-        base = max(daily, key=lambda row: row[0]) if daily else latest
+        if not daily:
+            continue
+        base = max(daily, key=lambda row: row[0])
         bars.append(
             Bar(
                 day=day,
                 open=Decimal(base[1]),
                 high=Decimal(base[2]),
                 low=Decimal(base[3]),
-                close=Decimal(latest[4]),
+                close=Decimal(base[4]),
                 volume=Decimal(base[5]),
             )
         )

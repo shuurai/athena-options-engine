@@ -5,7 +5,7 @@ Each development step has a check. **Pending means the event has not happened ye
 **Status values:** `passed` · `pending` · `deferred`  
 **Last updated:** 2026-10-11
 
-Rows below are the proof recorded on that day. The live rules for price, cover, audit outcomes, realized-vol tags, and the strike menu are in [03-strategy-news-frontrun.md](03-strategy-news-frontrun.md). A row that still says `HIGH_IV` or `source=seed` is history, not the current rule.
+Rows below are the proof recorded on that day. The live rules for the wheel, price, cover, audit outcomes, realized-vol tags, the strike menu, the cycle budget, and the slot clock are in [03-strategy-news-frontrun.md](03-strategy-news-frontrun.md) and [06-data-and-ib.md](06-data-and-ib.md). A row that still says `HIGH_IV`, `source=seed`, or a market line on `/book` is history, not the current rule.
 
 Build tasks stay in [10-implementation-tracker.md](10-implementation-tracker.md). This file only records proof.
 

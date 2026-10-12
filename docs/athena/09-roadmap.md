@@ -79,10 +79,11 @@ No live money until Settings + Approve path + IB slots are proven in paper.
 2. [x] fanit sync = later  
 3. [x] Backup = MinIO local via S3 env vars; remote endpoint later  
 4. [x] Bots stub OK; Telegram connect guide on control-web  
-5. Weekday Athena vs Mobile slot calendar  
-6. Create Telegram bot + allowlist (when ready to leave stub)  
-7. Tailscale (or equivalent) on Windows box  
-8. Feishu app (optional after Telegram)  
+5. [x] Slot calendar = HK cash, US regular session in HKT, Mobile 19:00–21:30. Overnight US tail included
+6. [x] Telegram bot and allowlist
+7. Tailscale (or equivalent) on Windows box
+8. Feishu app (optional after Telegram)
+9. [x] Wheel, strike menu, and cycle budget. Implied-vol consumption stays unbuilt  
 
 ## Success of the roadmap
 

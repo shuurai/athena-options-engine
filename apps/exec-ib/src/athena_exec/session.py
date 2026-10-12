@@ -254,7 +254,7 @@ def cache_symbol_chain(conn, broker, settings: SettingsPayload, symbol: str, und
         log.info("strangle none symbol=%s", symbol)
         return
     strikes = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
-    distance = plan_otm_pct(strategy, _stored_rv(conn, symbol), (expiry - today).days)
+    distance = plan_otm_pct(settings, _stored_rv(conn, symbol), (expiry - today).days)
     picked = choose_strikes(strikes, underlying, distance)
     if picked is None:
         log.info("strangle none symbol=%s", symbol)
@@ -360,6 +360,14 @@ def record_chain_snapshot(conn, broker, settings: SettingsPayload, symbol: str, 
     return True
 
 
+def _choice_quote(broker, symbol, expiry, strike, right, trading_class, exchange, multiplier):
+    """Ask and bid from one chain quote. A broker without a bid still returns the ask."""
+    quote = getattr(broker, "option_quote", None)
+    if quote is not None:
+        return quote(symbol, expiry, strike, right, trading_class, exchange, multiplier)
+    return broker.option_ask(symbol, expiry, strike, right, trading_class, exchange, multiplier), None
+
+
 def _stored_rv(conn, symbol: str) -> Decimal | None:
     row = conn.execute(
         "SELECT rv20 FROM rv_marks WHERE symbol = %s ORDER BY day DESC LIMIT 1",
@@ -385,16 +393,18 @@ def _store_choices(
         rows = [("P", strike) for strike in strike_shortlist(listed, underlying, "P", width=width, otm_pct=distance, inside=inside)]
         rows.extend(("C", strike) for strike in strike_shortlist(listed, underlying, "C", width=width, otm_pct=distance, inside=inside))
         for right, strike in rows:
-            limit_price = broker.option_ask(
-                symbol, expiry, strike, right, trading_class, exchange, multiplier,
+            limit_price, bid = _choice_quote(
+                broker, symbol, expiry, strike, right, trading_class, exchange, multiplier,
             )
             conn.execute(
                 """
-                INSERT INTO option_choices (symbol, expiry, contract_right, strike, limit_price)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO option_choices (
+                    symbol, expiry, contract_right, strike, limit_price, bid
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING
                 """,
-                (symbol, expiry, right, strike, limit_price),
+                (symbol, expiry, right, strike, limit_price, bid),
             )
     conn.commit()
 

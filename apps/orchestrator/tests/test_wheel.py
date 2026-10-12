@@ -499,7 +499,7 @@ class WheelDbTest(unittest.TestCase):
         ).fetchone()
         self.assertEqual(trail, ("no_data", "rv_samples"))
 
-    def test_rv_percentile_39_stays_quiet_and_41_opens(self) -> None:
+    def test_rv_percentile_39_drops_the_put_and_41_opens(self) -> None:
         spot = self._bars(self._dip_closes())
         self._choices(spot, "P", ("0.97", "0.95", "0.93"))
         self._rv_history()
@@ -527,7 +527,7 @@ class WheelDbTest(unittest.TestCase):
             "SELECT outcome, summary FROM decision_trails WHERE account_id = %s",
             (ACCOUNT,),
         ).fetchone()
-        self.assertEqual(quiet, ("quiet", "rv_percentile"))
+        self.assertEqual(quiet, ("dropped", "rv_percentile"))
         self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
         self.conn.commit()
         with patch("athena_strategy.wheel.read_indicators", side_effect=gated(41)):
@@ -552,7 +552,97 @@ class WheelDbTest(unittest.TestCase):
             "SELECT outcome, summary FROM decision_trails WHERE account_id = %s",
             (ACCOUNT,),
         ).fetchone()
-        self.assertEqual(trail[1], "narrator_overruled")
+        self.assertEqual(trail, ("dropped", "narrator_overruled"))
+
+    def test_a_low_rv_floor_keeps_the_share_buy(self) -> None:
+        spot = self._bars(self._dip_closes())
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._rv_history()
+        base = self._settings(long=True, intent="both")
+        settings = base.model_copy(update={
+            "risk": base.risk.model_copy(update={"min_rv_pctl_new_short": 40}),
+        })
+        seen = {"n": 0}
+
+        def gate(conn, book, symbol):
+            seen["n"] += 1
+            reading = read_indicators(conn, book, symbol)
+            if seen["n"] > 1:
+                return replace(reading, rv_pctl=39)
+            return reading
+
+        with patch("athena_strategy.wheel.read_indicators", side_effect=gate):
+            ids = execute_opening(self.conn, settings, ACCOUNT, SYMBOL)
+        self.assertEqual(len(ids), 1)
+        drafts = self.conn.execute(
+            "SELECT tactic, status FROM drafts WHERE account_id = %s ORDER BY leg_index",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(drafts, [("BUY", "pending")])
+        ticket = self.conn.execute(
+            "SELECT reason, state_before, state_after, legs FROM tickets WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchone()
+        buy_qty = self.conn.execute(
+            "SELECT contracts FROM drafts WHERE account_id = %s AND tactic = 'BUY'",
+            (ACCOUNT,),
+        ).fetchone()[0]
+        self.assertEqual(ticket[0], "dip_long")
+        self.assertEqual(ticket[1], "FLAT")
+        self.assertEqual(ticket[2], "LONG" if buy_qty >= 100 else "ODD_LOT")
+        self.assertEqual(ticket[3], 1)
+        trails = self.conn.execute(
+            "SELECT outcome, summary FROM decision_trails WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(set(trails), {("drafted", "dip_long"), ("dropped", "rv_percentile")})
+
+    def test_missing_rv_samples_keep_the_share_buy(self) -> None:
+        spot = self._bars(self._dip_closes())
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._rv_history()
+        seen = {"n": 0}
+
+        def gate(conn, book, symbol):
+            seen["n"] += 1
+            reading = read_indicators(conn, book, symbol)
+            if seen["n"] > 1:
+                return replace(reading, rv_pctl=None)
+            return reading
+
+        with patch("athena_strategy.wheel.read_indicators", side_effect=gate):
+            ids = execute_opening(self.conn, self._settings(long=True, intent="both"), ACCOUNT, SYMBOL)
+        self.assertEqual(len(ids), 1)
+        drafts = self.conn.execute(
+            "SELECT tactic FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(drafts, [("BUY",)])
+        trails = self.conn.execute(
+            "SELECT outcome, summary FROM decision_trails WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(set(trails), {("drafted", "dip_long"), ("no_data", "rv_samples")})
+
+    def test_an_off_menu_strike_keeps_the_share_buy(self) -> None:
+        spot = self._bars(self._dip_closes())
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._rv_history()
+        ids = execute_opening(
+            self.conn, self._settings(long=True, intent="both"), ACCOUNT, SYMBOL,
+            narrator_strike=Decimal("1"),
+        )
+        self.assertEqual(len(ids), 1)
+        drafts = self.conn.execute(
+            "SELECT tactic, status FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(drafts, [("BUY", "pending")])
+        trails = self.conn.execute(
+            "SELECT outcome, summary FROM decision_trails WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(set(trails), {("drafted", "dip_long"), ("dropped", "narrator_overruled")})
 
     def test_a_ticket_that_breaks_the_cash_reserve_blocks_both_legs(self) -> None:
         spot = self._bars(self._dip_closes())
@@ -643,6 +733,73 @@ class WheelDbTest(unittest.TestCase):
         self.assertEqual([row[1] for row in legs], [0, 1])
         self.assertGreaterEqual(legs[1][2], Decimal("10"))
 
+    def _pending_dip(self) -> Decimal:
+        spot = self._bars(self._dip_closes())
+        self._rv_history()
+        self._stock(100, "10")
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._choices(spot, "C", ("1.12", "1.20", "1.30"))
+        self._open_ticket("ticket_dip", "draft_dip", SYMBOL, "OPEN_CSP", "dip_csp", "9")
+        return spot
+
+    def test_a_pending_dip_yields_to_a_strangle(self) -> None:
+        self._pending_dip()
+        ids = execute_opening(
+            self.conn, self._settings(), ACCOUNT, SYMBOL, tags={"NEWS_WASH", "RV_HIGH"},
+        )
+        old = self.conn.execute(
+            "SELECT status, reason FROM drafts WHERE id = 'draft_dip'"
+        ).fetchone()
+        fresh = self.conn.execute(
+            """
+            SELECT reason, status FROM tickets
+            WHERE account_id = %s AND symbol = %s AND reason = 'signaled_strangle'
+            """,
+            (ACCOUNT, SYMBOL),
+        ).fetchone()
+        self.assertEqual(old, ("blocked", "replaced by signaled_strangle"))
+        self.assertEqual(fresh, ("signaled_strangle", "pending"))
+        self.assertEqual(len(ids), 2)
+
+    def test_an_equal_reason_leaves_the_pending_dip(self) -> None:
+        self._pending_dip()
+        ids = execute_opening(self.conn, self._settings(cc=False, strangle=False), ACCOUNT, SYMBOL)
+        old = self.conn.execute(
+            "SELECT status, reason FROM drafts WHERE id = 'draft_dip'"
+        ).fetchone()
+        extra = self.conn.execute(
+            """
+            SELECT count(*) FROM tickets
+            WHERE account_id = %s AND symbol = %s AND id <> 'ticket_dip'
+              AND reason = ANY(%s)
+            """,
+            (ACCOUNT, SYMBOL, ["dip_long", "dip_csp", "high_cc", "cover_gap", "signaled_strangle"]),
+        ).fetchone()
+        self.assertEqual(ids, [])
+        self.assertEqual(old, ("pending", "dip_csp"))
+        self.assertEqual(extra[0], 0)
+
+    def test_an_approved_dip_stays_for_the_day(self) -> None:
+        self._pending_dip()
+        self.conn.execute("UPDATE drafts SET status = 'approved' WHERE id = 'draft_dip'")
+        self.conn.commit()
+        ids = execute_opening(
+            self.conn, self._settings(), ACCOUNT, SYMBOL, tags={"NEWS_WASH", "RV_HIGH"},
+        )
+        old = self.conn.execute(
+            "SELECT status FROM drafts WHERE id = 'draft_dip'"
+        ).fetchone()
+        fresh = self.conn.execute(
+            """
+            SELECT count(*) FROM tickets
+            WHERE account_id = %s AND symbol = %s AND reason = 'signaled_strangle'
+            """,
+            (ACCOUNT, SYMBOL),
+        ).fetchone()
+        self.assertEqual(ids, [])
+        self.assertEqual(old[0], "approved")
+        self.assertEqual(fresh[0], 0)
+
     def test_a_strangle_signal_under_100_shares_does_not_sell_both_legs(self) -> None:
         spot = self._bars(self._high_closes())
         self._rv_history()
@@ -700,6 +857,33 @@ class WheelDbTest(unittest.TestCase):
             (ACCOUNT,),
         ).fetchone()
         self.assertEqual(tactic[0], "ROLL")
+
+    def test_a_pending_roll_blocks_a_new_open(self) -> None:
+        self._choices(Decimal("100"), "P", ("0.90",))
+        self.conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, expiry,
+                contract_right, strike, market_price, simulated
+            )
+            VALUES (%s, %s, -1, 2, 'OPT', %s, 'P', 90, 2, false)
+            """,
+            (ACCOUNT, SYMBOL, date.today() + timedelta(days=5)),
+        )
+        self.conn.commit()
+        self.assertTrue(manage_book(self.conn, self._settings(), ACCOUNT))
+        opened = execute_opening(self.conn, self._settings(long=True, intent="both"), ACCOUNT, SYMBOL)
+        self.assertEqual(opened, [])
+        tactics = self.conn.execute(
+            "SELECT tactic FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(tactics, [("ROLL",)])
+        trail = self.conn.execute(
+            "SELECT outcome, summary FROM decision_trails WHERE account_id = %s AND source = 'wheel'",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(trail, ("quiet", "manage_pending"))
 
     def test_a_short_put_that_captured_premium_closes(self) -> None:
         self._choices(Decimal("100"), "P", ("0.90",))
@@ -830,7 +1014,7 @@ class WheelDbTest(unittest.TestCase):
             "ATHENA_INDICATORS": "off",
         }
         with patch.dict(os.environ, flags):
-            self.assertFalse(state_machine_enabled())
+            self.assertTrue(state_machine_enabled())
             self.assertFalse(slot_split_enabled())
             self.assertFalse(dry_run_enabled())
             self.assertFalse(screener_enabled())
@@ -956,24 +1140,72 @@ class WheelDbTest(unittest.TestCase):
         ).fetchall()
         return {row[0]: (row[1], row[2]) for row in rows}
 
-    def test_two_opens_that_together_break_cash_are_both_blocked(self) -> None:
+    def _peer_bar(self, symbol: str) -> None:
+        self.conn.execute(
+            """
+            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+            VALUES (%s, %s, 10, 11, 9, 10, 1000, 'ib-daily')
+            """,
+            (symbol, datetime.now(timezone.utc)),
+        )
+        self.conn.commit()
+
+    def _cash_settings(self):
+        settings = self._settings()
+        return settings.model_copy(update={
+            "risk": settings.risk.model_copy(update={"max_bucket_pct_nav": 100}),
+        })
+
+    def test_the_first_put_keeps_the_cash_and_the_second_is_blocked(self) -> None:
         self._marks("100", "100")
+        self._bars([Decimal("10")])
+        self._peer_bar("ZZU")
         self._open_ticket("tkt_a", "draft_a", SYMBOL, "OPEN_CSP", "dip_csp", "40")
         self._open_ticket("tkt_b", "draft_b", "ZZU", "OPEN_CSP", "dip_csp", "40")
-        apply_cycle_budget(self.conn, self._settings(), ACCOUNT, ["draft_a", "draft_b"])
+        apply_cycle_budget(self.conn, self._cash_settings(), ACCOUNT, ["draft_a", "draft_b"])
         found = self._statuses()
-        self.assertEqual(found["draft_a"][0], "blocked")
+        self.assertEqual(found["draft_a"][0], "pending")
         self.assertEqual(found["draft_b"][0], "blocked")
-        self.assertIn("cycle", found["draft_a"][1])
+        self.assertIn("cycle cash reserve", found["draft_b"][1])
         self.conn.execute("DELETE FROM drafts WHERE symbol = 'ZZU'")
         self.conn.execute("DELETE FROM tickets WHERE symbol = 'ZZU'")
+        self.conn.execute("DELETE FROM market_bars WHERE symbol = 'ZZU'")
+        self.conn.commit()
+
+    def test_a_later_put_still_fits_after_an_earlier_one_fails(self) -> None:
+        self._marks("100", "100")
+        self._bars([Decimal("10")])
+        self._peer_bar("ZZU")
+        self._open_ticket("tkt_a", "draft_a", SYMBOL, "OPEN_CSP", "dip_csp", "80")
+        self._open_ticket("tkt_b", "draft_b", "ZZU", "OPEN_CSP", "dip_csp", "20")
+        apply_cycle_budget(self.conn, self._cash_settings(), ACCOUNT, ["draft_a", "draft_b"])
+        found = self._statuses()
+        self.assertEqual(found["draft_a"][0], "blocked")
+        self.assertIn("cycle cash reserve", found["draft_a"][1])
+        self.assertEqual(found["draft_b"][0], "pending", found["draft_b"][1])
+        self.conn.execute("DELETE FROM drafts WHERE symbol = 'ZZU'")
+        self.conn.execute("DELETE FROM tickets WHERE symbol = 'ZZU'")
+        self.conn.execute("DELETE FROM market_bars WHERE symbol = 'ZZU'")
         self.conn.commit()
 
     def test_close_before_a_dip_is_not_the_same_as_the_dip_first(self) -> None:
         self._marks("50", "100")
+        self._bars([Decimal("10")])
+        self.conn.execute(
+            """
+            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+            VALUES ('ZZU', %s, 10, 11, 9, 10, 1000, 'ib-daily')
+            """,
+            (datetime.now(timezone.utc),),
+        )
+        self.conn.commit()
+        settings = self._settings()
+        settings = settings.model_copy(update={
+            "risk": settings.risk.model_copy(update={"max_bucket_pct_nav": 100}),
+        })
         self._open_ticket("tkt_c", "draft_c", SYMBOL, "CLOSE", "manage_close", "40")
         self._open_ticket("tkt_d", "draft_d", "ZZU", "OPEN_CSP", "dip_long", "40")
-        apply_cycle_budget(self.conn, self._settings(), ACCOUNT, ["draft_c", "draft_d"])
+        apply_cycle_budget(self.conn, settings, ACCOUNT, ["draft_c", "draft_d"])
         first = self._statuses()
         self.assertEqual(first["draft_c"][0], "pending")
         self.assertEqual(first["draft_d"][0], "pending")
@@ -992,7 +1224,7 @@ class WheelDbTest(unittest.TestCase):
             return 3
 
         with patch("athena_risk.cycle_rank", side_effect=_swapped):
-            apply_cycle_budget(self.conn, self._settings(), ACCOUNT, ["draft_c", "draft_d"])
+            apply_cycle_budget(self.conn, settings, ACCOUNT, ["draft_c", "draft_d"])
         second = self._statuses()
         self.assertNotEqual(
             (first["draft_c"][0], first["draft_d"][0]),
@@ -1002,6 +1234,7 @@ class WheelDbTest(unittest.TestCase):
         self.assertEqual(second["draft_c"][0], "pending")
         self.conn.execute("DELETE FROM drafts WHERE symbol = 'ZZU'")
         self.conn.execute("DELETE FROM tickets WHERE symbol = 'ZZU'")
+        self.conn.execute("DELETE FROM market_bars WHERE symbol = 'ZZU'")
         self.conn.commit()
 
     def test_a_full_bucket_blocks_the_next_ticket_in_that_bucket(self) -> None:
@@ -1022,6 +1255,24 @@ class WheelDbTest(unittest.TestCase):
         self.assertEqual(status, "blocked")
         self.assertIn("AI_NARRATIVE", reason)
 
+    def test_a_name_with_no_classifier_uses_one_bucket(self) -> None:
+        self._marks("1000", "1000")
+        self._stock(1, "400")
+        self._open_ticket("tkt_u", "draft_u", SYMBOL, "OPEN_CSP", "dip_csp", "10")
+        apply_cycle_budget(self.conn, self._settings(), ACCOUNT, ["draft_u"])
+        status, reason = self._statuses()["draft_u"]
+        self.assertEqual(status, "blocked")
+        self.assertIn("UNCLASSIFIED", reason)
+        self.conn.execute("DELETE FROM drafts WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM tickets WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM positions WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+        self._bars([Decimal("10")])
+        self._open_ticket("tkt_v", "draft_v", SYMBOL, "OPEN_CSP", "dip_csp", "10")
+        apply_cycle_budget(self.conn, self._settings(), ACCOUNT, ["draft_v"])
+        status, reason = self._statuses()["draft_v"]
+        self.assertEqual(status, "pending", reason)
+
     def test_assignment_that_spends_the_cash_floor_blocks_the_put(self) -> None:
         self._marks("100", "100")
         self._bars([Decimal(100 + (index % 5) - 2) for index in range(25)])
@@ -1032,12 +1283,40 @@ class WheelDbTest(unittest.TestCase):
                 "cash_reserve_pct": 0,
                 "max_symbol_pct_nav": 200,
                 "max_short_opt_margin_pct": 100,
+                "max_bucket_pct_nav": 100,
             }),
         })
         apply_cycle_budget(self.conn, settings, ACCOUNT, ["draft_f"])
         status, reason = self._statuses()["draft_f"]
         self.assertEqual(status, "blocked")
         self.assertIn("assignment would breach min cash", reason)
+
+    def test_a_put_counts_its_strike_once_against_the_cash_floor(self) -> None:
+        self._marks("100", "100")
+        self._bars([Decimal(100 + (index % 5) - 2) for index in range(25)])
+        self._open_ticket("tkt_g", "draft_g", SYMBOL, "OPEN_CSP", "dip_csp", "46")
+        settings = self._settings()
+        settings = settings.model_copy(update={
+            "risk": settings.risk.model_copy(update={
+                "cash_reserve_pct": 0,
+                "max_symbol_pct_nav": 500,
+                "max_short_opt_margin_pct": 100,
+                "max_assign_pct_nav": 100,
+                "max_bucket_pct_nav": 100,
+            }),
+        })
+        apply_cycle_budget(self.conn, settings, ACCOUNT, ["draft_g"])
+        status, reason = self._statuses()["draft_g"]
+        self.assertEqual(status, "pending", reason)
+        self.conn.execute("DELETE FROM drafts WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM tickets WHERE account_id = %s", (ACCOUNT,))
+        self.conn.commit()
+        self._open_ticket("tkt_g", "draft_g", SYMBOL, "OPEN_CSP", "dip_csp", "25")
+        self._open_ticket("tkt_h", "draft_h", SYMBOL, "OPEN_CSP", "dip_csp", "25")
+        apply_cycle_budget(self.conn, settings, ACCOUNT, ["draft_g", "draft_h"])
+        found = self._statuses()
+        self.assertEqual(found["draft_g"][0], "pending", found["draft_g"][1])
+        self.assertEqual(found["draft_h"][0], "pending", found["draft_h"][1])
 
     def test_book_page_labels_the_axes(self) -> None:
         page = _book_page(self.conn, ACCOUNT, {})
@@ -1136,13 +1415,22 @@ class WheelDbTest(unittest.TestCase):
 
     def test_the_reading_card_holds_the_volatility_family(self) -> None:
         body = _risk(self.conn, ACCOUNT, {})["body"]
-        card = body.split('id="volatility-reading"', 1)[1].split('id="strategy-card"', 1)[0]
+        card = body.split('id="volatility-reading"', 1)[1].split("<h2>Limits</h2>", 1)[0]
         for name in (
             "min_rv", "ivr_min_samples", "rv_window", "rv_high_pctl", "rv_low_pctl",
-            "chain_band_pct", "strangle_delta_target", "otm_floor_pct", "otm_ceiling_pct",
+            "chain_band_pct", "strangle_delta_target",
             "iv_rv_multiple_hi", "iv_rv_multiple_mid", "iv_rv_multiple_lo",
         ):
             self.assertIn(f'name="{name}"', card)
+        self.assertNotIn('name="otm_floor_pct"', card)
+        limits = body.split("<h2>Limits</h2>", 1)[1].split("<h2>Approval privilege", 1)[0]
+        for name in (
+            "otm_floor_pct", "otm_ceiling_pct", "rv_band_high_pct", "rv_band_mid_pct", "wing_z",
+            "max_spread_pct",
+        ):
+            self.assertIn(f'name="{name}"', limits)
+        self.assertIn("Zero removes the cap so the width follows realized vol.", limits)
+        self.assertIn("Zero keeps every quoted strike.", limits)
         self.assertIn('class="tag blue">premium_ratio</span>', card)
         self.assertIn('class="tag">chain_bs</span>', card)
         self.assertIn("The mark written today. This page cannot change it.", card)
