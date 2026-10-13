@@ -300,10 +300,17 @@ tr.hit { cursor: pointer; }
 .pool-tgl.on::after { left: 18px; background: var(--site-primary); }
 .pool-tgl.green.on { background: #0d1f16; border-color: #16c784; }
 .pool-tgl.green.on::after { background: #16c784; }
+.sym-line { display: flex; align-items: center; gap: 8px; }
+.pool-spin { visibility: hidden; flex: none; }
+tr.pool-busy .pool-spin { visibility: visible; }
+tr.pool-busy button, tr.pool-busy select, tr.pool-busy input { pointer-events: none; }
 .sym-name { font-size: 10.5px; color: var(--site-text-4); }
 .chg-up { color: var(--ath-up); }
 .chg-down { color: var(--ath-down); }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; flex: none; }
+.audit-table-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 12px; }
+.audit-table-head > .filters { flex: 1 1 auto; margin-bottom: 0; }
+.card.fill > .audit-table-head { flex: none; }
 .filters a, .filters button {
   padding: 6px 12px; font-size: 11px; font-weight: 600; font-family: var(--font-mono);
   background: transparent; border: 1px solid var(--site-border-strong); color: var(--site-text-3); cursor: pointer;
@@ -339,6 +346,11 @@ button.sort[data-dir="desc"] { color: #93c5fd; }
 button.sort[data-dir="desc"] .down { opacity: 1; }
 .pool-actions { white-space: nowrap; text-align: right; }
 .pool-actions .btn + .btn, .pool-actions form { margin-left: 6px; }
+.trade-box label { display: block; margin: 12px 0 0; font-size: 11px; color: var(--site-text-3); }
+.trade-box .input { margin-top: 6px; }
+.trade-box .seg { margin-top: 8px; }
+.trade-box .row-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.trade-box .row-actions .btn { width: 100%; }
 .pool-actions form { display: inline; }
 .card-lead { margin: 0 0 12px; font-size: 12.5px; color: var(--site-text-3); line-height: 1.5; }
 .slot-row { display: grid; grid-template-columns: 108px 1fr 16px 1fr 32px; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -1533,13 +1545,19 @@ _CLIENT_JS = r"""
     }
     document.dispatchEvent(new Event("ath-feed"));
   }
+  function lockPoolRow(row, locked) {
+    if (!row) return;
+    row.classList.toggle("pool-busy", locked);
+    row.setAttribute("aria-busy", locked ? "true" : "false");
+    row.querySelectorAll("button, select, input").forEach((node) => { node.disabled = locked; });
+  }
   function postUniverse(form) {
     const body = new URLSearchParams(new FormData(form));
     body.set("partial", "row");
     const symbol = (body.get("symbol") || "").toUpperCase();
     const select = form.querySelector("select.intent");
-    const controls = form.querySelectorAll("button, select");
-    controls.forEach((node) => { node.disabled = true; });
+    const row = form.closest("tr");
+    lockPoolRow(row, true);
     fetch("/universe", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1565,7 +1583,7 @@ _CLIENT_JS = r"""
       if (select && select.dataset.prev != null) select.value = select.dataset.prev;
       toast("Not saved", "The console did not answer.", "err");
     }).finally(() => {
-      controls.forEach((node) => { node.disabled = false; });
+      if (row && row.isConnected) lockPoolRow(row, false);
     });
   }
   function refreshPoolRow(symbol) {
@@ -2629,6 +2647,135 @@ _CLIENT_JS = r"""
       note.textContent = "Name and market cap are shared. Classifiers and thesis stay on this account. Price and IVR come from stored bars.";
       wrap.appendChild(note);
       panel("Edit " + symbol, wrap);
+      return;
+    }
+    if (cmd === "trade-symbol") {
+      const symbol = btn.getAttribute("data-symbol") || "";
+      const accountId = btn.getAttribute("data-account") || "";
+      const wrap = document.createElement("div");
+      wrap.className = "trade-box";
+      wrap.innerHTML = '<div class="k">Side</div><div class="seg" data-trade-side>' +
+        '<button type="button" class="on" data-side="BUY">Buy</button>' +
+        '<button type="button" data-side="SELL">Sell</button></div>' +
+        '<label>Quantity<input class="input" name="quantity" inputmode="numeric" value="100"></label>' +
+        '<div class="k" style="margin-top:12px">Order</div><div class="seg" data-trade-order>' +
+        '<button type="button" data-order="MKT">Market</button>' +
+        '<button type="button" class="on" data-order="LMT">Limit</button>' +
+        '<button type="button" data-order="STP LMT">Stop limit</button></div>' +
+        '<label data-trade-limit>Limit<input class="input" name="limit" inputmode="decimal"></label>' +
+        '<label data-trade-stop hidden>Stop<input class="input" name="stop" inputmode="decimal"></label>' +
+        '<p class="slot-note" data-trade-reason></p>' +
+        '<div class="row-actions">' +
+        '<button class="btn" type="button" data-trade-auto>Auto Set Price</button>' +
+        '<button class="btn primary" type="button" data-trade-send>Place order</button></div>' +
+        '<p class="slot-note">Sends the order to IB for this account. Risk caps are not applied.</p>';
+      const sideBox = wrap.querySelector("[data-trade-side]");
+      const orderBox = wrap.querySelector("[data-trade-order]");
+      const limitRow = wrap.querySelector("[data-trade-limit]");
+      const stopRow = wrap.querySelector("[data-trade-stop]");
+      const reason = wrap.querySelector("[data-trade-reason]");
+      const auto = wrap.querySelector("[data-trade-auto]");
+      function pick(box, attr, value) {
+        box.querySelectorAll("button").forEach((node) => {
+          node.classList.toggle("on", node.getAttribute(attr) === value);
+        });
+      }
+      function side() {
+        const on = sideBox.querySelector("button.on");
+        return on ? on.getAttribute("data-side") : "BUY";
+      }
+      function orderType() {
+        const on = orderBox.querySelector("button.on");
+        return on ? on.getAttribute("data-order") : "LMT";
+      }
+      function paintOrder() {
+        const kind = orderType();
+        limitRow.hidden = kind === "MKT";
+        stopRow.hidden = kind !== "STP LMT";
+        auto.disabled = kind === "MKT";
+      }
+      sideBox.addEventListener("click", (event) => {
+        const choice = event.target.closest("button");
+        if (!choice) return;
+        pick(sideBox, "data-side", choice.getAttribute("data-side"));
+      });
+      orderBox.addEventListener("click", (event) => {
+        const choice = event.target.closest("button");
+        if (!choice) return;
+        pick(orderBox, "data-order", choice.getAttribute("data-order"));
+        paintOrder();
+      });
+      paintOrder();
+      auto.addEventListener("click", () => {
+        if (auto.disabled) return;
+        auto.disabled = true;
+        auto.textContent = "Setting…";
+        reason.textContent = "";
+        const body = new URLSearchParams({
+          action: "price",
+          symbol: symbol,
+          last: btn.getAttribute("data-price") || "",
+          side: side(),
+          order: orderType()
+        });
+        fetch("/universe", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: body
+        }).then((res) => res.json().then((data) => ({ ok: res.ok, data: data }))).then((result) => {
+          const data = result.data || {};
+          if (!result.ok || !data.ok) {
+            reason.textContent = data.message || "No price";
+            return;
+          }
+          if (data.limit) wrap.querySelector("[name=limit]").value = data.limit;
+          if (orderType() === "STP LMT" && data.stop) wrap.querySelector("[name=stop]").value = data.stop;
+          reason.textContent = data.reason || "";
+        }).catch(() => {
+          reason.textContent = "The console did not answer.";
+        }).finally(() => {
+          auto.disabled = orderType() === "MKT";
+          auto.textContent = "Auto Set Price";
+        });
+      });
+      wrap.querySelector("[data-trade-send]").addEventListener("click", () => {
+        const kind = orderType();
+        const qty = (wrap.querySelector("[name=quantity]").value || "").trim();
+        const limit = (wrap.querySelector("[name=limit]").value || "").trim();
+        const stop = (wrap.querySelector("[name=stop]").value || "").trim();
+        let price = "at market";
+        if (kind === "LMT") price = "at limit " + (limit || "—");
+        if (kind === "STP LMT") price = "at stop " + (stop || "—") + " limit " + (limit || "—");
+        const text = side() + " " + (qty || "—") + " " + symbol + " " + price + " on " + (accountId || "this account") + "?";
+        confirmBox("Place order", text, () => {
+          const body = new URLSearchParams({
+            action: "trade",
+            symbol: symbol,
+            side: side(),
+            quantity: qty,
+            order: kind,
+            limit: limit,
+            stop: stop
+          });
+          fetch("/universe", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body
+          }).then((res) => res.json().then((data) => ({ ok: res.ok, data: data }))).then((result) => {
+            const data = result.data || {};
+            if (!result.ok || !data.ok) {
+              toast("Not sent", data.message || "Try again", "err");
+              return;
+            }
+            const task = data.task || {};
+            if (task.id) watchTask(task.id);
+            toast("Sending", data.message || "", "ok");
+          }).catch(() => {
+            toast("Not sent", "The console did not answer.", "err");
+          });
+        }, "Send");
+      });
+      panel("Trade " + symbol, wrap);
       return;
     }
     if (cmd === "draft-amend" || cmd === "draft-reject") {

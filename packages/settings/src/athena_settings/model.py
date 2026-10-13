@@ -264,7 +264,7 @@ UNIVERSE_SEED = (
     "NVDA", "QCOM", "T", "700", "1810", "MRVL", "NOK", "DRAM", "AAPL", "ORCL",
     "INTC", "SMH", "GLD", "GOOGL", "AMZN", "SKHY", "GLW", "NIO", "992", "MSFT",
     "SPCX", "AVGO", "ROKU", "AMD", "CNXC", "RDW", "RARE", "IGV", "BABA", "META",
-    "TSLA", "SPY", "QQQ", "9988", "9888",
+    "TSLA", "SPY", "QQQ", "9988", "9888", "KULR", "MRAM",
 )
 
 

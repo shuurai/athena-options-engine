@@ -8,7 +8,7 @@ from datetime import date
 from decimal import Decimal
 
 from athena_exec.options import bs_delta, rv_multiple, target_otm_pct
-from athena_settings.model import SettingsPayload
+from athena_settings.model import SettingsPayload, TacticFlags
 from athena_strategy.iv import estimated_iv
 
 _HUNDRED = Decimal(100)
@@ -459,7 +459,7 @@ def _with_alt(text: str, primary: list[ScreenerLine], extra: list[ScreenerLine],
     return text
 
 
-def prompt_sides(conn, settings: SettingsPayload, account_id: str, symbol: str, reading, plan: dict | None, spot, today: date) -> tuple[str, str, str | None, str | None, str | None]:
+def prompt_sides(conn, settings: SettingsPayload, account_id: str, symbol: str, reading, plan: dict | None, spot, today: date, flags: TacticFlags | None = None) -> tuple[str, str, str | None, str | None, str | None]:
     """Put table, call table, clamp note, covered-call block, and the pick's delta source."""
     if not screener_enabled() or spot is None:
         puts, calls = legacy_text(conn, symbol, plan)
@@ -467,18 +467,28 @@ def prompt_sides(conn, settings: SettingsPayload, account_id: str, symbol: str, 
     stored = load_choices(conn, symbol)
     basis = stock_basis(conn, account_id, symbol) if account_id else None
     block = basis_block(stored, spot, basis)
-    puts, note = candidates(
-        conn, settings, symbol, reading, today, account_id=account_id, purpose="csp", spot=spot, choices=stored,
-    )
-    calls, call_note = candidates(
-        conn, settings, symbol, reading, today, account_id=account_id, purpose="cc", spot=spot, choices=stored,
-    )
-    strangle_calls, _strangle_note = candidates(
-        conn, settings, symbol, reading, today, account_id=account_id, purpose="strangle_call", spot=spot, choices=stored,
-    )
-    strangle_puts, _strangle_put_note = candidates(
-        conn, settings, symbol, reading, today, account_id=account_id, purpose="strangle_put", spot=spot, choices=stored,
-    )
+    want_csp = flags is None or flags.csp
+    want_cc = flags is None or flags.cc
+    want_strangle = flags is None or flags.strangle
+    puts, note = ([], None)
+    calls, call_note = ([], None)
+    strangle_calls: list = []
+    strangle_puts: list = []
+    if want_csp:
+        puts, note = candidates(
+            conn, settings, symbol, reading, today, account_id=account_id, purpose="csp", spot=spot, choices=stored,
+        )
+    if want_cc:
+        calls, call_note = candidates(
+            conn, settings, symbol, reading, today, account_id=account_id, purpose="cc", spot=spot, choices=stored,
+        )
+    if want_strangle:
+        strangle_calls, _strangle_note = candidates(
+            conn, settings, symbol, reading, today, account_id=account_id, purpose="strangle_call", spot=spot, choices=stored,
+        )
+        strangle_puts, _strangle_put_note = candidates(
+            conn, settings, symbol, reading, today, account_id=account_id, purpose="strangle_put", spot=spot, choices=stored,
+        )
     put_text = _with_alt(render_table(puts, "puts"), puts, strangle_puts, "strangle puts")
     call_text = _with_alt(render_table(calls, "calls"), calls, strangle_calls, "strangle calls")
     if block and call_text == "none":
@@ -488,6 +498,8 @@ def prompt_sides(conn, settings: SettingsPayload, account_id: str, symbol: str, 
         source = puts[0].delta_source
     elif calls:
         source = calls[0].delta_source
+    if not (want_csp or want_cc or want_strangle):
+        return "none", "none", None, None, None
     if put_text == "none" and call_text == "none":
         listed_puts, listed_calls = _listed(plan)
         return listed_puts, listed_calls, note or call_note, block, source or None

@@ -340,6 +340,22 @@ def may_buy(flags: TacticFlags) -> bool:
     return bool(flags.may_buy)
 
 
+def enabled_functions(flags: TacticFlags) -> frozenset[str]:
+    """Tactics this account still checks for one name. Another account's toggles are not included."""
+    found = set()
+    if flags.csp:
+        found.add("CSP")
+    if flags.cc:
+        found.add("CC")
+    if flags.strangle:
+        found.add("STRANGLE")
+    if flags.long:
+        found.add("LONG")
+    if may_buy(flags):
+        found.add("BUY")
+    return frozenset(found)
+
+
 def buy_access(flags: TacticFlags) -> tuple[bool, str]:
     """Whether this name may buy shares, and the one reason that decides it."""
     if may_buy(flags):
@@ -502,13 +518,14 @@ def _choose(
     price = spot if spot is not None and spot > 0 else None
     puts: list[ScreenerLine] = []
     calls: list[ScreenerLine] = []
+    on = enabled_functions(flags)
     if price is not None and opt_contracts >= 1:
-        if dip and csp_block is None and flags.csp:
+        if dip and csp_block is None and "CSP" in on:
             puts, _note = candidates(
                 conn, settings, symbol, reading, today,
                 account_id=account_id, purpose="csp", spot=price,
             )
-        if high and cc_block is None and flags.cc:
+        if high and cc_block is None and "CC" in on:
             calls, _note = candidates(
                 conn, settings, symbol, reading, today,
                 account_id=account_id, purpose="cc", spot=price,
@@ -521,7 +538,7 @@ def _choose(
     if (
         high
         and cc_block is None
-        and flags.cc
+        and "CC" in on
         and calls
         and opt_contracts >= 1
         and state.shares >= Decimal(min(opt_contracts, coverable_contracts(state.shares)) * 100)
@@ -541,8 +558,7 @@ def _choose(
         and not earnings
         and csp_block is None
         and cc_block is None
-        and flags.csp
-        and flags.cc
+        and "STRANGLE" in on
     )
     if strangle_on:
         strangle_puts, _note = candidates(
@@ -567,7 +583,8 @@ def _choose(
     missing = share_gap(state.shares)
     if (
         high
-        and flags.cc
+        and "CC" in on
+        and "BUY" in on
         and cc_block == "cc_needs_shares"
         and buy_block is None
         and price is not None
@@ -578,9 +595,9 @@ def _choose(
     dip_legs: tuple[LegPlan, ...] = ()
     dip_reason = ""
     dip_miss = _dip_miss(dip, earnings, flags, csp_block, puts, reading)
-    if dip and price is not None and share_count >= 1 and buy_block is None and may_buy(flags):
+    if dip and price is not None and share_count >= 1 and buy_block is None and "BUY" in on:
         buy = _buy_leg(share_count, price)
-        if csp_block is None and flags.csp and RV_HIGH in reading.tags and puts and opt_contracts >= 1:
+        if csp_block is None and "CSP" in on and RV_HIGH in reading.tags and puts and opt_contracts >= 1:
             dip_legs = (buy, _option_leg(puts[0], meta, "OPEN_CSP", opt_contracts))
             dip_reason = "dip_long"
             dip_miss = None
@@ -588,7 +605,7 @@ def _choose(
             dip_legs = (buy,)
             dip_reason = "dip_long"
             dip_miss = None
-    elif dip and csp_block is None and flags.csp and puts and opt_contracts >= 1 and not may_buy(flags):
+    elif dip and csp_block is None and "CSP" in on and puts and opt_contracts >= 1 and "BUY" not in on:
         dip_legs = (_option_leg(puts[0], meta, "OPEN_CSP", opt_contracts),)
         dip_reason = "dip_csp"
         dip_miss = None

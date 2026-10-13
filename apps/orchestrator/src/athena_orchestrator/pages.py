@@ -11,7 +11,7 @@ import re
 import secrets
 import threading
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
@@ -36,7 +36,7 @@ from athena_settings.model import (
     TacticFlags,
     normalize_provider,
 )
-from athena_settings.prompts import AGENT_ORDER, AGENT_ROLES, resolved_agents
+from athena_settings.prompts import AGENT_ORDER, AGENT_ROLES, TRADE_NAME, resolved_agents
 from athena_settings.repository import save_settings
 from athena_settings.resolve import (
     allowlist_ids,
@@ -1406,13 +1406,25 @@ def _position_rows(conn, account: str) -> list[dict]:
         (account, _replaying(conn, account)),
     ).fetchall()
     today = datetime.now(HKT).date()
+    from athena_strategy.drafts import last_tradeable_price
+
+    closes: dict[str, Decimal | None] = {}
     rows = []
     for symbol, quantity, avg_price, sec_type, expiry, right, strike, mark, currency, multiplier, value, unrealized, realized, snapshot_at, simulated in found:
         qty = Decimal(quantity)
         if qty == 0:
             continue
         mult = Decimal(multiplier or 1)
+        sec = sec_type or "STK"
         price = None if mark is None else Decimal(mark)
+        stored_close = False
+        if price is None and sec == "STK":
+            if symbol not in closes:
+                closes[symbol] = last_tradeable_price(conn, symbol)
+            stored = closes[symbol]
+            if stored is not None and stored > 0:
+                price = stored
+                stored_close = True
         average = Decimal(avg_price)
         market_value = None if value is None else Decimal(value)
         if market_value is None and price is not None:
@@ -1425,12 +1437,13 @@ def _position_rows(conn, account: str) -> list[dict]:
             "symbol": symbol,
             "qty": qty,
             "avg": average,
-            "sec_type": sec_type or "STK",
+            "sec_type": sec,
             "right": right or "",
             "expiry": "" if expiry is None else expiry.isoformat(),
             "dte": dte,
             "strike": "" if strike is None else _plain_number(strike),
             "mark": "" if price is None else f"{price:,.2f}",
+            "stored_close": stored_close,
             "market": market_value,
             "value": "" if market_value is None else f"{market_value:,.2f}",
             "pnl": pnl,
@@ -1553,7 +1566,9 @@ def _position_tr(row: dict) -> str:
         f'<td><span class="tag {side_tag}">{side}</span></td>'
         f'<td class="mono">{escape(qty)}</td>'
         f'<td class="mono">{escape(average)}</td>'
-        f'<td class="mono">{escape(row["mark"] or DASH)}</td>'
+        f'<td class="mono">{escape(row["mark"] or DASH)}'
+        + ('<div class="sym-name">close</div>' if row.get("stored_close") else "")
+        + "</td>"
         f'<td class="mono">{escape(row["value"] or DASH)}</td>'
         f'<td class="mono {pnl_class}">{escape(pnl_text)}</td>'
         f'<td class="mono">{escape(row["expiry"] or DASH)}'
@@ -2193,7 +2208,8 @@ def _pool_row(conn, account: str, settings, symbol: str) -> str:
         f' data-price="{escape(price_sort, quote=True)}"'
         f' data-cap="{escape(cap_sort, quote=True)}"'
         f' data-classifiers="{escape(classifiers, quote=True)}">'
-        f"<td><b>{escape(symbol)}</b><div class=\"sym-name\">{escape(name) if name else DASH}</div></td>"
+        f'<td><span class="sym-line"><span class="pool-spin sim-spin" aria-hidden="true"></span>'
+        f"<span><b>{escape(symbol)}</b><div class=\"sym-name\">{escape(name) if name else DASH}</div></span></span></td>"
         f"<td class=\"mono\" style=\"font-weight:600\">{escape(last)}</td>"
         f"<td class=\"mono {tone}\">{escape(change)}</td>"
         f"{_band_cell(band, high_pct, low_pct)}"
@@ -2209,7 +2225,7 @@ def _pool_row(conn, account: str, settings, symbol: str) -> str:
         f"<td>{_toggle(symbol, 'csp', flags.csp)}</td>"
         f"<td>{_toggle(symbol, 'cc', flags.cc)}</td>"
         f"<td>{_toggle(symbol, 'strangle', flags.strangle)}</td>"
-        f"<td class=\"pool-actions\">{_edit_symbol(symbol, name, cap, classifiers, thesis, last, change, rank, phase)}{_sync_symbol(symbol)}{_remove_symbol(symbol)}</td>"
+        f"<td class=\"pool-actions\">{_edit_symbol(symbol, name, cap, classifiers, thesis, last, change, rank, phase)}{_trade_symbol(symbol, last, account)}{_sync_symbol(symbol)}{_remove_symbol(symbol)}</td>"
         "</tr>"
     )
 
@@ -2260,6 +2276,12 @@ def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
     symbol = (form.get("symbol") or [""])[0].strip().upper()
     action = (form.get("action") or [""])[0]
     field = (form.get("field") or [""])[0]
+    if action in {"price", "trade"} and not symbol:
+        return fail("Symbol is required.")
+    if action == "price":
+        return _trade_price(conn, account, current, symbol, form)
+    if action == "trade":
+        return _trade_send(account, current, actor, symbol, form)
     if action == "seed":
         return _seed_universe(conn, account, payload, actor)
     if not symbol:
@@ -2679,6 +2701,7 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         f"{side}"
         "</div>"
         f'<div class="agent-grid">{"".join(cards)}</div>'
+        f"{_trade_prompt_card(prompts[TRADE_NAME])}"
         "</div>"
     )
     return _html(
@@ -2689,11 +2712,33 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
     )
 
 
+def _trade_prompt_card(prompt) -> str:
+    note = "Used only by Auto Set Price on Universe. The cycle does not call this prompt."
+    return (
+        '<form class="card agent" method="post" action="/orchestration">'
+        f"<h2><span>{escape(TRADE_NAME)}</span></h2>"
+        '<div class="body">'
+        f'<p class="role">{escape(note)}</p>'
+        f'<input type="hidden" name="agent" value="{escape(TRADE_NAME, quote=True)}">'
+        '<label class="prompt">System prompt'
+        f'<textarea class="prompt" name="system">{escape(prompt.system)}</textarea></label>'
+        '<label class="prompt">Execution prompt'
+        f'<textarea class="prompt" name="execution">{escape(prompt.execution)}</textarea></label>'
+        '<div class="toggle-row"><div>Reasoning</div><div class="toggle-end">'
+        '<input type="hidden" name="reasoning" value="0">'
+        f'<input type="checkbox" name="reasoning" value="1"{" checked" if prompt.reasoning else ""}>'
+        "</div></div>"
+        '<p class="slot-note">When on, the provider uses its medium reasoning setting.</p>'
+        '<button class="btn primary" type="submit">Save prompts</button>'
+        "</div></form>"
+    )
+
+
 def _post_strategy(conn, account: str, form: dict, actor: str) -> dict:
     if not account:
         return _strategy(conn, account, {}, "No account is configured.") | {"status": 400}
     name = (form.get("agent") or [""])[0]
-    if name not in AGENT_ORDER:
+    if name not in AGENT_ORDER and name != TRADE_NAME:
         return _strategy(conn, account, {}, "Unknown agent.") | {"status": 400}
     system = (form.get("system") or [""])[0].strip()
     execution = (form.get("execution") or [""])[0].strip()
@@ -2745,9 +2790,11 @@ def _audit(conn, account: str, query: dict) -> dict:
         '<button class="help-q" type="button" data-cmd="view-book" data-panel="audit-legend" '
         'data-title="Result types" aria-label="Result types">?</button></span></h2>'
         f"{_result_legend()}"
+        '<div class="audit-table-head">'
         '<div class="filters" id="audit-filters">'
         '<input class="input" id="audit-keyword" type="search" placeholder="Keyword" autocomplete="off" spellcheck="false">'
         f'{"".join(filters)}</div>'
+        f"{_REFRESH}</div>"
         f"{_feed('/audit', nxt, more, table)}</div>"
     )
     return _html(
@@ -2755,7 +2802,6 @@ def _audit(conn, account: str, query: dict) -> dict:
         "Model calls and the decision trail for this account. Open a row for the reply or the reasons. This page does not approve orders.",
         body,
         chips,
-        _REFRESH,
     )
 
 
@@ -3661,6 +3707,76 @@ def _cap_text(value) -> str:
             shown = f"{amount / scale:.2f}".rstrip("0").rstrip(".")
             return f"{shown}{unit}"
     return f"{amount:,.0f}"
+
+
+def _trade_symbol(symbol: str, price: str, account: str) -> str:
+    return (
+        '<button class="btn ghost" type="button" data-cmd="trade-symbol" style="padding:4px 10px;font-size:11px"'
+        f' data-symbol="{escape(symbol, quote=True)}"'
+        f' data-price="{escape(price, quote=True)}"'
+        f' data-account="{escape(account, quote=True)}">Trade</button>'
+    )
+
+
+def _trade_price(conn, account: str, settings, symbol: str, form: dict) -> dict:
+    if symbol not in {item.upper() for item in settings.watchlist}:
+        return _pool_patch(False, f"{symbol} is not in this universe.", status=400)
+    from athena_strategy.agents import suggest_trade_price
+
+    side = (form.get("side") or ["BUY"])[0].strip().upper()
+    order = (form.get("order") or ["LMT"])[0].strip().upper()
+    if side not in {"BUY", "SELL"}:
+        side = "BUY"
+    if order not in {"LMT", "STP LMT"}:
+        order = "LMT"
+    result = suggest_trade_price(conn, settings, account, symbol, (form.get("last") or [""])[0], side, order)
+    if not result["ok"]:
+        return _pool_patch(False, result["message"], status=400)
+    body = {
+        "ok": True,
+        "message": result["reason"],
+        "limit": result["limit"],
+        "stop": result["stop"],
+        "reason": result["reason"],
+    }
+    return {"status": 200, "kind": "json", "body": json.dumps(body), "title": "", "lead": "", "chips": []}
+
+
+def _trade_send(account: str, settings, actor: str, symbol: str, form: dict) -> dict:
+    from athena_orchestrator.tasks import begin_trade
+    from athena_strategy.pool import clean_symbol
+
+    if symbol not in {item.upper() for item in settings.watchlist}:
+        return _pool_patch(False, f"{symbol} is not in this universe.", status=400)
+    try:
+        symbol = clean_symbol(symbol)
+        quantity = int((form.get("quantity") or ["0"])[0])
+        side = (form.get("side") or [""])[0].strip().upper()
+        order_type = (form.get("order") or [""])[0].strip().upper()
+        limit_price = _posted_price(form, "limit")
+        stop_price = _posted_price(form, "stop")
+        task = begin_trade(
+            os.environ.get("DATABASE_URL", "").strip(),
+            account,
+            actor,
+            symbol,
+            side,
+            quantity,
+            order_type,
+            limit_price,
+            stop_price,
+        )
+    except (ValueError, InvalidOperation) as exc:
+        return _pool_patch(False, str(exc) or "The order was not sent.", status=400)
+    body = {"ok": True, "message": "Sending to IB", "task": task}
+    return {"status": 200, "kind": "json", "body": json.dumps(body), "title": "", "lead": "", "chips": []}
+
+
+def _posted_price(form: dict, name: str) -> Decimal | None:
+    raw = (form.get(name) or [""])[0].strip()
+    if not raw:
+        return None
+    return Decimal(raw)
 
 
 def _edit_symbol(symbol: str, name: str, cap, classifiers: str, thesis: str, price: str, change: str, rank: str, phase: str) -> str:

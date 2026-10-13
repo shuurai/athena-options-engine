@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import threading
 import time
 import uuid
@@ -329,6 +330,128 @@ def begin_simulate(database_url: str, account: str, start: str, months: str) -> 
             daemon=True,
         ).start()
     return task
+
+
+def begin_trade(
+    database_url: str,
+    account: str,
+    actor: str,
+    symbol: str,
+    side: str,
+    quantity: int,
+    order_type: str,
+    limit_price: Decimal | None,
+    stop_price: Decimal | None,
+) -> dict:
+    """Send one stock order. The confirm on the Universe page is the consent."""
+    if not database_url:
+        raise ValueError("The store is not configured.")
+    if side not in {"BUY", "SELL"}:
+        raise ValueError("Side must be Buy or Sell.")
+    if order_type not in {"MKT", "LMT", "STP LMT"}:
+        raise ValueError("Order type must be Market, Limit, or Stop limit.")
+    if quantity < 1 or quantity > 1_000_000:
+        raise ValueError("Quantity must be a whole number of shares.")
+    if order_type != "MKT" and (limit_price is None or limit_price <= 0):
+        raise ValueError("Limit price is required.")
+    if order_type == "STP LMT" and (stop_price is None or stop_price <= 0):
+        raise ValueError("Stop price is required.")
+    task, fresh = _start("trade", f"{side} {symbol}", "Sending to IB")
+    if fresh:
+        threading.Thread(
+            target=_run_trade,
+            args=(task["id"], database_url, account, actor, symbol, side, quantity, order_type, limit_price, stop_price),
+            name="athena-trade",
+            daemon=True,
+        ).start()
+    return task
+
+
+def _run_trade(
+    task_id: str,
+    database_url: str,
+    account: str,
+    actor: str,
+    symbol: str,
+    side: str,
+    quantity: int,
+    order_type: str,
+    limit_price: Decimal | None,
+    stop_price: Decimal | None,
+) -> None:
+    import asyncio
+
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
+    broker = IbBroker()
+    try:
+        with _IB_LOCK:
+            if not broker.connect(host, port, _PROBE_CLIENT, False):
+                raise RuntimeError("IB Gateway did not connect.")
+            try:
+                if order_type == "MKT":
+                    ib_order_id = broker.place_market(account, symbol, side, quantity)
+                elif order_type == "STP LMT":
+                    ib_order_id = broker.place_stop_limit(account, symbol, side, quantity, limit_price, stop_price)
+                else:
+                    ib_order_id = broker.place_limit(account, symbol, side, quantity, limit_price)
+            finally:
+                broker.disconnect()
+        with connect(database_url) as conn:
+            _store_manual_order(
+                conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id,
+            )
+        _finish(task_id, "done", f"IB order {ib_order_id}.", f"{side} {symbol}")
+    except Exception as exc:
+        log.info("manual order failed symbol=%s error=%s", symbol, exc.__class__.__name__)
+        text = str(exc).strip() or "IB did not accept the order."
+        _finish(task_id, "error", text, "Not sent")
+
+
+def _store_manual_order(
+    conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id,
+) -> None:
+    draft_id = "draft_" + secrets.token_hex(3)
+    order_id = "ord_" + secrets.token_hex(3)
+    if order_type == "MKT":
+        price_text = "market"
+    elif order_type == "STP LMT":
+        price_text = f"stop {stop_price} limit {limit_price}"
+    else:
+        price_text = f"limit {limit_price}"
+    reason = f"{side} {quantity} {symbol} at {price_text}"
+    conn.execute(
+        """
+        INSERT INTO drafts (
+            id, symbol, tactic, contracts, status, reason, phase, account_id,
+            instrument, limit_price, multiplier, order_action
+        )
+        VALUES (%s, %s, 'MANUAL', %s, 'approved', %s, '', %s, 'STK', %s, '1', %s)
+        """,
+        (draft_id, symbol, quantity, reason, account, limit_price, side),
+    )
+    conn.execute(
+        """
+        INSERT INTO approvals (draft_id, actor, decision, account_id, reason)
+        VALUES (%s, %s, 'approve', %s, %s)
+        """,
+        (draft_id, actor, account, reason),
+    )
+    conn.execute(
+        """
+        INSERT INTO orders (
+            id, draft_id, account_id, symbol, tactic, action, contracts, limit_price,
+            status, ib_order_id, multiplier, order_type, stop_price
+        )
+        VALUES (%s, %s, %s, %s, 'MANUAL', %s, %s, %s, 'submitted', %s, '1', %s, %s)
+        """,
+        (order_id, draft_id, account, symbol, side, quantity, limit_price, ib_order_id, order_type, stop_price),
+    )
+    conn.commit()
 
 
 def begin_liquidate(database_url: str, account: str) -> dict:

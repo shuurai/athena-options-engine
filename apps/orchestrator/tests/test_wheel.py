@@ -17,6 +17,7 @@ from athena_orchestrator.pages import (
     _heat_color,
     _position_heatmap,
     _squarify,
+    _pool_row,
     _post_risk,
     _risk,
     _strategy,
@@ -158,6 +159,16 @@ class WheelAliasTest(unittest.TestCase):
         self.assertIsNone(refusal("SHORT_PUT", "ROLL"))
         self.assertIsNone(refusal("NAKED_CALL", "CLOSE"))
         self.assertEqual(refusal("MULTI_CONFLICT", "ROLL"), "manual_review")
+
+    def test_each_account_keeps_its_own_tactics(self) -> None:
+        from athena_strategy.wheel import enabled_functions
+
+        account_a = TacticFlags(csp=True, cc=False, strangle=False, long=False, may_buy=False)
+        account_b = TacticFlags(csp=False, cc=True, strangle=False, long=False, may_buy=False)
+        self.assertEqual(enabled_functions(account_a), frozenset({"CSP"}))
+        self.assertEqual(enabled_functions(account_b), frozenset({"CC"}))
+        self.assertNotIn("CC", enabled_functions(account_a))
+        self.assertNotIn("CSP", enabled_functions(account_b))
 
     def test_income_does_not_buy_unless_may_buy_is_on(self) -> None:
         self.assertFalse(may_buy(TacticFlags(long=True, intent="income")))
@@ -455,7 +466,7 @@ class WheelDbTest(unittest.TestCase):
     def test_odd_lot_at_the_rail_buys_the_gap_to_100(self) -> None:
         self._bars(self._high_closes())
         self._stock(1, "10")
-        ids = execute_opening(self.conn, self._settings(), ACCOUNT, SYMBOL)
+        ids = execute_opening(self.conn, self._settings(may_buy=True), ACCOUNT, SYMBOL)
         self.assertEqual(len(ids), 1)
         draft = self.conn.execute(
             "SELECT tactic, contracts, status FROM drafts WHERE id = %s",
@@ -473,6 +484,75 @@ class WheelDbTest(unittest.TestCase):
                 (ACCOUNT,),
             ).fetchone()
         )
+
+    def test_an_odd_lot_does_not_buy_when_may_buy_is_off(self) -> None:
+        self._bars(self._high_closes())
+        self._stock(1, "10")
+        ids = execute_opening(self.conn, self._settings(), ACCOUNT, SYMBOL)
+        self.assertEqual(ids, [])
+
+    def test_a_strangle_toggle_is_enough_without_csp_or_cc(self) -> None:
+        spot = self._bars(self._dip_closes())
+        self._rv_history()
+        self._stock(100, "10")
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._choices(spot, "C", ("1.12", "1.20", "1.30"))
+        ids = execute_opening(
+            self.conn,
+            self._settings(csp=False, cc=False, strangle=True),
+            ACCOUNT,
+            SYMBOL,
+            tags={"NEWS_WASH", "RV_HIGH"},
+        )
+        self.assertEqual(len(ids), 2)
+        reason = self.conn.execute(
+            "SELECT reason FROM tickets WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(reason, ("signaled_strangle",))
+
+    def test_an_account_does_not_screen_a_tactic_it_has_off(self) -> None:
+        from athena_strategy.screener import candidates as real_candidates
+
+        spot = self._bars(self._dip_closes())
+        self._rv_history()
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._choices(spot, "C", ("1.12", "1.20", "1.30"))
+        purposes = []
+
+        def _spy(*args, **kwargs):
+            purposes.append(kwargs.get("purpose"))
+            return real_candidates(*args, **kwargs)
+
+        with patch("athena_strategy.wheel.candidates", side_effect=_spy):
+            execute_opening(
+                self.conn,
+                self._settings(csp=True, cc=False, strangle=False, long=False, may_buy=False),
+                ACCOUNT,
+                SYMBOL,
+            )
+        self.assertNotIn("cc", purposes)
+        self.assertNotIn("strangle_put", purposes)
+        self.assertNotIn("strangle_call", purposes)
+
+    def test_strangle_off_does_not_open_both_legs(self) -> None:
+        spot = self._bars(self._dip_closes())
+        self._rv_history()
+        self._stock(100, "10")
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._choices(spot, "C", ("1.12", "1.20", "1.30"))
+        execute_opening(
+            self.conn,
+            self._settings(strangle=False),
+            ACCOUNT,
+            SYMBOL,
+            tags={"NEWS_WASH", "RV_HIGH"},
+        )
+        reason = self.conn.execute(
+            "SELECT reason FROM tickets WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertNotEqual(reason, ("signaled_strangle",))
 
     def test_may_buy_lets_an_income_name_buy_the_dip(self) -> None:
         spot = self._bars(self._dip_closes())
@@ -1472,6 +1552,11 @@ class WheelDbTest(unittest.TestCase):
         self.assertNotIn('class="card span-2" id="strategy-card"', body)
         self.assertNotIn('<div class="name">test</div>', body)
         self.assertEqual(body.count('<div class="name">'), 5)
+        self.assertIn("Used only by Auto Set Price", page["body"])
+        self.assertIn('value="Trade"', page["body"])
+        row = _pool_row(self.conn, ACCOUNT, load_active(self.conn, ACCOUNT), SYMBOL)
+        self.assertLess(row.index(">Edit</button>"), row.index(">Trade</button>"))
+        self.assertIn('data-cmd="trade-symbol"', row)
 
     def _settings_id(self) -> int:
         row = self.conn.execute(

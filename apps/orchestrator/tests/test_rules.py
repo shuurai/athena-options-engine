@@ -462,6 +462,33 @@ class OptionsAndSlotsTest(unittest.TestCase):
         self.assertEqual(late[0].quantity, Decimal("-1"))
         self.assertIsNone(late[0].market_price)
 
+    def test_a_stock_order_can_be_market_limit_or_stop(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from athena_exec.broker import IbBroker
+        from athena_settings.prompts import AGENT_ORDER, RUN_ORDER, TRADE_NAME, default_agents
+
+        self.assertIn(TRADE_NAME, default_agents())
+        self.assertNotIn(TRADE_NAME, RUN_ORDER)
+        self.assertNotIn(TRADE_NAME, AGENT_ORDER)
+        broker = IbBroker()
+        broker.readonly = False
+        ib = Mock()
+        trade = SimpleNamespace(order=SimpleNamespace(orderId=44), orderStatus=SimpleNamespace(status="Submitted"), log=[])
+        ib.qualifyContracts.return_value = [SimpleNamespace()]
+        ib.placeOrder.return_value = trade
+        broker._ib = ib
+        self.assertEqual(broker.place_market("U1", "ZZT", "BUY", 10), 44)
+        market = ib.placeOrder.call_args[0][1]
+        self.assertEqual(market.orderType, "MKT")
+        self.assertEqual(market.tif, "DAY")
+        self.assertEqual(broker.place_stop_limit("U1", "ZZT", "SELL", 4, Decimal("12.4"), Decimal("12.1")), 44)
+        stopped = ib.placeOrder.call_args[0][1]
+        self.assertEqual(stopped.orderType, "STP LMT")
+        self.assertEqual(stopped.lmtPrice, 12.4)
+        self.assertEqual(stopped.auxPrice, 12.1)
+
     def test_one_empty_history_quiets_the_symbol(self) -> None:
         from athena_exec.broker import IbBroker
 
@@ -1628,6 +1655,11 @@ class BlockedDraftsTest(unittest.TestCase):
         page = _audit(None, "", {})
         self.assertIn('data-panel="audit-legend"', page["body"])
         self.assertIn("Result types", page["body"])
+        self.assertIn('class="audit-table-head"', page["body"])
+        head, table = page["body"].split('id="audit-table"', 1)
+        self.assertIn('data-cmd="refresh-list"', head)
+        self.assertNotIn('data-cmd="refresh-list"', table)
+        self.assertEqual(page["actions"], "")
         legend = _result_legend()
         self.assertIn('id="audit-legend"', legend)
         self.assertIn("CYCLE MARGIN", legend)

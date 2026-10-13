@@ -23,6 +23,8 @@ RUN_ORDER = (
     "Consolidator",
 )
 
+TRADE_NAME = "Trade"
+
 AGENT_ROLES = {
     "Location": "Tags only. No order. Names where price sits in the 63-session channel and the long range.",
     "News": "Tags only. No order. A keyword score is used only when this agent does not run.",
@@ -31,6 +33,7 @@ AGENT_ROLES = {
     "Purchase": "One share purchase, or quiet. Used when the symbol is Long and Accumulate, and price is on the lower rail or at the long-range low.",
     "Call": "One covered call, or quiet. Used at the upper rail or the long-range high, and only when shares are already held.",
     "Consolidator": "Thinking on. Chooses the cash-secured put, covered call, or share price, and may sequence them.",
+    "Trade": "Suggests a limit and a stop for one manual stock order. The cycle does not call it.",
 }
 
 
@@ -191,6 +194,20 @@ def _standing_agents() -> dict[str, AgentPrompt]:
                 "Cash reserve: {{cash_reserve}}%\nProposals:\n{{proposals}}"
             ),
             reasoning=True,
+        ),
+        "Trade": AgentPrompt(
+            system=(
+                "You suggest a price for one stock order. You do not choose the size and you do not send the order.\n"
+                "Use the last price, today's bar, and today's headlines.\n"
+                "limit is the limit price. stop is the stop price for a stop limit, otherwise 0.\n"
+                'Reply with JSON only: {"limit":0,"stop":0,"reason":""}'
+            ),
+            execution=(
+                "Symbol: {{symbol}}\nSide: {{side}}\nOrder: {{order}}\nLast: {{last}}\n"
+                "Today open: {{open}}\nToday high: {{high}}\nToday low: {{low}}\n"
+                "Today close: {{close}}\nToday volume: {{volume}}\n"
+                "Headlines:\n{{headlines}}"
+            ),
         ),
         "Narrator": AgentPrompt(
             system=(

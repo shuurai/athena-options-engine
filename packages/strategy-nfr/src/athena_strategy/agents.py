@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 from athena_exec.halt import active_reason
 from athena_marketdata.pricing import Bar, daily_bars, last_daily_close
 from athena_settings.model import SettingsPayload, StrategySettings, TacticFlags
-from athena_settings.prompts import RUN_ORDER, range_names, resolved_agents
+from athena_settings.prompts import RUN_ORDER, TRADE_NAME, range_names, resolved_agents
 from athena_settings.resolve import deepseek_token, scoring_model
 from athena_strategy.drafts import apply_ticket_block, has_open_draft, open_quantity, stage_draft
 from athena_strategy.dsh import chat
@@ -39,6 +39,121 @@ _TACTICS = {"BUY": "BUY", "CSP": "OPEN_CSP", "CC": "OPEN_CC", "STRANGLE": "OPEN_
 _MIN_BARS = 63
 _INVALID_RETRIES = 1
 _TAG_AGENTS = ("Location", "News")
+
+
+def suggest_trade_price(conn, settings: SettingsPayload, account_id: str, symbol: str, last: str, side: str, order: str) -> dict:
+    """Ask the Trade prompt for a limit and a stop. Does not send an order."""
+    name = symbol.upper()
+    prompt = resolved_agents(settings)[TRADE_NAME]
+    context = _trade_context(conn, settings, name, last, side, order)
+    user = fill_prompt(prompt.execution, context)
+    model = scoring_model(settings)
+    provider = settings.ai.provider
+    token = deepseek_token(settings)
+    thinking = bool(prompt.reasoning)
+    result = chat(prompt.system, user, model, provider, token, thinking)
+    marked = "on" if thinking and provider != "DSH" else "off"
+    if result["error"]:
+        _record(conn, account_id, TRADE_NAME, name, model, provider, marked, result, {"error": result["error"]}, "error")
+        return {"ok": False, "message": result["error"]}
+    payload = _trade_reply(result["text"])
+    if payload is None:
+        _record(
+            conn, account_id, TRADE_NAME, name, model, provider, marked, result,
+            {"raw": result["text"], "stage": "schema"}, "invalid",
+        )
+        return {"ok": False, "message": "The reply was not a price."}
+    _record(conn, account_id, TRADE_NAME, name, model, provider, marked, result, payload, "ok")
+    return {
+        "ok": True,
+        "limit": payload["limit"],
+        "stop": payload["stop"],
+        "reason": payload["reason"],
+    }
+
+
+def _trade_reply(text: str) -> dict | None:
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.strip("`")
+        if raw.lower().startswith("json"):
+            raw = raw[4:].strip()
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        payload = json.loads(raw[start:end + 1])
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    limit = _number(payload.get("limit"))
+    stop = _number(payload.get("stop"))
+    if limit is None or limit <= 0:
+        return None
+    return {
+        "limit": format(limit, "f"),
+        "stop": "" if stop is None or stop <= 0 else format(stop, "f"),
+        "reason": str(payload.get("reason") or "").strip(),
+    }
+
+
+def _trade_context(conn, settings: SettingsPayload, symbol: str, last: str, side: str, order: str) -> dict[str, str]:
+    from datetime import datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+
+    from athena_exec.slots import symbol_market
+    from athena_marketdata.pricing import last_tradeable_price
+
+    flags = settings.tactic_flags.get(symbol, TacticFlags())
+    kind = symbol_market(symbol, flags.market or "")
+    zone_name = {"hk": "Asia/Hong_Kong", "ca": "America/Toronto"}.get(kind, "America/New_York")
+    zone = ZoneInfo(zone_name)
+    day = datetime.now(zone).date()
+    start = datetime.combine(day, time.min, tzinfo=zone)
+    shown = last.strip()
+    if not shown or shown in {"—", "-"}:
+        price = last_tradeable_price(conn, symbol)
+        shown = "none" if price is None else format(price, "f")
+    bar = conn.execute(
+        """
+        SELECT open, high, low, close, volume
+        FROM market_bars
+        WHERE symbol = %s AND source = 'ib-daily' AND ts::date = %s AND close > 0
+        ORDER BY ts DESC
+        LIMIT 1
+        """,
+        (symbol, day),
+    ).fetchone()
+    news = conn.execute(
+        """
+        SELECT title FROM news_events
+        WHERE symbol = %s AND dismissed = false AND ts >= %s AND ts < %s
+        ORDER BY ts DESC
+        LIMIT 8
+        """,
+        (symbol, start, start + timedelta(days=1)),
+    ).fetchall()
+    headlines = "none" if not news else "\n".join(f"- {row[0]}" for row in news)
+
+    def piece(value) -> str:
+        if bar is None or value is None:
+            return "none"
+        return format(Decimal(value), "f")
+
+    return {
+        "symbol": symbol,
+        "side": side or "BUY",
+        "order": order or "LMT",
+        "last": shown,
+        "open": piece(None if bar is None else bar[0]),
+        "high": piece(None if bar is None else bar[1]),
+        "low": piece(None if bar is None else bar[2]),
+        "close": piece(None if bar is None else bar[3]),
+        "volume": piece(None if bar is None else bar[4]),
+        "headlines": headlines,
+    }
 
 
 def fill_prompt(template: str, values: dict[str, Any]) -> str:
@@ -128,8 +243,14 @@ def run_legacy_signaled(conn: psycopg.Connection, settings: SettingsPayload, acc
                     {"filter": reason, "items": []},
                 )
                 continue
-            names = RUN_ORDER if level == "full" else _TAG_AGENTS
-            limited = "" if level == "full" else reason
+            flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+            if level == "full":
+                names = _names_for(flags, chain=True)
+            elif level == "shares":
+                names = _names_for(flags, chain=False)
+            else:
+                names = _TAG_AGENTS
+            limited = "" if level in {"full", "shares"} else reason
             created.extend(_run_symbol(conn, settings, account_id, symbol, names, limited))
         except Exception as exc:
             log.error("signaled entry failed symbol=%s error=%s", symbol, exc.__class__.__name__)
@@ -218,12 +339,34 @@ def eligible(conn, settings: SettingsPayload, account_id: str, symbol: str) -> t
         return "none", "symbol blocked"
     if len(_bars(conn, symbol)) < _MIN_BARS:
         return "none", "no_bars"
-    if not _has_chain(conn, symbol):
-        return "tag_only", "no_chain"
     flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
-    if not (flags.csp or flags.cc or flags.strangle):
+    from athena_strategy.wheel import may_buy
+
+    shares = flags.long or may_buy(flags)
+    if not _has_chain(conn, symbol):
+        if shares:
+            return "shares", ""
+        return "tag_only", "no_chain"
+    if not flags.options_on() and not shares:
         return "tag_only", "options off"
     return "full", ""
+
+
+def _names_for(flags: TacticFlags, chain: bool) -> tuple[str, ...]:
+    """Location and News, then only the toggles that are on, then the consolidator."""
+    from athena_strategy.wheel import may_buy
+
+    names = ["Location", "News"]
+    if chain and flags.csp:
+        names.append("CSP")
+    if flags.long or may_buy(flags):
+        names.append("Purchase")
+    if chain and flags.strangle:
+        names.append("Strangle")
+    if chain and flags.cc:
+        names.append("Call")
+    names.append("Consolidator")
+    return tuple(names)
 
 
 def _has_chain(conn, symbol: str) -> bool:
@@ -359,10 +502,22 @@ def _drafts(conn, settings, account_id, symbol, flags: TacticFlags, answers: dic
         if tactic is None:
             steps.append(_step(label, "dropped", "unknown tactic"))
             continue
-        if tactic == "BUY" and (not flags.long or flags.intent == "income"):
-            why = "Long is off" if not flags.long else "intent is Income"
-            steps.append(_step("BUY", "dropped", why))
+        if tactic == "OPEN_CSP" and not flags.csp:
+            steps.append(_step("CSP", "dropped", "csp off"))
             continue
+        if tactic == "OPEN_CC" and not flags.cc:
+            steps.append(_step("CC", "dropped", "cc off"))
+            continue
+        if tactic == "OPEN_STRANGLE" and not flags.strangle:
+            steps.append(_step("STRANGLE", "dropped", "strangle off"))
+            continue
+        if tactic == "BUY":
+            from athena_strategy.wheel import buy_access, may_buy
+
+            allowed, why = buy_access(flags)
+            if not may_buy(flags) or not allowed:
+                steps.append(_step("BUY", "dropped", why))
+                continue
         if has_open_draft(conn, account_id, symbol, tactic):
             steps.append(_step(_label(tactic), "dropped", "draft already open"))
             continue
@@ -599,6 +754,12 @@ def _result_line(agent: str, payload: dict, error: str) -> str:
     if agent == "Universe":
         codes = str(payload.get("classifiers") or "")
         return codes.replace(",", ", ") or "QUIET"
+    if agent == TRADE_NAME:
+        limit = payload.get("limit") or ""
+        stop = payload.get("stop") or ""
+        if not limit:
+            return "QUIET"
+        return f"limit {limit}" + (f" stop {stop}" if stop else "")
     drafts = payload.get("drafts") if isinstance(payload.get("drafts"), list) else []
     if not drafts:
         return "QUIET"
@@ -710,7 +871,7 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
     from athena_strategy.screener import prompt_sides
 
     puts, calls, clamped, cc_block, delta_source = prompt_sides(
-        conn, settings, account_id, symbol, reading, plan, last, date.today(),
+        conn, settings, account_id, symbol, reading, plan, last, date.today(), flags,
     )
     risk = settings.risk
     return {

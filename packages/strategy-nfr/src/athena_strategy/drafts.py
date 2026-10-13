@@ -144,12 +144,19 @@ _TACTIC_FLAG = {
 }
 
 
-def _tactic_on(settings: SettingsPayload, symbol: str, tactic: str) -> bool:
-    flag = _TACTIC_FLAG.get(tactic)
-    if flag is None:
-        return True
+def _tactic_on(settings: SettingsPayload, symbol: str, tactic: str, reason: str = "") -> bool:
+    """A leg is allowed when its own toggle is on. A strangle leg follows the strangle toggle."""
     flags = settings.tactic_flags.get(symbol.upper())
     if flags is None:
+        return True
+    if reason == "signaled_strangle" and flags.strangle and tactic in {"OPEN_CSP", "OPEN_CC"}:
+        return True
+    if tactic == "BUY":
+        from athena_strategy.wheel import may_buy
+
+        return may_buy(flags)
+    flag = _TACTIC_FLAG.get(tactic)
+    if flag is None:
         return True
     return bool(getattr(flags, flag))
 
@@ -731,7 +738,7 @@ def stage_draft(
         )
     if symbol.upper() in {item.upper() for item in settings.blocked_symbols}:
         return {"id": None, "status": "skipped", "detail": "symbol blocked", "contracts": contracts, "tactic": tactic}
-    if not _tactic_on(settings, symbol, tactic):
+    if not _tactic_on(settings, symbol, tactic, reason):
         flag = _TACTIC_FLAG.get(tactic, "tactic")
         return {"id": None, "status": "skipped", "detail": f"{flag} is off", "contracts": contracts}
     from athena_strategy.screener import outside_table

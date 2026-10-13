@@ -272,6 +272,9 @@ def cache_symbol_chain(conn, broker, settings: SettingsPayload, symbol: str, und
         conn, broker, symbol, list(expiries), today, underlying,
         trading_class, exchange, multiplier, strategy, expiry,
     )
+    flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+    if not flags.strangle:
+        return
     if expiry is None:
         log.info("strangle none symbol=%s", symbol)
         return

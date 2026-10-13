@@ -380,6 +380,48 @@ class WorkflowTest(unittest.TestCase):
             ],
         )
 
+    def test_an_unmarked_stock_uses_the_stored_close(self) -> None:
+        from athena_orchestrator.pages import _position_rows, _position_tr
+
+        expiry = date(2026, 12, 18)
+        self.conn.execute(
+            """
+            INSERT INTO positions (account_id, symbol, quantity, avg_price, sec_type, multiplier, simulated)
+            VALUES (%s, %s, 10, 12, 'STK', 1, false)
+            """,
+            (ACCOUNT, SYMBOL),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, expiry, contract_right,
+                strike, multiplier, simulated
+            )
+            VALUES (%s, %s, -1, 1.5, 'OPT', %s, 'P', 90, 100, false)
+            """,
+            (ACCOUNT, SYMBOL, expiry),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+            VALUES (%s, %s, 14, 16, 13, 15, 1000, 'ib-daily')
+            """,
+            (SYMBOL, datetime(2026, 10, 13, tzinfo=timezone.utc)),
+        )
+        self.conn.commit()
+        rows = _position_rows(self.conn, ACCOUNT)
+        stock = next(row for row in rows if row["sec_type"] == "STK")
+        option = next(row for row in rows if row["sec_type"] == "OPT")
+        self.assertEqual(stock["mark"], "15.00")
+        self.assertTrue(stock["stored_close"])
+        self.assertEqual(stock["value"], "150.00")
+        self.assertEqual(stock["pnl"], Decimal("30"))
+        self.assertIn(">close<", _position_tr(stock))
+        self.assertEqual(option["mark"], "")
+        self.assertEqual(option["value"], "")
+        self.assertIsNone(option["pnl"])
+        self.assertNotIn(">close<", _position_tr(option))
+
     def test_liquidate_sends_the_closes(self) -> None:
         expiry = date(2026, 12, 18)
         self.conn.execute(
@@ -426,6 +468,81 @@ class WorkflowTest(unittest.TestCase):
         ).fetchone()
         self.assertEqual(drafts, [])
         self.assertEqual(simulated[0], 0)
+
+    def test_a_confirmed_trade_is_stored_after_ib_accepts(self) -> None:
+        from athena_orchestrator.tasks import _run_trade
+
+        broker = Mock()
+        broker.connect.return_value = False
+        with patch("athena_orchestrator.tasks.IbBroker", return_value=broker):
+            _run_trade("zz-trade-off", os.environ["DATABASE_URL"], ACCOUNT, "tester", SYMBOL, "BUY", 15, "LMT", Decimal("11.2"), None)
+        quiet = self.conn.execute("SELECT count(*) FROM drafts WHERE account_id = %s", (ACCOUNT,)).fetchone()
+        self.assertEqual(quiet[0], 0)
+        broker.connect.return_value = True
+        broker.place_limit.return_value = 77
+        with patch("athena_orchestrator.tasks.IbBroker", return_value=broker):
+            _run_trade("zz-trade", os.environ["DATABASE_URL"], ACCOUNT, "tester", SYMBOL, "BUY", 15, "LMT", Decimal("11.2"), None)
+        broker.place_limit.assert_called_once_with(ACCOUNT, SYMBOL, "BUY", 15, Decimal("11.2"))
+        broker.place_market.assert_not_called()
+        row = self.conn.execute(
+            """
+            SELECT d.tactic, d.status, o.action, o.contracts, o.status, o.ib_order_id, o.order_type, o.multiplier, a.decision
+            FROM drafts d
+            JOIN orders o ON o.draft_id = d.id
+            JOIN approvals a ON a.draft_id = d.id
+            WHERE d.account_id = %s
+            """,
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(row, ("MANUAL", "approved", "BUY", 15, "submitted", 77, "LMT", "1", "approve"))
+
+    def test_auto_set_price_reads_todays_bar_and_news(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from athena_strategy.agents import suggest_trade_price
+
+        day = datetime.now(ZoneInfo("America/New_York")).date()
+        ts = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+        self.conn.execute(
+            """
+            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+            VALUES (%s, %s, 10, 11, 9, 10.5, 1000, 'ib-daily')
+            """,
+            (SYMBOL, ts),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO news_events (fingerprint, ts, symbol, source, event_type, sentiment, title)
+            VALUES ('zz-trade-news', now(), %s, 'test', 'GENERIC', 0, 'ZZT trade headline')
+            """,
+            (SYMBOL,),
+        )
+        self.conn.commit()
+        seen = {}
+
+        def fake_chat(system, user, model, provider, token, thinking):
+            seen["user"] = user
+            return {
+                "text": '{"limit": 12.5, "stop": 0, "reason": "near the low"}',
+                "tokens": 3,
+                "error": "",
+                "latency_ms": 1,
+                "request": {},
+            }
+
+        try:
+            with patch("athena_strategy.agents.chat", side_effect=fake_chat):
+                result = suggest_trade_price(self.conn, standard_payload(), ACCOUNT, SYMBOL, "10.25", "BUY", "LMT")
+        finally:
+            self.conn.execute("DELETE FROM news_events WHERE symbol = %s", (SYMBOL,))
+            self.conn.commit()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["limit"], "12.5")
+        self.assertEqual(result["stop"], "")
+        self.assertIn("ZZT trade headline", seen["user"])
+        self.assertIn("Today open: 10", seen["user"])
+        self.assertIn("Last: 10.25", seen["user"])
 
     def test_mock_send_order_stays_a_pending_draft(self) -> None:
         from athena_strategy.mock import prepare_mock_orders
@@ -1102,7 +1219,10 @@ class WorkflowTest(unittest.TestCase):
         self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
         self.conn.execute("DELETE FROM ai_calls WHERE account_id = %s", (ACCOUNT,))
         self.conn.commit()
-        self._pass(quiet[:2])
+        bare = standard_payload().model_copy(
+            update={"watchlist": [SYMBOL], "tactic_flags": {SYMBOL: TacticFlags()}}
+        )
+        self._pass(quiet[:2], bare)
         self.assertEqual(self._trail(), ("no_data", "no_chain"))
         self.assertEqual([row[0] for row in self._calls()], ["Location", "News"])
         self.assertTrue(all(row[1] == "ok" for row in self._calls()))
@@ -1192,7 +1312,12 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(self._trail(), ("no_data", "symbol blocked"))
         self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
         self.conn.commit()
-        off = self._audit_settings(csp=False, cc=False, strangle=False)
+        off = standard_payload().model_copy(
+            update={
+                "watchlist": [SYMBOL],
+                "tactic_flags": {SYMBOL: TacticFlags(csp=False, cc=False, strangle=False)},
+            }
+        )
         with patch("athena_strategy.agents.chat", return_value={
             "text": '{"tags":[],"news_wash":false}',
             "error": "",
@@ -1204,6 +1329,56 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(chat.call_count, 2)
         self.assertEqual(self._trail(), ("no_data", "options off"))
         self.assertTrue(all(row[1] == "ok" for row in self._calls()))
+
+    def test_a_cycle_calls_only_the_toggles_that_are_on(self) -> None:
+        self._sessions(63)
+        self._chain()
+        only_csp = standard_payload().model_copy(
+            update={
+                "watchlist": [SYMBOL],
+                "tactic_flags": {
+                    SYMBOL: TacticFlags(csp=True, cc=False, strangle=False, long=False, may_buy=False),
+                },
+            }
+        )
+        self._pass(
+            [
+                '{"tags":[]}',
+                '{"news_wash":false}',
+                '{"quiet":true}',
+                '{"thinking":"","drafts":[]}',
+            ],
+            only_csp,
+        )
+        self.assertEqual(
+            [row[0] for row in self._calls()],
+            ["Location", "News", "CSP", "Consolidator"],
+        )
+        self.conn.execute("DELETE FROM ai_calls WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM decision_trails WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM option_plans WHERE symbol = %s", (SYMBOL,))
+        self.conn.commit()
+        only_long = standard_payload().model_copy(
+            update={
+                "watchlist": [SYMBOL],
+                "tactic_flags": {
+                    SYMBOL: TacticFlags(csp=False, cc=False, strangle=False, long=True, intent="accumulate"),
+                },
+            }
+        )
+        self._pass(
+            [
+                '{"tags":[]}',
+                '{"news_wash":false}',
+                '{"quiet":true}',
+                '{"thinking":"","drafts":[]}',
+            ],
+            only_long,
+        )
+        self.assertEqual(
+            [row[0] for row in self._calls()],
+            ["Location", "News", "Purchase", "Consolidator"],
+        )
 
     def test_chain_snapshot_appends_and_skips_a_missing_bid(self) -> None:
         from athena_exec.session import cache_symbol_chain, record_chain_snapshot
@@ -1360,6 +1535,7 @@ class WorkflowTest(unittest.TestCase):
             data = json.loads(result["body"])
             self.assertTrue(data["ok"])
             self.assertIn(f'data-symbol="{SYMBOL}"', data["html"])
+            self.assertIn('class="pool-spin sim-spin"', data["html"])
             self.assertIn('aria-label="CSP"', data["html"])
             self.assertNotIn('class="pool-tgl on" type="submit" aria-label="CSP"', data["html"])
             fetched = json.loads(
@@ -1406,10 +1582,12 @@ class WorkflowTest(unittest.TestCase):
                 page["body"],
             )
             result = _post_universe(self.conn, ACCOUNT, {"action": ["seed"]}, "test")
-            self.assertIn("Added 35 seed symbols.", result["body"])
+            self.assertIn("Added 37 seed symbols.", result["body"])
             saved = load_active(self.conn, ACCOUNT)
             self.assertEqual(saved.watchlist[0], SYMBOL)
             self.assertEqual(saved.watchlist[1:], list(UNIVERSE_SEED))
+            self.assertEqual(saved.tactic_flags["KULR"].market, "us")
+            self.assertEqual(saved.tactic_flags["MRAM"].market, "us")
             again = _post_universe(self.conn, ACCOUNT, {"action": ["seed"]}, "test")
             self.assertIn("The pool already has the seed symbols.", again["body"])
             self.assertEqual(load_active(self.conn, ACCOUNT).watchlist, saved.watchlist)

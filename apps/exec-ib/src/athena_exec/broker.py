@@ -141,6 +141,11 @@ class IbBroker:
             log.info("gateway disconnect: %s", exc)
         self._ib = None
 
+    def place_market(self, account: str, symbol: str, action: str, quantity: int) -> int:
+        from ib_insync import MarketOrder
+
+        return self._place_stock(account, symbol, MarketOrder(action, quantity))
+
     def place_limit(
         self,
         account: str,
@@ -149,16 +154,37 @@ class IbBroker:
         quantity: int,
         limit_price: Decimal,
     ) -> int:
+        from ib_insync import LimitOrder
+
+        return self._place_stock(account, symbol, LimitOrder(action, quantity, float(limit_price)))
+
+    def place_stop_limit(
+        self,
+        account: str,
+        symbol: str,
+        action: str,
+        quantity: int,
+        limit_price: Decimal,
+        stop_price: Decimal,
+    ) -> int:
+        from ib_insync import StopLimitOrder
+
+        return self._place_stock(
+            account,
+            symbol,
+            StopLimitOrder(action, quantity, float(limit_price), float(stop_price)),
+        )
+
+    def _place_stock(self, account: str, symbol: str, order) -> int:
         if self.readonly or self._ib is None:
             raise RuntimeError("placeOrder refused on a read-only session")
-        from ib_insync import LimitOrder, Stock
+        from ib_insync import Stock
 
         exchange, currency = self._listed(symbol)
         contract = Stock(symbol, exchange, currency)
         qualified = self._ib.qualifyContracts(contract)
         if not qualified:
             raise RuntimeError(f"IB did not find {symbol} on {exchange}")
-        order = LimitOrder(action, quantity, float(limit_price))
         order.account = account
         order.tif = "DAY"
         trade = self._ib.placeOrder(contract, order)

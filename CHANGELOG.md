@@ -35,6 +35,14 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-13 | Add a reset card for the selected risk grade | [C-20261013-16](logs/2026-10-13.md#c-20261013-16) |
 | 2026-10-13 | Mark the console version 0.2.0 | [C-20261013-17](logs/2026-10-13.md#c-20261013-17) |
 | 2026-10-13 | Mark the console version 1.0.0 | [C-20261013-18](logs/2026-10-13.md#c-20261013-18) |
+| 2026-10-13 | Add a Universe trade panel that sends a stock order | [C-20261013-19](logs/2026-10-13.md#c-20261013-19) |
+| 2026-10-13 | Show a spinner while a universe row saves | [C-20261013-20](logs/2026-10-13.md#c-20261013-20) |
+| 2026-10-13 | Add KULR and MRAM to the universe seed | [C-20261013-21](logs/2026-10-13.md#c-20261013-21) |
+| 2026-10-13 | Price an unmarked stock from its stored close | [C-20261013-22](logs/2026-10-13.md#c-20261013-22) |
+| 2026-10-13 | Move the audit refresh onto the table | [C-20261013-23](logs/2026-10-13.md#c-20261013-23) |
+| 2026-10-13 | Cycle each name only when its toggle is on | [C-20261013-24](logs/2026-10-13.md#c-20261013-24) |
+| 2026-10-13 | Check a name with the tactic union | [C-20261013-25](logs/2026-10-13.md#c-20261013-25) |
+| 2026-10-13 | Check each tactic only on its account | [C-20261013-26](logs/2026-10-13.md#c-20261013-26) |
 
 ## Notes
 
