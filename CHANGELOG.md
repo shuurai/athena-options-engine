@@ -33,6 +33,7 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-13 | Document four risk grades before changing the form | [C-20261013-14](logs/2026-10-13.md#c-20261013-14) |
 | 2026-10-13 | Fill each risk grade from the appetite template | [C-20261013-15](logs/2026-10-13.md#c-20261013-15) |
 | 2026-10-13 | Add a reset card for the selected risk grade | [C-20261013-16](logs/2026-10-13.md#c-20261013-16) |
+| 2026-10-13 | Mark the console version 0.2.0 | [C-20261013-17](logs/2026-10-13.md#c-20261013-17) |
 
 ## Notes
 
