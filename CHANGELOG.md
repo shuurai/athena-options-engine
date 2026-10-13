@@ -43,6 +43,8 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-13 | Cycle each name only when its toggle is on | [C-20261013-24](logs/2026-10-13.md#c-20261013-24) |
 | 2026-10-13 | Check a name with the tactic union | [C-20261013-25](logs/2026-10-13.md#c-20261013-25) |
 | 2026-10-13 | Check each tactic only on its account | [C-20261013-26](logs/2026-10-13.md#c-20261013-26) |
+| 2026-10-13 | Pad the trade order note below the button | [C-20261013-27](logs/2026-10-13.md#c-20261013-27) |
+| 2026-10-13 | Show trade reasoning in a dashed card | [C-20261013-28](logs/2026-10-13.md#c-20261013-28) |
 
 ## Notes
 

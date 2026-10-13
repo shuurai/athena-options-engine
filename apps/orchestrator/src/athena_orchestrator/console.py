@@ -351,6 +351,19 @@ button.sort[data-dir="desc"] .down { opacity: 1; }
 .trade-box .seg { margin-top: 8px; }
 .trade-box .row-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .trade-box .row-actions .btn { width: 100%; }
+.trade-box .row-actions + .slot-note { padding-top: 16px; margin-bottom: 0; }
+.trade-reason {
+  margin-top: 16px; padding: 14px 16px;
+  border: 1px dashed #8a6a2f; background: #16130c;
+}
+.trade-reason[hidden] { display: none; }
+.trade-reason .k {
+  display: block; margin: 0 0 8px; font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: #d4b06a; font-family: var(--font-mono);
+}
+.trade-reason p { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--site-text); }
+.trade-reason.err { border-color: #8f3d3d; background: #160e0e; }
+.trade-reason.err .k { color: #e08a8a; }
 .pool-actions form { display: inline; }
 .card-lead { margin: 0 0 12px; font-size: 12.5px; color: var(--site-text-3); line-height: 1.5; }
 .slot-row { display: grid; grid-template-columns: 108px 1fr 16px 1fr 32px; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -2664,17 +2677,26 @@ _CLIENT_JS = r"""
         '<button type="button" data-order="STP LMT">Stop limit</button></div>' +
         '<label data-trade-limit>Limit<input class="input" name="limit" inputmode="decimal"></label>' +
         '<label data-trade-stop hidden>Stop<input class="input" name="stop" inputmode="decimal"></label>' +
-        '<p class="slot-note" data-trade-reason></p>' +
         '<div class="row-actions">' +
         '<button class="btn" type="button" data-trade-auto>Auto Set Price</button>' +
         '<button class="btn primary" type="button" data-trade-send>Place order</button></div>' +
-        '<p class="slot-note">Sends the order to IB for this account. Risk caps are not applied.</p>';
+        '<p class="slot-note">Sends the order to IB for this account. Risk caps are not applied.</p>' +
+        '<div class="trade-reason" data-trade-reason hidden><div class="k">Reasoning</div><p></p></div>';
       const sideBox = wrap.querySelector("[data-trade-side]");
       const orderBox = wrap.querySelector("[data-trade-order]");
       const limitRow = wrap.querySelector("[data-trade-limit]");
       const stopRow = wrap.querySelector("[data-trade-stop]");
-      const reason = wrap.querySelector("[data-trade-reason]");
+      const reasonCard = wrap.querySelector("[data-trade-reason]");
+      const reason = reasonCard.querySelector("p");
+      const reasonLabel = reasonCard.querySelector(".k");
       const auto = wrap.querySelector("[data-trade-auto]");
+      function showReason(text, failed) {
+        const message = text || "";
+        reason.textContent = message;
+        reasonCard.hidden = !message;
+        reasonCard.classList.toggle("err", Boolean(message && failed));
+        reasonLabel.textContent = failed ? "Notice" : "Reasoning";
+      }
       function pick(box, attr, value) {
         box.querySelectorAll("button").forEach((node) => {
           node.classList.toggle("on", node.getAttribute(attr) === value);
@@ -2710,7 +2732,7 @@ _CLIENT_JS = r"""
         if (auto.disabled) return;
         auto.disabled = true;
         auto.textContent = "Setting…";
-        reason.textContent = "";
+        showReason("");
         const body = new URLSearchParams({
           action: "price",
           symbol: symbol,
@@ -2725,14 +2747,14 @@ _CLIENT_JS = r"""
         }).then((res) => res.json().then((data) => ({ ok: res.ok, data: data }))).then((result) => {
           const data = result.data || {};
           if (!result.ok || !data.ok) {
-            reason.textContent = data.message || "No price";
+            showReason(data.message || "No price", true);
             return;
           }
           if (data.limit) wrap.querySelector("[name=limit]").value = data.limit;
           if (orderType() === "STP LMT" && data.stop) wrap.querySelector("[name=stop]").value = data.stop;
-          reason.textContent = data.reason || "";
+          showReason(data.reason || "", false);
         }).catch(() => {
-          reason.textContent = "The console did not answer.";
+          showReason("The console did not answer.", true);
         }).finally(() => {
           auto.disabled = orderType() === "MKT";
           auto.textContent = "Auto Set Price";
