@@ -17,6 +17,7 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-11 | Add cycle budget checks and a read-only book page | [C-20261011-2](logs/2026-10-11.md#c-20261011-2) |
 | 2026-10-12 | Close strategy holes for marks, rails, openings, and option spreads | [C-20261012-1](logs/2026-10-12.md#c-20261012-1) |
 | 2026-10-12 | Read the US session as standard time from 2 Nov 2026 | [C-20261012-2](logs/2026-10-12.md#c-20261012-2) |
+| 2026-10-13 | Cap IB quotes, skip a closed market, and stop after empty option history | [C-20261013-1](logs/2026-10-13.md#c-20261013-1) |
 
 ## Notes
 

@@ -12,6 +12,32 @@ HKT = ZoneInfo("Asia/Hong_Kong")
 US_STANDARD_FROM = date(2026, 11, 2)
 US_DAYLIGHT = (time(21, 30), time(4, 0))
 US_STANDARD = (time(22, 30), time(5, 0))
+HK_CASH = ((time(9, 30), time(12, 0)), (time(13, 0), time(16, 0)))
+
+
+def symbol_market(symbol: str, explicit: str = "") -> str:
+    """us, hk, or ca. A blank value treats a numeric code as Hong Kong and the rest as US."""
+    kind = (explicit or "").strip().lower()
+    if kind in {"us", "hk", "ca"}:
+        return kind
+    if str(symbol).strip().isdigit():
+        return "hk"
+    return "us"
+
+
+def cash_open(symbol: str, now: datetime, market: str = "") -> bool:
+    """True during that name's own cash session.
+
+    Hong Kong is the weekday morning and afternoon sessions.
+    US and Canada use the US cash leg, including the Friday overnight tail.
+    """
+    local = now.astimezone(HKT)
+    clock = local.timetz().replace(tzinfo=None)
+    weekday = local.weekday()
+    if symbol_market(symbol, market) == "hk":
+        return any(covers(weekday, clock, start, end) for start, end in HK_CASH)
+    window = US_STANDARD if local.date() >= US_STANDARD_FROM else US_DAYLIGHT
+    return covers(weekday, clock, window[0], window[1])
 
 
 def observe_allowed(now: datetime, slots: IBSlots, mode: str) -> bool:

@@ -586,9 +586,9 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
     rows = [_pool_row(conn, account, settings, symbol) for symbol in page]
     body_rows = "".join(rows)
     if not body_rows and offset == 0:
-        body_rows = '<tr><td colspan="15">The watchlist is empty.</td></tr>'
+        body_rows = '<tr><td colspan="16">The watchlist is empty.</td></tr>'
     if offset == 0:
-        body_rows += '<tr id="pool-empty" hidden><td colspan="15">No symbols match.</td></tr>'
+        body_rows += '<tr id="pool-empty" hidden><td colspan="16">No symbols match.</td></tr>'
     if _wants_rows(query):
         return _fragment(body_rows, more, nxt)
     classifier_options = "".join(
@@ -627,8 +627,9 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
         f"{draft_value}"
         '<div class="meta"><a href="/drafts" style="color:var(--site-primary)">open queue →</a></div></div>'
         "</div>"
-        '<div class="card fill"><h2>Symbol pool '
-        '<button class="more" type="button" data-cmd="add-symbol">+ add symbol</button></h2>'
+        '<div class="card fill"><h2><span>Symbol pool</span>'
+        '<span><button class="more" type="button" data-cmd="seed-defaults">seed defaults</button>'
+        '<button class="more" type="button" data-cmd="add-symbol">+ add symbol</button></span></h2>'
         '<div class="filters pool-filters">'
         '<input class="input" id="pool-keyword" type="search" placeholder="Keyword" autocomplete="off" spellcheck="false">'
         f'<select class="input" id="pool-classifier"><option value="">All classifiers</option>{classifier_options}</select>'
@@ -636,7 +637,7 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
         '<div class="scroll-y" data-feed="/universe" data-offset="'
         f'{nxt}" data-more="{"1" if more else "0"}"><table class="data" id="pool-table"><thead><tr>'
         f"{_sort_th('Symbol', 'symbol')}{_sort_th('Price', 'price')}<th>1D %</th><th>52w</th>{_sort_th('Mkt cap', 'cap')}"
-        "<th>Classifiers</th><th>IVR</th><th>Phase</th>"
+        "<th>Market</th><th>Classifiers</th><th>IVR</th><th>Phase</th>"
         "<th>Intent</th><th>Long</th><th>May buy</th><th>Enabled</th><th>CSP</th><th>CC</th><th>Strangle</th><th></th></tr></thead>"
         f"<tbody>{body_rows}</tbody></table></div></div>"
     )
@@ -1909,6 +1910,7 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_row('Client id', _tag(_env('IB_CLIENT_ID', '1')), 'The Athena session uses this id. Probes and history use another id.')}"
         f"{_row('Trading mode', _tag(mode, 'amber'), 'Paper or live, from the environment. The other book stays stored and hidden.')}"
         f"{_limit('Cycle minutes', 'cycle_minutes', current.cycle_minutes, 'Minutes between cycles. A wait already running keeps its clock. The next wait uses this.')}"
+        f"{_limit('Concurrent subscriptions', 'concurrent_subscriptions', current.ib.concurrent_subscriptions, 'How many IB quotes may be open at once. Further quotes wait.')}"
         '<p class="slot-note">Host, port, and client id stay on the logged-in Gateway. Slot windows are on the cockpit.</p></div></div>'
         '<div class="card fill"><h2>AI</h2><div class="scroll-y">'
         '<p class="card-lead">Scores news sentiment. Does not place orders.</p>'
@@ -2045,6 +2047,7 @@ def _pool_row(conn, account: str, settings, symbol: str) -> str:
         f"<td class=\"mono {tone}\">{escape(change)}</td>"
         f"{_band_cell(band, high_pct, low_pct)}"
         f"<td class=\"mono\" style=\"color:var(--site-text-3)\">{escape(_cap_text(cap))}</td>"
+        f"<td>{_market_select(symbol, flags.market or '')}</td>"
         f"<td>{_classifier_badges(classifiers)}</td>"
         f"<td class=\"mono\">{escape(rank)}</td>"
         f"<td>{phase_html}</td>"
@@ -2058,6 +2061,30 @@ def _pool_row(conn, account: str, settings, symbol: str) -> str:
         f"<td class=\"pool-actions\">{_edit_symbol(symbol, name, cap, classifiers, thesis, last, change, rank, phase)}{_sync_symbol(symbol)}{_remove_symbol(symbol)}</td>"
         "</tr>"
     )
+
+
+def _seed_universe(conn, account: str, payload: SettingsPayload, actor: str) -> dict:
+    """Add the paper universe. Names already in this pool stay, in their current order."""
+    from athena_settings.model import UNIVERSE_SEED
+
+    have = {item.upper() for item in payload.watchlist}
+    added = [symbol for symbol in UNIVERSE_SEED if symbol not in have]
+    if not added:
+        return _universe(conn, account, {}, "The pool already has the seed symbols.")
+    from athena_exec.slots import symbol_market
+
+    payload.watchlist.extend(added)
+    for symbol in added:
+        flags = payload.tactic_flags.get(symbol, TacticFlags())
+        if not flags.market:
+            payload.tactic_flags[symbol] = flags.model_copy(
+                update={"market": symbol_market(symbol)}
+            )
+    try:
+        save_settings(conn, account, payload, f"console:{actor}", f"universe seed {len(added)}")
+    except ValueError as exc:
+        return _universe(conn, account, {}, str(exc)) | {"status": 400}
+    return _universe(conn, account, {}, f"Added {len(added)} seed symbols.")
 
 
 def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
@@ -2082,6 +2109,8 @@ def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
     symbol = (form.get("symbol") or [""])[0].strip().upper()
     action = (form.get("action") or [""])[0]
     field = (form.get("field") or [""])[0]
+    if action == "seed":
+        return _seed_universe(conn, account, payload, actor)
     if not symbol:
         return fail("Symbol is required.")
     if action == "facts":
@@ -2094,6 +2123,13 @@ def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
         if symbol in {item.upper() for item in payload.watchlist}:
             return fail(f"{symbol} is already in the pool.")
         payload.watchlist.append(symbol)
+        kind = (form.get("market") or [""])[0].strip().lower()
+        if kind not in {"us", "hk", "ca"}:
+            from athena_exec.slots import symbol_market
+
+            kind = symbol_market(symbol)
+        flags = payload.tactic_flags.get(symbol, TacticFlags())
+        payload.tactic_flags[symbol] = flags.model_copy(update={"market": kind})
         try:
             save_settings(conn, account, payload, f"console:{actor}", f"universe add {symbol}")
         except ValueError as exc:
@@ -2110,6 +2146,13 @@ def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
             payload.blocked_symbols = [item for item in payload.blocked_symbols if item.upper() != symbol]
         else:
             payload.blocked_symbols.append(symbol)
+        removed = False
+    elif action == "market":
+        market = (form.get("market") or [""])[0].strip().lower()
+        if market not in {"us", "hk", "ca"}:
+            return fail("Market must be US, HK, or CA.")
+        flags = payload.tactic_flags.get(symbol, TacticFlags())
+        payload.tactic_flags[symbol] = flags.model_copy(update={"market": market})
         removed = False
     elif action == "intent":
         intent = (form.get("intent") or [""])[0]
@@ -2395,6 +2438,15 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         }
     )
     payload.notify = payload.notify.model_copy(update=notify_update)
+    raw_lines = (form.get("concurrent_subscriptions") or [""])[0].strip()
+    if raw_lines:
+        try:
+            lines = int(raw_lines)
+        except ValueError:
+            return _settings(conn, account, {}, "Concurrent subscriptions must be a whole number.") | {"status": 400}
+        if not 1 <= lines <= 50:
+            return _settings(conn, account, {}, "Concurrent subscriptions must be 1 to 50.") | {"status": 400}
+        payload.ib = payload.ib.model_copy(update={"concurrent_subscriptions": lines})
     payload.global_currency = posted_currency
     payload.cycle_minutes = numbers["cycle_minutes"]
     payload.privilege = current.privilege
@@ -2739,6 +2791,23 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
     for item in rows:
         item.pop("_at", None)
     return rows
+
+
+def _market_select(symbol: str, market: str) -> str:
+    from athena_exec.slots import symbol_market
+
+    chosen = symbol_market(symbol, market)
+    options = []
+    for value, label in (("us", "US"), ("hk", "HK"), ("ca", "CA")):
+        selected = " selected" if chosen == value else ""
+        options.append(f'<option value="{value}"{selected}>{label}</option>')
+    return (
+        '<form method="post" action="/universe">'
+        f'<input type="hidden" name="symbol" value="{escape(symbol, quote=True)}">'
+        '<input type="hidden" name="action" value="market">'
+        f'<select class="input intent" name="market" aria-label="Market for {escape(symbol, quote=True)}">'
+        f'{"".join(options)}</select></form>'
+    )
 
 
 def _intent_select(symbol: str, intent: str) -> str:

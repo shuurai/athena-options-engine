@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from athena_exec.broker import IbBroker
 from athena_settings import load_active
-from athena_settings.model import SettingsPayload
+from athena_settings.model import SettingsPayload, TacticFlags
 from athena_settings.repository import save_settings
 from athena_settings.resolve import deepseek_token, scoring_model
 from athena_store import connect
@@ -146,15 +146,22 @@ def _run_positions(task_id: str, database_url: str, account: str) -> None:
         _finish(task_id, "error", "IB did not return the book.", "Not done")
 
 
-def begin_fill(conn, database_url: str, account: str, actor: str, symbol: str, mode: str) -> dict:
+def begin_fill(conn, database_url: str, account: str, actor: str, symbol: str, mode: str, market: str = "") -> dict:
     """Queue a fill. Add also puts the ticker on the watchlist first."""
     symbol = clean_symbol(symbol)
     current = load_active(conn, account)
     if mode == "add":
         if symbol in {item.upper() for item in current.watchlist}:
             raise ValueError(f"{symbol} is already in the pool.")
+        from athena_exec.slots import symbol_market
+
         payload = SettingsPayload.model_validate(current.model_dump())
         payload.watchlist.append(symbol)
+        kind = market.strip().lower()
+        if kind not in {"us", "hk", "ca"}:
+            kind = symbol_market(symbol)
+        flags = payload.tactic_flags.get(symbol, TacticFlags())
+        payload.tactic_flags[symbol] = flags.model_copy(update={"market": kind})
         save_settings(conn, account, payload, f"console:{actor}", f"universe add {symbol}")
         verb = "Added"
     elif mode == "sync":

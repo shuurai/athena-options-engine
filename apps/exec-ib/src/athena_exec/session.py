@@ -10,10 +10,10 @@ from decimal import Decimal
 
 from psycopg.types.json import Jsonb
 
-from athena_exec.broker import BrokerPosition, IbBroker
+from athena_exec.broker import BrokerPosition, IbBroker, set_subscription_limit
 from athena_exec.gate import SOFT_BLOCKS, live_block_reason
 from athena_exec.halt import active_reason, note_nav
-from athena_exec.slots import HKT, slot_state
+from athena_exec.slots import HKT, cash_open, slot_state, symbol_market
 from athena_settings.model import SettingsPayload, TacticFlags
 from athena_exec.options import (
     atm_strikes,
@@ -25,7 +25,7 @@ from athena_exec.options import (
     strike_shortlist,
     wide_band,
 )
-from athena_marketdata.pricing import has_daily_on, last_tradeable_price
+from athena_marketdata.pricing import has_daily_on, has_ib_daily, last_tradeable_price
 
 log = logging.getLogger("athena.exec")
 
@@ -41,39 +41,55 @@ def run_session(
     also_sync: list[str] | None = None,
 ) -> list[tuple]:
     """Run one Athena slot. Returns fills that were new this cycle."""
+    created = broker is None
     broker = broker or IbBroker()
-    moment = now or datetime.now(HKT)
-    slot = slot_state(moment, settings.ib)
-    host = os.environ.get("IB_GATEWAY_HOST", settings.ib.gateway_host)
-    port = int(os.environ.get("IB_GATEWAY_PORT", str(settings.ib.gateway_port)))
-    client_id = int(os.environ.get("IB_CLIENT_ID", str(settings.ib.client_id)))
-    if not _connect_athena(broker, host, port, client_id, slot):
-        log.info("ib_session=%s account=%s", "disconnected" if slot == "mobile" else "idle", account)
-        return []
-    log.info("ib_session=connected account=%s", account)
+    set_subscription_limit(settings.ib.concurrent_subscriptions)
+    try:
+        moment = now or datetime.now(HKT)
+        slot = slot_state(moment, settings.ib)
+        host = os.environ.get("IB_GATEWAY_HOST", settings.ib.gateway_host)
+        port = int(os.environ.get("IB_GATEWAY_PORT", str(settings.ib.gateway_port)))
+        client_id = int(os.environ.get("IB_CLIENT_ID", str(settings.ib.client_id)))
+        if not _connect_athena(broker, host, port, client_id, slot):
+            log.info("ib_session=%s account=%s", "disconnected" if slot == "mobile" else "idle", account)
+            return []
+        log.info("ib_session=connected account=%s", account)
+        if hasattr(broker, "set_markets"):
+            broker.set_markets({symbol: _name_market(settings, symbol) for symbol in settings.watchlist})
 
-    _cache_quotes(conn, broker, settings.watchlist)
-    _cache_history(conn, broker, settings.watchlist, moment.date())
-    _cache_strangles(conn, broker, settings, moment.date())
-    _record_chain_marks(conn, broker, settings, moment.date())
-    if sync:
-        _refresh_account(conn, broker, settings, account, moment)
-    for other in also_sync or []:
-        if other and other != account:
-            _refresh_account(conn, broker, settings, other, moment)
-    if trading:
-        _submit_queued(conn, broker, slot, account)
-    else:
-        log.info("trading off account=%s", account)
-    noticed = _apply_fills(conn, account, broker.fills())
-    noticed.extend(_sync_order_status(conn, broker, account))
-    return noticed
+        _cache_quotes(conn, broker, settings, moment)
+        _cache_history(conn, broker, settings, moment)
+        _cache_strangles(conn, broker, settings, moment)
+        _record_chain_marks(conn, broker, settings, moment)
+        if sync:
+            _refresh_account(conn, broker, settings, account, moment)
+        for other in also_sync or []:
+            if other and other != account:
+                _refresh_account(conn, broker, settings, other, moment)
+        if trading:
+            _submit_queued(conn, broker, slot, account)
+        else:
+            log.info("trading off account=%s", account)
+        noticed = _apply_fills(conn, account, broker.fills())
+        noticed.extend(_sync_order_status(conn, broker, account))
+        return noticed
+    finally:
+        if created:
+            broker.disconnect()
 
 
-def _cache_quotes(conn, broker, symbols: list[str]) -> None:
+def _name_market(settings: SettingsPayload, symbol: str) -> str:
+    flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
+    return symbol_market(symbol, flags.market or "")
+
+
+def _cache_quotes(conn, broker, settings: SettingsPayload, now: datetime) -> None:
     hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
     wrote = False
-    for symbol in symbols:
+    for symbol in settings.watchlist:
+        if not cash_open(symbol, now, _name_market(settings, symbol)):
+            log.info("quote closed symbol=%s", symbol)
+            continue
         price = broker.last_price(symbol)
         if price is None:
             log.info("quote missing symbol=%s", symbol)
@@ -92,10 +108,14 @@ def _cache_quotes(conn, broker, symbols: list[str]) -> None:
         conn.commit()
 
 
-def _cache_history(conn, broker, symbols: list[str], today) -> None:
+def _cache_history(conn, broker, settings: SettingsPayload, now: datetime) -> None:
     wrote = False
-    for symbol in symbols:
-        if has_daily_on(conn, symbol, today):
+    today = now.astimezone(HKT).date()
+    for symbol in settings.watchlist:
+        if not cash_open(symbol, now, _name_market(settings, symbol)):
+            if has_ib_daily(conn, symbol):
+                continue
+        elif has_daily_on(conn, symbol, today):
             continue
         bars = broker.daily_history(symbol)
         if not bars:
@@ -302,17 +322,24 @@ def chain_names(settings: SettingsPayload) -> list[str]:
     return names
 
 
-def _cache_strangles(conn, broker, settings: SettingsPayload, today) -> None:
+def _cache_strangles(conn, broker, settings: SettingsPayload, now: datetime) -> None:
+    today = now.astimezone(HKT).date()
     for symbol in chain_names(settings):
+        if not cash_open(symbol, now, _name_market(settings, symbol)):
+            log.info("chain closed symbol=%s", symbol)
+            continue
         price = last_tradeable_price(conn, symbol)
         if price is None:
             continue
         cache_symbol_chain(conn, broker, settings, symbol, price, today)
 
 
-def _record_chain_marks(conn, broker, settings: SettingsPayload, today) -> None:
+def _record_chain_marks(conn, broker, settings: SettingsPayload, now: datetime) -> None:
     """Append one ATM mid per name. A replay never calls this."""
+    today = now.astimezone(HKT).date()
     for symbol in chain_names(settings):
+        if not cash_open(symbol, now, _name_market(settings, symbol)):
+            continue
         price = last_tradeable_price(conn, symbol)
         if price is None:
             continue
@@ -360,6 +387,11 @@ def record_chain_snapshot(conn, broker, settings: SettingsPayload, symbol: str, 
     return True
 
 
+def _history_quiet(broker, symbol: str) -> bool:
+    quiet = getattr(broker, "history_quiet", None)
+    return bool(quiet and quiet(symbol))
+
+
 def _choice_quote(broker, symbol, expiry, strike, right, trading_class, exchange, multiplier):
     """Ask and bid from one chain quote. A broker without a bid still returns the ask."""
     quote = getattr(broker, "option_quote", None)
@@ -392,10 +424,16 @@ def _store_choices(
         listed = broker.expiry_strikes(symbol, expiry, trading_class, exchange)
         rows = [("P", strike) for strike in strike_shortlist(listed, underlying, "P", width=width, otm_pct=distance, inside=inside)]
         rows.extend(("C", strike) for strike in strike_shortlist(listed, underlying, "C", width=width, otm_pct=distance, inside=inside))
+        quiet = False
         for right, strike in rows:
+            if _history_quiet(broker, symbol):
+                quiet = True
+                break
             limit_price, bid = _choice_quote(
                 broker, symbol, expiry, strike, right, trading_class, exchange, multiplier,
             )
+            if _history_quiet(broker, symbol):
+                quiet = True
             conn.execute(
                 """
                 INSERT INTO option_choices (
@@ -406,6 +444,11 @@ def _store_choices(
                 """,
                 (symbol, expiry, right, strike, limit_price, bid),
             )
+            if quiet:
+                break
+        if quiet:
+            log.info("option history stopped symbol=%s", symbol)
+            break
     conn.commit()
 
 

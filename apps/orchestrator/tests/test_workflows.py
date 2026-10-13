@@ -1372,6 +1372,52 @@ class WorkflowTest(unittest.TestCase):
             except ValueError:
                 pass
 
+    def test_settings_show_the_quote_cap(self) -> None:
+        from athena_orchestrator.pages import _settings
+
+        page = _settings(self.conn, ACCOUNT, {})
+        self.assertIn('name="concurrent_subscriptions"', page["body"])
+        self.assertIn("Concurrent subscriptions<button", page["body"])
+
+    def test_seed_defaults_adds_the_paper_universe(self) -> None:
+        from athena_orchestrator.pages import _post_universe, _universe
+        from athena_settings.model import UNIVERSE_SEED, SettingsPayload, standard_payload
+        from athena_settings.repository import load_active, save_settings
+
+        try:
+            before = load_active(self.conn, ACCOUNT)
+        except RuntimeError:
+            from athena_settings.repository import seed_standard_if_empty
+
+            seed_standard_if_empty(self.conn, ACCOUNT)
+            before = load_active(self.conn, ACCOUNT)
+        original = SettingsPayload.model_validate(
+            {key: before.model_dump()[key] for key in SettingsPayload.model_fields}
+        )
+        staged = standard_payload().model_copy(update={"watchlist": [SYMBOL]})
+        try:
+            save_settings(self.conn, ACCOUNT, staged, "test", "universe seed setup")
+            page = _universe(self.conn, ACCOUNT, {})
+            self.assertIn('aria-label="Market for ', page["body"])
+            self.assertIn(
+                'data-cmd="seed-defaults">seed defaults</button>'
+                '<button class="more" type="button" data-cmd="add-symbol">',
+                page["body"],
+            )
+            result = _post_universe(self.conn, ACCOUNT, {"action": ["seed"]}, "test")
+            self.assertIn("Added 35 seed symbols.", result["body"])
+            saved = load_active(self.conn, ACCOUNT)
+            self.assertEqual(saved.watchlist[0], SYMBOL)
+            self.assertEqual(saved.watchlist[1:], list(UNIVERSE_SEED))
+            again = _post_universe(self.conn, ACCOUNT, {"action": ["seed"]}, "test")
+            self.assertIn("The pool already has the seed symbols.", again["body"])
+            self.assertEqual(load_active(self.conn, ACCOUNT).watchlist, saved.watchlist)
+        finally:
+            try:
+                save_settings(self.conn, ACCOUNT, original, "test", "restore universe seed")
+            except ValueError:
+                pass
+
     def test_chain_list_skips_names_with_options_off(self) -> None:
         from athena_exec.session import chain_names
         from athena_settings.model import TacticFlags

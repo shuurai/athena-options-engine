@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from athena_exec.accounts import active_accounts, stamp_legacy_accounts, trading_mode
 from athena_exec.gate import live_block_reason
 from athena_exec.options import choose_expiry, choose_strikes, expiry_band, strike_shortlist
-from athena_exec.slots import draft_allowed, observe_allowed, slot_state
+from athena_exec.slots import cash_open, draft_allowed, observe_allowed, slot_state
 from athena_marketdata.pricing import Bar
 from athena_orchestrator.money import DASH, cash_rows, convert, ledger, marked, report_currency, show
 from athena_orchestrator.pages import PROFILES, _audit_result_tag, _audit_status_tag, _audit_tr, _position_nlv_stat, sim_targets
@@ -356,6 +356,78 @@ class OptionsAndSlotsTest(unittest.TestCase):
         self.assertLessEqual(pair[0], underlying * Decimal("0.9"))
         self.assertGreaterEqual(pair[1], underlying * Decimal("1.1"))
         self.assertIsNone(choose_strikes([180], underlying))
+
+    def test_a_third_quote_waits_for_a_free_line(self) -> None:
+        import threading
+        import time
+
+        from athena_exec.broker import set_subscription_limit, subscription
+
+        self.assertEqual(IBSlots().concurrent_subscriptions, 2)
+        set_subscription_limit(2)
+        inside: list[int] = []
+        release = threading.Event()
+
+        def occupy() -> None:
+            with subscription():
+                inside.append(1)
+                release.wait(2)
+
+        threads = [threading.Thread(target=occupy) for _ in range(2)]
+        try:
+            for thread in threads:
+                thread.start()
+            deadline = time.time() + 1
+            while len(inside) < 2 and time.time() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(len(inside), 2)
+            third_in = threading.Event()
+
+            def third() -> None:
+                with subscription():
+                    third_in.set()
+
+            extra = threading.Thread(target=third)
+            extra.start()
+            time.sleep(0.15)
+            self.assertFalse(third_in.is_set())
+            release.set()
+            extra.join(2)
+            self.assertTrue(third_in.is_set())
+        finally:
+            release.set()
+            for thread in threads:
+                thread.join(2)
+            set_subscription_limit(2)
+
+    def test_a_closed_market_skips_the_live_quote(self) -> None:
+        morning = datetime(2026, 10, 13, 10, 10, tzinfo=HKT)
+        self.assertFalse(cash_open("QCOM", morning))
+        self.assertTrue(cash_open("700", morning))
+        lunch = datetime(2026, 10, 13, 12, 30, tzinfo=HKT)
+        self.assertFalse(cash_open("QCOM", lunch))
+        self.assertFalse(cash_open("700", lunch))
+        evening = datetime(2026, 10, 13, 22, 0, tzinfo=HKT)
+        self.assertTrue(cash_open("QCOM", evening))
+        self.assertFalse(cash_open("700", evening))
+        saturday_tail = datetime(2026, 10, 17, 2, 0, tzinfo=HKT)
+        self.assertTrue(cash_open("QCOM", saturday_tail))
+        self.assertFalse(cash_open("700", saturday_tail))
+        saturday = datetime(2026, 10, 17, 10, 0, tzinfo=HKT)
+        self.assertFalse(cash_open("QCOM", saturday))
+        self.assertFalse(cash_open("700", saturday))
+        self.assertFalse(cash_open("RY", morning, "ca"))
+        self.assertTrue(cash_open("RY", evening, "ca"))
+
+    def test_one_empty_history_quiets_the_symbol(self) -> None:
+        from athena_exec.broker import IbBroker
+
+        broker = IbBroker()
+        self.assertFalse(broker.history_quiet("T"))
+        broker.note_history_gap("T", 162)
+        self.assertTrue(broker.history_quiet("T"))
+        broker.note_history_gap("QCOM", 200)
+        self.assertFalse(broker.history_quiet("QCOM"))
 
     def test_slot_clock(self) -> None:
         slots = IBSlots()

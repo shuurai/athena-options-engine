@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
+from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
-from typing import NamedTuple
+from typing import Iterator, NamedTuple
 
 log = logging.getLogger("athena.exec")
 
@@ -32,11 +34,78 @@ DISPLAY_CURRENCIES = ("HKD", "USD", "AUD", "CNY", "JPY", "CAD")
 _FX_DENIED = {162, 354, 10089, 10186}
 
 
+class _LineGate:
+    """How many IB quote lines may be open. Further requests wait."""
+
+    def __init__(self) -> None:
+        self._limit = 2
+        self._held = 0
+        self._cv = threading.Condition()
+
+    def set_limit(self, limit: int) -> None:
+        if limit < 1:
+            raise ValueError("concurrent subscriptions must be at least 1")
+        with self._cv:
+            self._limit = limit
+            self._cv.notify_all()
+
+    @contextmanager
+    def hold(self) -> Iterator[None]:
+        with self._cv:
+            while self._held >= self._limit:
+                self._cv.wait()
+            self._held += 1
+        try:
+            yield
+        finally:
+            with self._cv:
+                self._held -= 1
+                self._cv.notify()
+
+
+_LINES = _LineGate()
+
+
+def set_subscription_limit(limit: int) -> None:
+    """Apply the settings cap before the next quote."""
+    _LINES.set_limit(limit)
+
+
+def subscription():
+    """One open IB quote. Release it when the line is cancelled."""
+    return _LINES.hold()
+
+
 class IbBroker:
     def __init__(self) -> None:
         self._ib = None
         self.readonly = True
         self._fx_closed = False
+        self._markets: dict[str, str] = {}
+        self._quiet_history: set[str] = set()
+
+    def set_markets(self, mapping: dict[str, str]) -> None:
+        """Remember each name's market for this connection."""
+        self._markets = {key.upper(): value for key, value in mapping.items()}
+
+    def history_quiet(self, symbol: str) -> bool:
+        """True after IB reported no option history for this name."""
+        return symbol.upper() in self._quiet_history
+
+    def note_history_gap(self, symbol: str, code: int) -> None:
+        """Error 162 ends further option-history requests for this name."""
+        if code != 162:
+            return
+        self._quiet_history.add(symbol.upper())
+        log.info("option history quiet symbol=%s code=162", symbol.upper())
+
+    def _kind(self, symbol: str) -> str:
+        from athena_exec.slots import symbol_market
+
+        return symbol_market(symbol, self._markets.get(symbol.upper(), ""))
+
+    def _listed(self, symbol: str) -> tuple[str, str]:
+        return stock_venue(symbol, self._kind(symbol))
 
     def connected(self) -> bool:
         return self._ib is not None and self._ib.isConnected()
@@ -84,7 +153,7 @@ class IbBroker:
             raise RuntimeError("placeOrder refused on a read-only session")
         from ib_insync import LimitOrder, Stock
 
-        exchange, currency = stock_venue(symbol)
+        exchange, currency = self._listed(symbol)
         contract = Stock(symbol, exchange, currency)
         qualified = self._ib.qualifyContracts(contract)
         if not qualified:
@@ -110,7 +179,7 @@ class IbBroker:
             return None
         from ib_insync import Stock
 
-        exchange, currency = stock_venue(symbol)
+        exchange, currency = self._listed(symbol)
         contract = Stock(symbol, exchange, currency)
         if not self._ib.qualifyContracts(contract):
             return None
@@ -130,10 +199,11 @@ class IbBroker:
 
     def _read_quote(self, contract) -> Decimal | None:
         self._ib.reqMarketDataType(3)
-        ticker = self._ib.reqMktData(contract, "", False, False)
-        self._ib.sleep(2)
-        price = _ticker_price(ticker)
-        self._ib.cancelMktData(contract)
+        with subscription():
+            ticker = self._ib.reqMktData(contract, "", False, False)
+            self._ib.sleep(2)
+            price = _ticker_price(ticker)
+            self._ib.cancelMktData(contract)
         if price is not None:
             return price
         return _daily_close(self._ib, contract)
@@ -144,11 +214,12 @@ class IbBroker:
             return []
         from ib_insync import Stock
 
-        exchange, currency = stock_venue(symbol)
+        exchange, currency = self._listed(symbol)
         contract = Stock(symbol, exchange, currency)
         if not self._ib.qualifyContracts(contract):
             return []
-        bars = self._ib.reqHistoricalData(contract, "", "60 D", "1 day", "TRADES", True, 1)
+        with subscription():
+            bars = self._ib.reqHistoricalData(contract, "", "60 D", "1 day", "TRADES", True, 1)
         return list(bars or [])
 
     def history_span(self, symbol: str, duration: str, end: str = "") -> list[tuple]:
@@ -161,11 +232,12 @@ class IbBroker:
             return []
         from ib_insync import Stock
 
-        exchange, currency = stock_venue(symbol)
+        exchange, currency = self._listed(symbol)
         contract = Stock(symbol, exchange, currency)
         if not self._ib.qualifyContracts(contract):
             return []
-        bars = self._ib.reqHistoricalData(contract, end, duration, "1 day", "TRADES", True, 1)
+        with subscription():
+            bars = self._ib.reqHistoricalData(contract, end, duration, "1 day", "TRADES", True, 1)
         found = []
         for bar in bars or []:
             found.append(
@@ -188,10 +260,11 @@ class IbBroker:
             label = contract.localSymbol or contract.symbol
             raise RuntimeError(f"IB did not find {label}")
         what = "TRADES"
-        bars = self._ib.reqHistoricalData(contract, end, duration, bar_size, what, True, 1)
-        if not bars and getattr(contract, "secType", "") == "OPT":
-            what = "MIDPOINT"
+        with subscription():
             bars = self._ib.reqHistoricalData(contract, end, duration, bar_size, what, True, 1)
+            if not bars and getattr(contract, "secType", "") == "OPT":
+                what = "MIDPOINT"
+                bars = self._ib.reqHistoricalData(contract, end, duration, bar_size, what, True, 1)
         return [_candle(bar) for bar in bars or []]
 
     def describe(self, contract) -> dict:
@@ -245,7 +318,7 @@ class IbBroker:
             raise RuntimeError("placeOrder refused on a read-only session")
         from ib_insync import LimitOrder
 
-        currency = "HKD" if symbol.isdigit() else "USD"
+        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
         contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
         if not self._ib.qualifyContracts(contract):
             raise RuntimeError(f"IB did not find {symbol} {right} {strike} {expiry}")
@@ -270,7 +343,7 @@ class IbBroker:
             return None
         from ib_insync import Stock
 
-        exchange, currency = stock_venue(symbol)
+        exchange, currency = self._listed(symbol)
         stock = Stock(symbol, exchange, currency)
         if not self._ib.qualifyContracts(stock):
             return None
@@ -286,7 +359,7 @@ class IbBroker:
             return []
         from ib_insync import Option
 
-        currency = "HKD" if symbol.isdigit() else "USD"
+        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
         details = self._ib.reqContractDetails(
             Option(
                 symbol,
@@ -310,18 +383,20 @@ class IbBroker:
         """Delayed ask and bid from one ticker. The bid is the positive bid only."""
         if self._ib is None:
             return None, None
-        currency = "HKD" if symbol.isdigit() else "USD"
+        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
         contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
         if not self._ib.qualifyContracts(contract):
             return None, None
         self._ib.reqMarketDataType(3)
-        ticker = self._ib.reqMktData(contract, "", False, False)
-        self._ib.sleep(2)
-        ask = _ask(ticker)
-        bid = _positive(ticker.bid)
-        self._ib.cancelMktData(contract)
-        if ask is None and currency == "USD":
-            ask = _cboe_close(self._ib, symbol, expiry, strike, right, trading_class, multiplier)
+        with subscription():
+            ticker = self._ib.reqMktData(contract, "", False, False)
+            self._ib.sleep(2)
+            ask = _ask(ticker)
+            bid = _positive(ticker.bid)
+            self._ib.cancelMktData(contract)
+        if ask is None and self._kind(symbol) == "us" and not self.history_quiet(symbol):
+            ask, code = _cboe_close(self._ib, symbol, expiry, strike, right, trading_class, multiplier)
+            self.note_history_gap(symbol, code)
         return ask, bid
 
     def option_ask(
@@ -346,7 +421,7 @@ class IbBroker:
             return False
         from ib_insync import Stock
 
-        exchange, currency = stock_venue(symbol)
+        exchange, currency = self._listed(symbol)
         return bool(self._ib.qualifyContracts(Stock(symbol, exchange, currency)))
 
     def option_mid(
@@ -362,16 +437,17 @@ class IbBroker:
         """Delayed (bid + ask) / 2. Missing either side writes nothing."""
         if self._ib is None:
             return None
-        currency = "HKD" if symbol.isdigit() else "USD"
+        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
         contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
         if not self._ib.qualifyContracts(contract):
             return None
         self._ib.reqMarketDataType(3)
-        ticker = self._ib.reqMktData(contract, "", False, False)
-        self._ib.sleep(2)
-        bid = _positive(ticker.bid)
-        ask = _positive(ticker.ask)
-        self._ib.cancelMktData(contract)
+        with subscription():
+            ticker = self._ib.reqMktData(contract, "", False, False)
+            self._ib.sleep(2)
+            bid = _positive(ticker.bid)
+            ask = _positive(ticker.ask)
+            self._ib.cancelMktData(contract)
         if bid is None or ask is None:
             return None
         return (bid + ask) / Decimal(2)
@@ -547,9 +623,10 @@ class IbBroker:
         self._ib.errorEvent += hear
         bars = []
         try:
-            bars = self._ib.reqHistoricalData(
-                contract, "", "1 D", "1 min", "MIDPOINT", False, 1
-            )
+            with subscription():
+                bars = self._ib.reqHistoricalData(
+                    contract, "", "1 D", "1 min", "MIDPOINT", False, 1
+                )
         except Exception as exc:
             log.info("fx pair %s%s: %s", left, right, exc.__class__.__name__)
         finally:
@@ -625,21 +702,39 @@ def _option(
 
 
 def _daily_close(ib, contract) -> Decimal | None:
-    bars = ib.reqHistoricalData(contract, "", "5 D", "1 day", "TRADES", True, 1)
+    with subscription():
+        bars = ib.reqHistoricalData(contract, "", "5 D", "1 day", "TRADES", True, 1)
     if not bars or not bars[-1].close or bars[-1].close <= 0:
         return None
     return Decimal(str(bars[-1].close))
 
 
-def _cboe_close(ib, symbol: str, expiry: date, strike: Decimal, right: str, trading_class: str, multiplier: str) -> Decimal | None:
-    """SMART has no option history on this login. The CBOE print is the sell reference."""
+def _cboe_close(ib, symbol: str, expiry: date, strike: Decimal, right: str, trading_class: str, multiplier: str) -> tuple[Decimal | None, int]:
+    """SMART has no option history on this login. The CBOE print is the sell reference.
+
+    Error 162 means this name has no history to walk. The caller stops the rest of its strikes.
+    """
     contract = _option(symbol, expiry, strike, right, trading_class, "CBOE", "USD", multiplier)
     if not ib.qualifyContracts(contract):
-        return None
-    bars = ib.reqHistoricalData(contract, "", "1 D", "1 hour", "TRADES", False, 1)
+        return None, 0
+    notes: list[int] = []
+
+    def hear(_req_id, code, _message, _contract) -> None:
+        if code == 162:
+            notes.append(code)
+
+    ib.errorEvent += hear
+    bars = []
+    try:
+        with subscription():
+            bars = ib.reqHistoricalData(contract, "", "1 D", "1 hour", "TRADES", False, 1)
+    finally:
+        ib.errorEvent -= hear
+    if notes:
+        return None, 162
     if not bars or not bars[-1].close or bars[-1].close <= 0:
-        return None
-    return Decimal(str(bars[-1].close))
+        return None, 0
+    return Decimal(str(bars[-1].close)), 0
 
 
 def _number(value) -> Decimal | None:
@@ -718,10 +813,15 @@ def _candle(bar) -> dict:
     }
 
 
-def stock_venue(symbol: str) -> tuple[str, str]:
-    """Hong Kong numeric codes trade on SEHK in HKD. Other names stay US stocks."""
-    if symbol.isdigit():
+def stock_venue(symbol: str, market: str = "") -> tuple[str, str]:
+    """Venue and currency for one listed name. A blank market infers Hong Kong from a numeric code."""
+    from athena_exec.slots import symbol_market
+
+    kind = symbol_market(symbol, market)
+    if kind == "hk":
         return "SEHK", "HKD"
+    if kind == "ca":
+        return "SMART", "CAD"
     return "SMART", "USD"
 
 

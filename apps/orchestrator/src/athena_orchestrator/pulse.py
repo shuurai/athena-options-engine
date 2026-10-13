@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from athena_exec.broker import IbBroker
+from athena_exec.slots import HKT, cash_open, symbol_market
 from athena_marketdata.pricing import has_ib_daily
 from athena_orchestrator.tasks import _IB_LOCK
 from athena_store import connect
@@ -132,7 +133,7 @@ def _refresh(symbols: list[str]) -> None:
             for symbol in symbols
             if not has_ib_daily(conn, symbol)
         ]
-    prices, history = _pull(symbols, need_history)
+    prices, history = _pull(symbols, need_history, _book_markets())
     if not prices and not history:
         return
     hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
@@ -164,13 +165,36 @@ def _refresh(symbols: list[str]) -> None:
     log.info("pulse quotes=%s history=%s", len(prices), len(history))
 
 
-def _pull(symbols: list[str], need_history: list[str]) -> tuple[dict, dict]:
+def _book_markets() -> dict[str, str]:
+    """Markets from the active book. A missing book leaves each name to be inferred."""
+    from athena_exec.accounts import active_accounts
+    from athena_settings.repository import load_active
+
+    accounts = active_accounts()
+    if not _URL or not accounts:
+        return {}
+    try:
+        with connect(_URL) as conn:
+            settings = load_active(conn, accounts[0])
+    except Exception as exc:
+        log.info("pulse markets skipped error=%s", exc.__class__.__name__)
+        return {}
+    found = {}
+    for symbol in settings.watchlist:
+        flags = settings.tactic_flags.get(symbol.upper())
+        explicit = flags.market if flags is not None and flags.market else ""
+        found[symbol.upper()] = symbol_market(symbol, explicit)
+    return found
+
+
+def _pull(symbols: list[str], need_history: list[str], markets: dict[str, str]) -> tuple[dict, dict]:
     import asyncio
 
     try:
         asyncio.get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
+    _apply_subscription_limit()
     host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
     port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
     broker = IbBroker()
@@ -181,10 +205,13 @@ def _pull(symbols: list[str], need_history: list[str]) -> tuple[dict, dict]:
             log.info("pulse gateway down")
             return {}, {}
         try:
+            broker.set_markets(markets)
+            now = datetime.now(HKT)
             for symbol in symbols:
-                price = broker.last_price(symbol)
-                if price is not None:
-                    prices[symbol] = price
+                if cash_open(symbol, now, markets.get(symbol.upper(), "")):
+                    price = broker.last_price(symbol)
+                    if price is not None:
+                        prices[symbol] = price
                 if symbol in need_history:
                     bars = broker.daily_history(symbol)
                     if bars:
@@ -192,3 +219,21 @@ def _pull(symbols: list[str], need_history: list[str]) -> tuple[dict, dict]:
         finally:
             broker.disconnect()
     return prices, history
+
+
+def _apply_subscription_limit() -> None:
+    """Use the active book's quote cap. A missing book keeps the default of 2."""
+    from athena_exec.accounts import active_accounts
+    from athena_exec.broker import set_subscription_limit
+    from athena_settings.repository import load_active
+
+    accounts = active_accounts()
+    if not _URL or not accounts:
+        return
+    try:
+        with connect(_URL) as conn:
+            settings = load_active(conn, accounts[0])
+    except Exception as exc:
+        log.info("pulse limit skipped error=%s", exc.__class__.__name__)
+        return
+    set_subscription_limit(settings.ib.concurrent_subscriptions)

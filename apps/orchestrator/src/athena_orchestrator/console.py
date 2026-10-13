@@ -787,6 +787,7 @@ def _post_tasks(conn, form: dict, actor: str, database_url: str) -> tuple[int, s
                 actor,
                 (form.get("symbol") or [""])[0],
                 action,
+                (form.get("market") or [""])[0],
             )
     except ValueError as exc:
         return 400, json.dumps({"ok": False, "message": str(exc)}), "json"
@@ -2563,14 +2564,38 @@ _CLIENT_JS = r"""
       wrap.querySelector("input").focus();
       return;
     }
+    if (cmd === "seed-defaults") {
+      btn.disabled = true;
+      fetch("/universe", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "action=seed"
+      }).then((res) => {
+        if (!res.ok) throw new Error("seed");
+        location.reload();
+      }).catch(() => {
+        btn.disabled = false;
+        toast("Not seeded", "The console did not answer.", "err");
+      });
+      return;
+    }
     if (cmd === "add-symbol") {
       const wrap = document.createElement("form");
       wrap.id = "add-symbol-form";
       wrap.method = "post";
       wrap.action = "/universe";
       wrap.innerHTML = '<input class="input mono" name="symbol" placeholder="Ticker" required autocomplete="off">' +
+        '<select class="input" name="market" aria-label="Market" style="margin-top:8px">' +
+        '<option value="us">US</option><option value="hk">HK</option><option value="ca">CA</option></select>' +
         '<input type="hidden" name="action" value="add">' +
         '<p class="slot-note" style="margin:10px 0 0">Athena looks up the name and size, syncs a price once, and DSH picks the classifier badges.</p>';
+      const marketPick = wrap.querySelector("[name=market]");
+      let marketTouched = false;
+      marketPick.addEventListener("change", () => { marketTouched = true; });
+      wrap.querySelector("[name=symbol]").addEventListener("input", (event) => {
+        if (marketTouched) return;
+        marketPick.value = /^\d+$/.test((event.target.value || "").trim()) ? "hk" : "us";
+      });
       const cancel = document.createElement("button");
       cancel.className = "btn ghost";
       cancel.type = "button";
@@ -2586,7 +2611,8 @@ _CLIENT_JS = r"""
         ok.disabled = true;
         ok.classList.add("busy");
         const symbol = wrap.querySelector("[name=symbol]").value.toUpperCase();
-        post("/api/tasks", "action=add&symbol=" + encodeURIComponent(symbol)).then((result) => {
+        const market = wrap.querySelector("[name=market]").value;
+        post("/api/tasks", "action=add&symbol=" + encodeURIComponent(symbol) + "&market=" + encodeURIComponent(market)).then((result) => {
           if (!result.ok) {
             ok.disabled = false;
             ok.classList.remove("busy");

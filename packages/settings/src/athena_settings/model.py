@@ -48,6 +48,7 @@ class IBSlots(BaseModel):
     gateway_host: str = "127.0.0.1"
     gateway_port: int = 4001
     client_id: int = 1
+    concurrent_subscriptions: int = 2
 
 
 class NewsSettings(BaseModel):
@@ -160,6 +161,7 @@ class TacticFlags(BaseModel):
     intent: Literal["income", "both", "accumulate"] = "income"
     long: bool = False
     may_buy: bool | None = None
+    market: Literal["us", "hk", "ca"] | None = None
 
     def options_on(self) -> bool:
         """A chain is useful only when one option tactic is still on."""
@@ -256,6 +258,14 @@ class StrategySettings(BaseModel):
 
 
 SIM_SYMBOLS = ["NVDA", "MSFT", "NOK", "AAPL", "IGV", "NIO", "AMZN", "AVGO"]
+
+# The paper universe, used by Seed defaults. Names already in the pool stay.
+UNIVERSE_SEED = (
+    "NVDA", "QCOM", "T", "700", "1810", "MRVL", "NOK", "DRAM", "AAPL", "ORCL",
+    "INTC", "SMH", "GLD", "GOOGL", "AMZN", "SKHY", "GLW", "NIO", "992", "MSFT",
+    "SPCX", "AVGO", "ROKU", "AMD", "CNXC", "RDW", "RARE", "IGV", "BABA", "META",
+    "TSLA", "SPY", "QQQ", "9988", "9888",
+)
 
 
 class SettingsPayload(BaseModel):
