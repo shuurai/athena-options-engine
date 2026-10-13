@@ -1,7 +1,6 @@
-"""A second Gateway login that keeps order status current.
+"""A Gateway login that keeps order status current.
 
-Client id 2 connects for a cycle or a manual order and then disconnects.
-This login stays up on the next client id and writes what IB reports.
+The cycle keeps the session id. This login stays up on the next id and writes what IB reports.
 """
 
 from __future__ import annotations
@@ -23,13 +22,10 @@ _LISTENERS: dict[str, list[queue.Queue]] = {}
 
 
 def order_client_id() -> int:
-    """The watcher login. IB_ORDER_CLIENT_ID wins. Otherwise the session id plus one."""
-    chosen = os.environ.get("IB_ORDER_CLIENT_ID", "").strip()
-    if chosen:
-        return int(chosen)
-    session = os.environ.get("IB_CLIENT_ID", "").strip()
-    base = int(session) if session else 2
-    return base + 1
+    """The watcher login. One past the session id, unless IB_ORDER_CLIENT_ID is set."""
+    from athena_exec.clients import client_id
+
+    return client_id("orders")
 
 
 def publish(account_id: str, order_id: str) -> None:

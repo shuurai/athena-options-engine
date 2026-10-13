@@ -50,6 +50,9 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-13 | Add a live Orders page for the selected account | [C-20261013-31](logs/2026-10-13.md#c-20261013-31) |
 | 2026-10-13 | Show order status and tactic as badges | [C-20261013-32](logs/2026-10-13.md#c-20261013-32) |
 | 2026-10-13 | Show the order side as a badge | [C-20261013-33](logs/2026-10-13.md#c-20261013-33) |
+| 2026-10-13 | Give each Gateway login its own client id | [C-20261013-34](logs/2026-10-13.md#c-20261013-34) |
+| 2026-10-14 | Stream delayed prices, left-align each IVR, and clip the cockpit log | [C-20261014-1](logs/2026-10-14.md#c-20261014-1) |
+| 2026-10-14 | Show one notice when a stock order is sent | [C-20261014-2](logs/2026-10-14.md#c-20261014-2) |
 
 ## Notes
 

@@ -360,10 +360,12 @@ def _live_quote(fields: dict):
 
     host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
     port = int(os.environ.get("IB_GATEWAY_PORT", "4001"))
-    client_id = int(os.environ.get("IB_CLIENT_ID", "1")) + 20
+    from athena_exec.clients import client_id
+
+    login = client_id("telegram")
     broker = IbBroker()
     try:
-        if not broker.connect(host, port, client_id, True):
+        if not broker.connect(host, port, login, True):
             return None
         return broker.quote(fields["kind"], fields["symbol"])
     finally:

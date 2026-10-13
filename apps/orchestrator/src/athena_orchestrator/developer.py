@@ -13,7 +13,8 @@ from datetime import date, datetime
 
 from athena_exec.accounts import active_accounts
 from athena_exec.broker import IbBroker, stock_venue
-from athena_orchestrator.tasks import _IB_LOCK, _PROBE_CLIENT
+from athena_exec.clients import client_id
+from athena_orchestrator.tasks import _IB_LOCK
 from athena_settings import load_active
 from athena_store import connect
 
@@ -316,7 +317,7 @@ def _finish_work(task_id: str, work) -> None:
     broker = IbBroker()
     try:
         with _IB_LOCK:
-            if not broker.connect(host, port, _PROBE_CLIENT, True):
+            if not broker.connect(host, port, client_id("probe"), True):
                 raise RuntimeError("IB Gateway did not connect.")
             try:
                 result = work(broker)

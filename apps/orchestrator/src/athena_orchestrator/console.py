@@ -414,6 +414,37 @@ table.data tbody tr.phase-pick.selected:hover {
 .news-title { color: var(--site-primary); }
 .px-tick { animation: px-tick .7s ease; }
 @keyframes px-tick { 0% { color: #93c5fd; } 100% { color: inherit; } }
+.stage > .share.cockpit-board { flex: 2 1 0; grid-template-columns: 2fr 1fr 1fr; }
+.cockpit-board .log-trail { grid-column: 3; grid-row: 1 / span 2; overflow: hidden; }
+.ivr-spark { overflow: hidden; height: 26px; }
+.log-roll {
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+}
+.log-line { white-space: nowrap; overflow: hidden; }
+.log-time { color: var(--site-text-4); }
+.log-name { color: var(--site-text-3); }
+.log-msg { color: var(--site-text); }
+.log-lvl.INFO { color: #6b96f2; }
+.log-lvl.WARN { color: #fbbf24; }
+.log-lvl.ERROR, .log-lvl.CRITICAL { color: #ea3943; }
+tr.pulse-hit td { animation: pulse-row .5s ease; }
+tr.pulse-hit b, tr.pulse-hit .px { animation: pulse-ink .5s ease; }
+@keyframes pulse-row {
+  0% { background: #1c3a66; }
+  100% { background: transparent; }
+}
+@keyframes pulse-ink {
+  0% { color: #fff; }
+  100% { color: inherit; }
+}
+@media (max-width: 1100px) {
+  .stage > .share.cockpit-board { grid-template-columns: 1fr; }
+  .cockpit-board .log-trail { grid-column: auto; grid-row: auto; min-height: 160px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  tr.pulse-hit td, tr.pulse-hit b, tr.pulse-hit .px { animation: none; }
+}
 .input { width: 100%; padding: 9px 11px; border: 1px solid var(--site-border-strong); font: 12.5px var(--font-mono); background: #0a0c10; color: var(--site-text); }
 .sim-date { position: relative; margin-top: 4px; }
 .sim-date .k { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
@@ -658,6 +689,12 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
 
                 self._send(200, json.dumps(cycle_view()), "json")
                 return
+            if parsed.path == "/api/pulse/ticks":
+                self._send_pulse()
+                return
+            if parsed.path == "/api/logs":
+                self._send_logs()
+                return
             if parsed.path == "/api/pulse":
                 with connect(database_url) as conn:
                     from athena_orchestrator.pulse import snapshot
@@ -717,6 +754,64 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def _open_stream(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+
+        def _send_pulse(self) -> None:
+            from queue import Empty
+
+            from athena_orchestrator.pulse import subscribe_ticks, unsubscribe_ticks
+
+            self._open_stream()
+            listener = subscribe_ticks()
+            try:
+                while True:
+                    try:
+                        payload = listener.get(timeout=15)
+                    except Empty:
+                        self.wfile.write(b":\n\n")
+                        self.wfile.flush()
+                        continue
+                    self.wfile.write(("data: " + json.dumps(payload) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                return
+            finally:
+                unsubscribe_ticks(listener)
+
+        def _send_logs(self) -> None:
+            from queue import Empty
+
+            from athena_orchestrator.runtime import subscribe_trail, trail_recent, unsubscribe_trail
+
+            listener = subscribe_trail()
+            recent = trail_recent()
+            sent = {id(line) for line in recent}
+            self._open_stream()
+            try:
+                for line in recent:
+                    self.wfile.write(("data: " + json.dumps(line) + "\n\n").encode("utf-8"))
+                self.wfile.flush()
+                while True:
+                    try:
+                        line = listener.get(timeout=15)
+                    except Empty:
+                        self.wfile.write(b":\n\n")
+                        self.wfile.flush()
+                        continue
+                    if id(line) in sent:
+                        continue
+                    self.wfile.write(("data: " + json.dumps(line) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                return
+            finally:
+                unsubscribe_trail(listener)
 
         def _send_events(self, account: str) -> None:
             from queue import Empty
@@ -1273,15 +1368,14 @@ def _cockpit_body(
   <div class="card stat"><div class="label">pending drafts</div><div class="value" data-sleeve="pending" style="color:var(--site-primary)">{facts["pending"]}</div>
     <div class="meta">{ttl}<a href="/drafts" style="color:var(--site-primary)">open queue →</a></div></div>
 </div>
-<div class="grid cols-2 share">
+<div class="grid share cockpit-board">
   <div class="card"><h2><span>sleeve nlv <span class="tag">stored weeks</span></span> <button class="more" data-cmd="nlv" type="button">full view →</button></h2>
     {nlv_box}<div class="month-row">{labels}</div></div>
   <div class="card"><h2>monthly premium vs net cash <button class="more" data-cmd="pnl" type="button">full view →</button></h2>
     {pnl_box}
     <div class="month-row">{pnl_labels}</div>
     <div class="chart-legend"><span><i style="background:#16c784"></i>up month</span><span><i style="background:#ea3943"></i>down month</span></div></div>
-</div>
-<div class="grid cols-2 share">
+  <div class="card log-trail"><h2>log trail</h2><div class="log-roll" id="log-roll"></div></div>
   <div class="card"><h2><span>ib session schedule <span class="tag">today</span></span> <button class="more" data-cmd="slots" type="button">edit slots →</button></h2>
     <table class="data"><thead><tr><th>window (hkt)</th><th>owner</th><th>status</th></tr></thead><tbody>{slot_rows}</tbody></table></div>
   <div class="card health-card" style="display:flex;flex-direction:column">
@@ -1317,7 +1411,7 @@ def _cockpit_body(
 def _watch_html(rows: list[dict]) -> str:
     body = []
     for row in rows:
-        spark = f'<span class="ivr-spark" data-iv="{escape(json.dumps(row["iv"]), quote=True)}" style="display:inline-block;width:110px;vertical-align:middle"></span>'
+        spark = f'<span class="ivr-spark" data-fit="left" data-iv="{escape(json.dumps(row["iv"]), quote=True)}" style="display:inline-block;width:110px;vertical-align:middle"></span>'
         body.append(
             "<tr>"
             f"<td><b>{escape(row['symbol'])}</b></td>"
@@ -1524,6 +1618,22 @@ _CLIENT_JS = r"""
   }
   function sparkline(el, values, color, fill) {
     if (!values || values.length < 2) return;
+    if (el.getAttribute("data-fit") === "left") {
+      const cell = 110, h = 26;
+      const fit = (cell - 12) / (values.length - 1);
+      const step = Math.min(14, fit);
+      const w = Math.round(12 + (values.length - 1) * step);
+      const min = Math.min.apply(null, values);
+      const max = Math.max.apply(null, values);
+      const span = max - min || 1;
+      const d = values.map((v, i) => {
+        const x = 6 + i * step;
+        const y = 3 + (1 - (v - min) / span) * (h - 6);
+        return (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
+      }).join(" ");
+      el.innerHTML = '<svg viewBox="0 0 ' + w + " " + h + '" width="' + w + '" height="' + h + '" preserveAspectRatio="xMinYMid meet"><path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.6"></path></svg>';
+      return;
+    }
     const w = 560, h = Math.max(el.clientHeight || 26, 26);
     const raw = el.getAttribute("data-threshold");
     let floor = null, ceiling = null, guide = "";
@@ -2002,7 +2112,10 @@ _CLIENT_JS = r"""
   function post(url, body) {
     return fetch(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body }).then((res) => res.json());
   }
+  const watchedTasks = new Set();
   function watchTask(id) {
+    if (!id || watchedTasks.has(id)) return;
+    watchedTasks.add(id);
     const timer = setInterval(() => {
       fetch("/api/tasks").then((res) => res.json()).then((body) => {
         const task = (body.tasks || []).find((item) => item.id === id);
@@ -2803,6 +2916,7 @@ _CLIENT_JS = r"""
           auto.textContent = "Auto Set Price";
         });
       });
+      let sending = false;
       wrap.querySelector("[data-trade-send]").addEventListener("click", () => {
         const kind = orderType();
         const qty = (wrap.querySelector("[name=quantity]").value || "").trim();
@@ -2813,6 +2927,8 @@ _CLIENT_JS = r"""
         if (kind === "STP LMT") price = "at stop " + (stop || "—") + " limit " + (limit || "—");
         const text = side() + " " + (qty || "—") + " " + symbol + " " + price + " on " + (accountId || "this account") + "?";
         confirmBox("Place order", text, () => {
+          if (sending) return;
+          sending = true;
           const body = new URLSearchParams({
             action: "trade",
             symbol: symbol,
@@ -2829,13 +2945,14 @@ _CLIENT_JS = r"""
           }).then((res) => res.json().then((data) => ({ ok: res.ok, data: data }))).then((result) => {
             const data = result.data || {};
             if (!result.ok || !data.ok) {
+              sending = false;
               toast("Not sent", data.message || "Try again", "err");
               return;
             }
             const task = data.task || {};
             if (task.id) watchTask(task.id);
-            toast("Sending", data.message || "", "ok");
           }).catch(() => {
+            sending = false;
             toast("Not sent", "The console did not answer.", "err");
           });
         }, "Send");
@@ -3244,6 +3361,7 @@ _CLIENT_JS = r"""
     root.innerHTML = "";
     tasks.forEach((task) => {
       if (hiddenTasks.has(task.id)) return;
+      if (task.kind === "trade" && task.status !== "running") return;
       if (task.status !== "running" && !toastedTasks.has(task.id)) {
         toastedTasks.add(task.id);
         sessionStorage.setItem("ath-task-toast", JSON.stringify([...toastedTasks]));
@@ -3426,18 +3544,58 @@ _CLIENT_JS = r"""
   });
   const picked = document.querySelector("tr.phase-pick.selected");
   if (picked) picked.scrollIntoView({ block: "nearest" });
+  const streamed = {};
+  function paintTick(quote) {
+    const cell = document.querySelector('.pulse-px[data-symbol="' + quote.symbol + '"]');
+    if (!cell) return;
+    const price = cell.querySelector(".px");
+    const change = cell.querySelector(".px-chg");
+    price.textContent = quote.price;
+    change.textContent = quote.change;
+    change.className = "px-chg" + (quote.tone ? " " + quote.tone : "");
+    const row = cell.closest("tr");
+    const body = row.parentNode;
+    if (body.firstElementChild !== row) body.insertBefore(row, body.firstElementChild);
+    row.classList.remove("pulse-hit");
+    void row.offsetWidth;
+    row.classList.add("pulse-hit");
+  }
+  function paintLog(line) {
+    const box = document.getElementById("log-roll");
+    if (!box || !line) return;
+    const row = document.createElement("div");
+    row.className = "log-line";
+    const time = document.createElement("span");
+    time.className = "log-time";
+    time.textContent = (line.time || "") + " ";
+    const lvl = document.createElement("span");
+    const kind = line.level === "WARNING" ? "WARN" : (line.level || "");
+    lvl.className = "log-lvl " + kind;
+    lvl.textContent = kind + " ";
+    const name = document.createElement("span");
+    name.className = "log-name";
+    name.textContent = (line.name || "") + " ";
+    const msg = document.createElement("span");
+    msg.className = "log-msg";
+    msg.textContent = line.message || "";
+    row.append(time, lvl, name, msg);
+    box.appendChild(row);
+    if (box.clientHeight < 24) requestAnimationFrame(() => trimLog(box));
+    else trimLog(box);
+  }
+  function trimLog(box) {
+    if (box.clientHeight < 24) return;
+    while (box.childElementCount > 1 && box.scrollHeight > box.clientHeight + 1) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+  }
   function paintPulse(body) {
     (body.quotes || []).forEach((quote) => {
+      if (streamed[quote.symbol] && streamed[quote.symbol] !== quote.price) return;
       const cell = document.querySelector('.pulse-px[data-symbol="' + quote.symbol + '"]');
       if (!cell) return;
       const price = cell.querySelector(".px");
       const change = cell.querySelector(".px-chg");
-      if (price.textContent !== quote.price) {
-        price.textContent = quote.price;
-        price.classList.remove("px-tick");
-        void price.offsetWidth;
-        price.classList.add("px-tick");
-      }
+      price.textContent = quote.price;
       change.textContent = quote.change;
       change.className = "px-chg" + (quote.tone ? " " + quote.tone : "");
     });
@@ -3537,6 +3695,18 @@ _CLIENT_JS = r"""
     const pollPulse = () => fetch("/api/pulse").then((res) => res.json()).then(paintPulse).catch(() => {});
     pollPulse();
     setInterval(pollPulse, 3000);
+    const ticks = new EventSource("/api/pulse/ticks");
+    ticks.onmessage = (event) => {
+      const quote = JSON.parse(event.data);
+      streamed[quote.symbol] = quote.price;
+      paintTick(quote);
+    };
+  }
+  const logRoll = document.getElementById("log-roll");
+  if (logRoll) {
+    const logs = new EventSource("/api/logs");
+    logs.onmessage = (event) => paintLog(JSON.parse(event.data));
+    window.addEventListener("resize", () => trimLog(logRoll));
   }
   const cycleStrip = document.getElementById("cycleStrip");
   if (cycleStrip && sessionStorage.getItem("ath-cycle-fold") === "1") cycleStrip.classList.add("compact");

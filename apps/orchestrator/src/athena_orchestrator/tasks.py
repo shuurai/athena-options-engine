@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from athena_exec.broker import IbBroker
+from athena_exec.clients import client_id
 from athena_settings import load_active
 from athena_settings.model import SettingsPayload, TacticFlags
 from athena_settings.repository import save_settings
@@ -25,8 +26,6 @@ _LOCK = threading.Lock()
 _IB_LOCK = threading.Lock()
 _TASKS: dict[str, dict] = {}
 _KEEP_SECONDS = 45
-_PROBE_CLIENT = 2
-
 
 def list_tasks() -> list[dict]:
     now = time.time()
@@ -132,7 +131,7 @@ def _run_positions(task_id: str, database_url: str, account: str) -> None:
     broker = IbBroker()
     try:
         with _IB_LOCK:
-            if not broker.connect(host, port, _PROBE_CLIENT, True):
+            if not broker.connect(host, port, client_id("probe"), True):
                 raise RuntimeError("IB Gateway did not connect.")
             try:
                 rows = broker.positions(account)
@@ -273,7 +272,7 @@ def _pull_ib(symbol: str) -> tuple[Decimal | None, list, str]:
     port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
     broker = IbBroker()
     with _IB_LOCK:
-        if not broker.connect(host, port, _PROBE_CLIENT, True):
+        if not broker.connect(host, port, client_id("probe"), True):
             return None, [], "IB Gateway did not connect."
         try:
             price = broker.last_price(symbol)
@@ -390,7 +389,7 @@ def _run_trade(
     broker = IbBroker()
     try:
         with _IB_LOCK:
-            if not broker.connect(host, port, _PROBE_CLIENT, False):
+            if not broker.connect(host, port, client_id("probe"), False):
                 raise RuntimeError("IB Gateway did not connect.")
             try:
                 if order_type == "MKT":
@@ -510,7 +509,7 @@ def _run_simulate(task_id: str, database_url: str, account: str, run_id: str, sy
     written = 0
     try:
         with _IB_LOCK:
-            if not broker.connect(host, port, _PROBE_CLIENT, True):
+            if not broker.connect(host, port, client_id("probe"), True):
                 raise RuntimeError("IB Gateway did not connect.")
             try:
                 with connect(database_url) as conn:
@@ -566,7 +565,7 @@ def _run_liquidate(task_id: str, database_url: str, account: str) -> None:
     closed: list[str] = []
     errors: list[str] = []
     with _IB_LOCK:
-        if not broker.connect(host, port, _PROBE_CLIENT, False):
+        if not broker.connect(host, port, client_id("probe"), False):
             _finish(task_id, "error", "IB Gateway did not connect.", "Liquidate")
             return
         try:

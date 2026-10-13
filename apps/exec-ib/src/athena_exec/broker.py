@@ -124,7 +124,7 @@ class IbBroker:
             ib.RequestTimeout = 30
             ib.connect(host, port, clientId=client_id, readonly=readonly, timeout=3)
         except Exception as exc:
-            log.info("gateway down: %s", exc)
+            log.info("gateway down client_id=%s: %s", client_id, exc)
             self._ib = None
             return False
         self._ib = ib

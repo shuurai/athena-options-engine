@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import socket
 import threading
 from collections import deque
@@ -179,6 +180,65 @@ def install_activity_log() -> None:
     if any(type(handler) is _ActivityLog for handler in root.handlers):
         return
     root.addHandler(_ActivityLog())
+
+
+_TRAIL_LOCK = threading.Lock()
+_TRAIL: deque[dict] = deque(maxlen=120)
+_TRAIL_LISTENERS: list[queue.Queue] = []
+_HKT = ZoneInfo("Asia/Hong_Kong")
+
+
+class _TrailLog(logging.Handler):
+    """Keep the newest terminal lines for the cockpit column."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.levelno < logging.INFO:
+            return
+        try:
+            message = record.getMessage().replace("\n", " ")[:300]
+        except Exception:
+            return
+        line = {
+            "time": datetime.now(_HKT).strftime("%H:%M:%S"),
+            "level": record.levelname,
+            "name": record.name or "",
+            "message": message,
+        }
+        with _TRAIL_LOCK:
+            _TRAIL.append(line)
+            listeners = list(_TRAIL_LISTENERS)
+        for listener in listeners:
+            try:
+                listener.put_nowait(line)
+            except queue.Full:
+                continue
+
+
+def install_log_trail() -> None:
+    root = logging.getLogger()
+    if any(type(handler) is _TrailLog for handler in root.handlers):
+        return
+    handler = _TrailLog()
+    handler.setLevel(logging.INFO)
+    root.addHandler(handler)
+
+
+def trail_recent() -> list[dict]:
+    with _TRAIL_LOCK:
+        return list(_TRAIL)
+
+
+def subscribe_trail() -> queue.Queue:
+    listener: queue.Queue = queue.Queue(maxsize=200)
+    with _TRAIL_LOCK:
+        _TRAIL_LISTENERS.append(listener)
+    return listener
+
+
+def unsubscribe_trail(listener: queue.Queue) -> None:
+    with _TRAIL_LOCK:
+        if listener in _TRAIL_LISTENERS:
+            _TRAIL_LISTENERS.remove(listener)
 
 
 def note_telegram(polling: bool) -> None:

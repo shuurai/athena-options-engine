@@ -1,5 +1,6 @@
 """Pure rules. No database and no IB."""
 
+import logging
 import os
 import unittest
 from pathlib import Path
@@ -1427,13 +1428,111 @@ class OrdersPageTest(unittest.TestCase):
         self.assertLess(core.index(("/positions", "Positions")), core.index(("/orders", "Orders")))
 
     def test_the_order_watch_uses_the_next_client_id(self) -> None:
+        from athena_exec.clients import client_id
         from athena_exec.order_watch import order_client_id
 
         with patch.dict("os.environ", {"IB_CLIENT_ID": "2"}, clear=False):
             os.environ.pop("IB_ORDER_CLIENT_ID", None)
+            self.assertEqual(client_id("session"), 2)
+            self.assertEqual(client_id("orders"), 3)
             self.assertEqual(order_client_id(), 3)
-        with patch.dict("os.environ", {"IB_ORDER_CLIENT_ID": "9"}, clear=False):
+            self.assertEqual(client_id("probe"), 4)
+            self.assertEqual(client_id("pulse"), 5)
+            self.assertEqual(client_id("telegram"), 22)
+        with patch.dict("os.environ", {"IB_ORDER_CLIENT_ID": "9", "IB_CLIENT_ID": "2"}, clear=False):
             self.assertEqual(order_client_id(), 9)
+            self.assertEqual(client_id("probe"), 4)
+
+
+class PulseStreamTest(unittest.TestCase):
+    def test_a_changed_print_moves_and_the_same_print_does_not(self) -> None:
+        from athena_orchestrator.pulse import format_tick, note_print
+
+        seen: dict[str, Decimal] = {}
+        self.assertTrue(note_print(seen, "skhy", Decimal("10.50")))
+        self.assertFalse(note_print(seen, "SKHY", Decimal("10.5")))
+        up = format_tick("SKHY", Decimal("10.50"), Decimal("10"))
+        self.assertEqual(up["price"], "10.50")
+        self.assertEqual(up["change"], "+5.00%")
+        self.assertEqual(up["tone"], "chg-up")
+        down = format_tick("SKHY", Decimal("9"), Decimal("10"))
+        self.assertEqual(down["tone"], "chg-down")
+        self.assertEqual(down["change"], "-10.00%")
+        flat = format_tick("SKHY", Decimal("10"), None)
+        self.assertEqual(flat["change"], "—")
+        self.assertEqual(flat["tone"], "")
+
+    def test_the_pulse_ivr_line_starts_at_the_left(self) -> None:
+        from athena_orchestrator.console import _watch_html
+
+        html = _watch_html([{
+            "symbol": "SKHY",
+            "price": "10.00",
+            "change": "—",
+            "tone": "",
+            "band": "—",
+            "high_pct": "",
+            "low_pct": "",
+            "iv": [12, 40],
+            "rank": "12",
+            "phase_class": "",
+            "phase": "—",
+            "tags": [],
+            "side": [],
+            "strikes": [],
+            "dte": "—",
+            "status": [],
+        }])
+        self.assertIn('data-fit="left"', html)
+        self.assertIn("SKHY", html)
+
+    def test_the_cockpit_log_column_spans_both_chart_rows(self) -> None:
+        from athena_orchestrator.console import _cockpit_body
+
+        class IB:
+            athena_slots = ""
+            mobile_slots = ""
+
+        class Settings:
+            ib = IB()
+
+        facts = {
+            "currency": "HKD", "account": "ZZTEST", "nav": "—", "change": "—",
+            "premium": "—", "premium_meta": "", "cash_pct": "", "cash": "—",
+            "cash_meta": "", "pending": 0, "ttl": "", "nlv_labels": [], "months": [],
+        }
+        health = {"state": "ok", "ok": 5, "checks": []}
+        html = _cockpit_body(facts, [], health, [], Settings(), None, "", "")
+        self.assertIn('class="grid share cockpit-board"', html)
+        self.assertIn('class="card log-trail"', html)
+        self.assertIn('id="log-roll"', html)
+        board = html.split('class="grid share cockpit-board"', 1)[1].split('<div class="card fill">', 1)[0]
+        self.assertLess(board.find("sleeve nlv"), board.find("log-trail"))
+        self.assertLess(board.find("log-trail"), board.find("ib session schedule"))
+        self.assertLess(board.find("monthly premium"), board.find("System health"))
+
+    def test_the_log_trail_drops_lines_that_no_longer_fit(self) -> None:
+        from athena_orchestrator.runtime import _TRAIL, install_log_trail, trail_recent
+
+        install_log_trail()
+        _TRAIL.clear()
+        logger = logging.getLogger("cockpit.test")
+        logger.setLevel(logging.INFO)
+        for index in range(150):
+            logger.info("line %s", index)
+        logger.warning("careful")
+        recent = [line for line in trail_recent() if line["name"] == "cockpit.test"]
+        self.assertLessEqual(len(trail_recent()), 120)
+        self.assertEqual(recent[-1]["level"], "WARNING")
+        self.assertEqual(recent[-1]["message"], "careful")
+        self.assertNotIn("line 0", [line["message"] for line in recent])
+
+    def test_a_sent_order_keeps_one_result_toast(self) -> None:
+        from athena_orchestrator.console import _CLIENT_JS
+
+        self.assertNotIn('toast("Sending"', _CLIENT_JS)
+        self.assertIn('task.kind === "trade" && task.status !== "running"', _CLIENT_JS)
+        self.assertIn("watchedTasks.has(id)", _CLIENT_JS)
 
 
 class PositionNlvTest(unittest.TestCase):

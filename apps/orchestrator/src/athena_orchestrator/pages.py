@@ -2270,7 +2270,7 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         '<div class="card"><h2>IB</h2><div class="scroll-y">'
         f"{_row('Gateway host', _tag(_env('IB_GATEWAY_HOST', '127.0.0.1')), 'Address of the logged-in Gateway. It stays in the environment.')}"
         f"{_row('Gateway port', _tag(_env('IB_GATEWAY_PORT', '4002')), '4002 is paper. 4001 is live. Athena does not switch the port.')}"
-        f"{_row('Client id', _tag(_env('IB_CLIENT_ID', '1')), 'The Athena session uses this id. Probes and history use another id.')}"
+        f"{_row('Client id', _tag(_env('IB_CLIENT_ID', '1')), 'Session uses this id. Orders use the next id. Probes use the one after that. The watchlist uses the one after the probes.')}"
         f"{_row('Trading mode', _tag(mode, 'amber'), 'Paper or live, from the environment. The other book stays stored and hidden.')}"
         f"{_limit('Cycle minutes', 'cycle_minutes', current.cycle_minutes, 'Minutes between cycles. A wait already running keeps its clock. The next wait uses this.')}"
         f"{_limit('Concurrent subscriptions', 'concurrent_subscriptions', current.ib.concurrent_subscriptions, 'How many IB quotes may be open at once. Further quotes wait.')}"

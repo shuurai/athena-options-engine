@@ -49,8 +49,10 @@ def run_session(
         slot = slot_state(moment, settings.ib)
         host = os.environ.get("IB_GATEWAY_HOST", settings.ib.gateway_host)
         port = int(os.environ.get("IB_GATEWAY_PORT", str(settings.ib.gateway_port)))
-        client_id = int(os.environ.get("IB_CLIENT_ID", str(settings.ib.client_id)))
-        if not _connect_athena(broker, host, port, client_id, slot):
+        from athena_exec.clients import client_id
+
+        login = client_id("session", settings.ib.client_id)
+        if not _connect_athena(broker, host, port, login, slot):
             log.info("ib_session=%s account=%s", "disconnected" if slot == "mobile" else "idle", account)
             return []
         log.info("ib_session=connected account=%s", account)

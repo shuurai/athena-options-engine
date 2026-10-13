@@ -1,4 +1,4 @@
-"""One paced pass that stores two years of IB daily bars. Read-only, client id 2."""
+"""One paced pass that stores two years of IB daily bars. Read-only, on the probe client id."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ from datetime import datetime
 from athena_exec.accounts import active_accounts
 from athena_exec.broker import IbBroker
 from athena_marketdata.pricing import ib_daily_count, set_history_short, store_ib_daily
-from athena_orchestrator.tasks import _IB_LOCK, _PROBE_CLIENT
+from athena_exec.clients import client_id
+from athena_orchestrator.tasks import _IB_LOCK
 from athena_settings import load_active
 from athena_settings.model import SettingsPayload
 from athena_settings.prompts import default_agents
@@ -155,7 +156,7 @@ def _run(database_url: str) -> None:
     broker = IbBroker()
     short: list[str] = []
     with _IB_LOCK:
-        if not broker.connect(host, port, _PROBE_CLIENT, True):
+        if not broker.connect(host, port, client_id("probe"), True):
             log.info("history backfill skipped gateway")
             _mark(database_url, books, symbols)
             return
