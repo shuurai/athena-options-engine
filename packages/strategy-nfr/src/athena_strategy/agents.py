@@ -47,6 +47,8 @@ def suggest_trade_price(conn, settings: SettingsPayload, account_id: str, symbol
     prompt = resolved_agents(settings)[TRADE_NAME]
     context = _trade_context(conn, settings, name, last, side, order)
     user = fill_prompt(prompt.execution, context)
+    if "3-month high:" not in user:
+        user = user.rstrip() + "\n" + _trade_range_block(context)
     model = scoring_model(settings)
     provider = settings.ai.provider
     token = deepseek_token(settings)
@@ -153,7 +155,62 @@ def _trade_context(conn, settings: SettingsPayload, symbol: str, last: str, side
         "close": piece(None if bar is None else bar[3]),
         "volume": piece(None if bar is None else bar[4]),
         "headlines": headlines,
+        **_trade_ranges(_bars(conn, symbol), shown),
     }
+
+
+def _trade_ranges(bars: list[Bar], last: str) -> dict[str, str]:
+    price = None if last in {"", "none"} else _number(last)
+    fields: dict[str, str] = {}
+    for key, sessions in (("63", 63), ("252", 252)):
+        window = bars[-sessions:]
+        high = _rail(bars, "high", sessions)
+        low = _rail(bars, "low", sessions, high=False)
+        fields[f"high_{key}"] = "none" if high is None else _show(high)
+        fields[f"low_{key}"] = "none" if low is None else _show(low)
+        fields[f"sessions_{key}"] = f"{len(window)} of {sessions}"
+        fields[f"vs_high_{key}"] = _versus_level(price, high)
+        fields[f"vs_low_{key}"] = _versus_level(price, low)
+        fields[f"place_{key}"] = _place_in_range(price, high, low)
+    prior = bars[-2].close if len(bars) >= 2 else None
+    fields["prior_close"] = "none" if prior is None else _show(prior)
+    return fields
+
+
+def _trade_range_block(context: dict[str, str]) -> str:
+    """Older saved Trade prompts omit the range. Append it so the call still sees history."""
+    return (
+        "Use this range with today's bar. Do not set the price from today alone.\n"
+        f"3-month high: {context['high_63']} ({context['sessions_63']} sessions)\n"
+        f"3-month low: {context['low_63']} ({context['sessions_63']} sessions)\n"
+        f"Last versus 3-month high: {context['vs_high_63']}\n"
+        f"Last versus 3-month low: {context['vs_low_63']}\n"
+        f"Last in the 3-month range: {context['place_63']}\n"
+        f"52-week high: {context['high_252']} ({context['sessions_252']} sessions)\n"
+        f"52-week low: {context['low_252']} ({context['sessions_252']} sessions)\n"
+        f"Last versus 52-week high: {context['vs_high_252']}\n"
+        f"Last versus 52-week low: {context['vs_low_252']}\n"
+        f"Last in the 52-week range: {context['place_252']}\n"
+        f"Prior close: {context['prior_close']}"
+    )
+
+
+def _versus_level(price: Decimal | None, level: Decimal | None) -> str:
+    if price is None or level is None or level <= 0:
+        return "none"
+    change = (price - level) / level * Decimal(100)
+    return f"{change:+.2f}%"
+
+
+def _place_in_range(price: Decimal | None, high: Decimal | None, low: Decimal | None) -> str:
+    if price is None or high is None or low is None or high <= low:
+        return "none"
+    if price < low:
+        return "below the low"
+    if price > high:
+        return "above the high"
+    spot = (price - low) / (high - low) * Decimal(100)
+    return f"{spot:.0f}% up from the low"
 
 
 def fill_prompt(template: str, values: dict[str, Any]) -> str:

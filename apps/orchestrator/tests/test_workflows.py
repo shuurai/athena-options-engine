@@ -543,6 +543,170 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("ZZT trade headline", seen["user"])
         self.assertIn("Today open: 10", seen["user"])
         self.assertIn("Last: 10.25", seen["user"])
+        self.assertIn("3-month high: 11 (1 of 63 sessions)", seen["user"])
+        self.assertIn("52-week low: 9 (1 of 252 sessions)", seen["user"])
+        self.assertIn("Prior close: none", seen["user"])
+
+    def test_auto_set_price_uses_the_3_month_and_52_week_ranges(self) -> None:
+        from athena_settings.model import AgentPrompt
+        from athena_strategy.agents import suggest_trade_price
+
+        start = date(2026, 1, 1)
+        for offset in range(80):
+            day = start + timedelta(days=offset)
+            if offset == 0:
+                low, high, close = "8", "200", "150"
+            elif offset == 78:
+                low, high, close = "15", "20", "16"
+            else:
+                low, high, close = "15", "20", "17"
+            self._print(datetime(day.year, day.month, day.day, tzinfo=timezone.utc), "ib-daily", low, high, close)
+        seen = {}
+
+        def fake_chat(system, user, model, provider, token, thinking):
+            seen["user"] = user
+            seen["system"] = system
+            return {
+                "text": '{"limit": 18, "stop": 0, "reason": "inside the 3-month range"}',
+                "tokens": 3,
+                "error": "",
+                "latency_ms": 1,
+                "request": {},
+            }
+
+        with patch("athena_strategy.agents.chat", side_effect=fake_chat):
+            result = suggest_trade_price(self.conn, standard_payload(), ACCOUNT, SYMBOL, "18", "BUY", "LMT")
+            first = dict(seen)
+            old = standard_payload().model_copy(update={
+                "agents": {
+                    "Trade": AgentPrompt(
+                        system="You suggest a price.",
+                        execution="Symbol: {{symbol}}\nLast: {{last}}\n",
+                    ),
+                },
+            })
+            old_result = suggest_trade_price(self.conn, old, ACCOUNT, SYMBOL, "18", "BUY", "LMT")
+        self.assertTrue(result["ok"])
+        self.assertIn("3-month high: 20 (63 of 63 sessions)", first["user"])
+        self.assertIn("3-month low: 15 (63 of 63 sessions)", first["user"])
+        self.assertIn("52-week high: 200 (80 of 252 sessions)", first["user"])
+        self.assertIn("52-week low: 8 (80 of 252 sessions)", first["user"])
+        self.assertIn("Last versus 3-month high: -10.00%", first["user"])
+        self.assertIn("Last versus 3-month low: +20.00%", first["user"])
+        self.assertIn("Last in the 3-month range: 60% up from the low", first["user"])
+        self.assertIn("Last versus 52-week low: +125.00%", first["user"])
+        self.assertIn("Last in the 52-week range: 5% up from the low", first["user"])
+        self.assertIn("Prior close: 16", first["user"])
+        self.assertIn("not from today's bar alone", first["system"])
+        self.assertTrue(old_result["ok"])
+        self.assertIn("Do not set the price from today alone.", seen["user"])
+        self.assertIn("52-week high: 200 (80 of 252 sessions)", seen["user"])
+
+    def test_the_orders_page_pages_the_selected_account(self) -> None:
+        from athena_orchestrator.pages import _orders_page
+
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id, instrument, simulated
+            )
+            VALUES ('draft_zzorders', %s, 'MANUAL', 1, 'approved', 'seed', '', %s, 'STK', false)
+            """,
+            (SYMBOL, ACCOUNT),
+        )
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        for index in range(51):
+            symbol = "DONE" if index == 50 else "OLDEST" if index == 0 else SYMBOL
+            status = "filled" if index == 50 else "submitted"
+            self.conn.execute(
+                """
+                INSERT INTO orders (
+                    id, draft_id, account_id, symbol, tactic, action, contracts, status, created_at
+                )
+                VALUES (%s, 'draft_zzorders', %s, %s, 'MANUAL', 'BUY', 1, %s, %s)
+                """,
+                (f"ord_zz{index}", ACCOUNT, symbol, status, start + timedelta(seconds=index)),
+            )
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id, instrument, simulated
+            )
+            VALUES ('draft_zzother', 'ZZOTHER', 'MANUAL', 1, 'approved', 'seed', '', 'ZZOTHER', 'STK', false)
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO orders (
+                id, draft_id, account_id, symbol, tactic, action, contracts, status
+            )
+            VALUES ('ord_zzother', 'draft_zzother', 'ZZOTHER', 'ZZOTHER', 'MANUAL', 'BUY', 1, 'submitted')
+            """
+        )
+        self.conn.commit()
+        try:
+            page = _orders_page(self.conn, ACCOUNT, {})
+            self.assertIn('id="orders-feed"', page["body"])
+            self.assertIn("DONE", page["body"])
+            self.assertNotIn("OLDEST", page["body"])
+            self.assertNotIn("ZZOTHER", page["body"])
+            nxt = _orders_page(self.conn, ACCOUNT, {"partial": ["rows"], "offset": ["50"]})
+            body = json.loads(nxt["body"])
+            self.assertIn("OLDEST", body["html"])
+            self.assertFalse(body["more"])
+            filled = _orders_page(self.conn, ACCOUNT, {"status": ["filled"]})
+            self.assertIn("DONE", filled["body"])
+            self.assertNotIn(">ZZT<", filled["body"])
+            working = _orders_page(self.conn, ACCOUNT, {"status": ["working"]})
+            self.assertNotIn("DONE", working["body"])
+            self.assertIn(SYMBOL, working["body"])
+        finally:
+            self.conn.execute("DELETE FROM orders WHERE account_id = 'ZZOTHER'")
+            self.conn.execute("DELETE FROM drafts WHERE account_id = 'ZZOTHER'")
+            self.conn.commit()
+
+    def test_a_live_ib_status_updates_only_a_known_order(self) -> None:
+        from queue import Empty
+
+        from athena_exec.order_watch import apply_live_order, subscribe, unsubscribe
+
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id, instrument, simulated
+            )
+            VALUES ('draft_zzlive', %s, 'MANUAL', 3, 'approved', 'seed', '', %s, 'STK', false)
+            """,
+            (SYMBOL, ACCOUNT),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO orders (
+                id, draft_id, account_id, symbol, tactic, action, contracts, status, ib_order_id
+            )
+            VALUES ('ord_zzlive', 'draft_zzlive', %s, %s, 'MANUAL', 'BUY', 3, 'submitted', 9001)
+            """,
+            (ACCOUNT, SYMBOL),
+        )
+        self.conn.commit()
+        listener = subscribe(ACCOUNT)
+        try:
+            account = apply_live_order(self.conn, 9001, "Submitted", 1, 2, "10.5")
+            self.assertEqual(account, ACCOUNT)
+            stored = self.conn.execute(
+                """
+                SELECT status, ib_status, filled_qty, remaining_qty, avg_fill
+                FROM orders WHERE id = 'ord_zzlive'
+                """
+            ).fetchone()
+            self.assertEqual(stored, ("submitted", "Submitted", Decimal("1"), Decimal("2"), Decimal("10.5")))
+            self.assertEqual(listener.get_nowait(), "ord_zzlive")
+            self.assertIsNone(apply_live_order(self.conn, 9001, "Submitted", 1, 2, "10.5"))
+            self.assertIsNone(apply_live_order(self.conn, 424242, "Filled", 1, 0, "1"))
+            with self.assertRaises(Empty):
+                listener.get_nowait()
+        finally:
+            unsubscribe(ACCOUNT, listener)
 
     def test_mock_send_order_stays_a_pending_draft(self) -> None:
         from athena_strategy.mock import prepare_mock_orders

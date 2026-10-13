@@ -87,6 +87,9 @@ async def run_loop() -> None:
     threading.Thread(target=console.serve_forever, daemon=True).start()
     log.info("console_port=%s", console_port)
     start_history_backfill(database_url)
+    from athena_exec.order_watch import start_order_watch
+
+    start_order_watch(database_url)
     threading.Thread(
         target=refresh_display_rates, args=(database_url,), daemon=True, name="fx-rates"
     ).start()

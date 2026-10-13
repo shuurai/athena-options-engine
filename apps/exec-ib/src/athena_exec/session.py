@@ -78,6 +78,12 @@ def run_session(
             broker.disconnect()
 
 
+def _publish_order(account: str, order_id: str) -> None:
+    from athena_exec.order_watch import publish
+
+    publish(account, order_id)
+
+
 def _name_market(settings: SettingsPayload, symbol: str) -> str:
     flags = settings.tactic_flags.get(symbol.upper(), TacticFlags())
     return symbol_market(symbol, flags.market or "")
@@ -530,6 +536,7 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
                 (reason, order_id),
             )
             conn.commit()
+            _publish_order(account, order_id)
             log.info("order blocked id=%s reason=%s", order_id, reason)
             continue
         try:
@@ -545,6 +552,7 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
                     (order_id, int(ib_order_id)),
                 )
                 conn.commit()
+                _publish_order(account, order_id)
                 log.info("order cancelled id=%s ib=%s", order_id, ib_order_id)
                 continue
             if instrument == "OPT":
@@ -560,6 +568,7 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
                 (str(exc), order_id),
             )
             conn.commit()
+            _publish_order(account, order_id)
             log.info("order blocked id=%s reason=%s", order_id, exc)
             continue
         conn.execute(
@@ -571,12 +580,14 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
             (ib_order_id, account, order_id),
         )
         conn.commit()
+        _publish_order(account, order_id)
         log.info("order submitted id=%s ib=%s", order_id, ib_order_id)
 
 
 def _sync_order_status(conn, broker, account: str) -> list[tuple]:
     """Mark working orders from IB. A Filled status with no execution print is still reported."""
     noticed: list[tuple] = []
+    changed: list[str] = []
     states = broker.order_states()
     if not states:
         return noticed
@@ -595,13 +606,17 @@ def _sync_order_status(conn, broker, account: str) -> list[tuple]:
         if live == "Filled":
             conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
             noticed.append((account, symbol, tactic, action, draft_id, None))
+            changed.append(order_id)
             log.info("order filled id=%s ib=%s", order_id, ib_order_id)
         elif live in {"Cancelled", "ApiCancelled", "Inactive"}:
             conn.execute("UPDATE orders SET status = 'cancelled' WHERE id = %s", (order_id,))
+            changed.append(order_id)
             log.info("order cancelled id=%s ib=%s status=%s", order_id, ib_order_id, live)
         else:
             log.info("order resting id=%s ib=%s status=%s", order_id, ib_order_id, live)
     conn.commit()
+    for order_id in changed:
+        _publish_order(account, order_id)
     return noticed
 
 
@@ -665,6 +680,7 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
         )
         conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
         conn.commit()
+        _publish_order(account, order_id)
         noticed.append((account, symbol, tactic, action, draft_id, price))
         log.info("fill order=%s symbol=%s price=%s", order_id, symbol, price)
     return noticed

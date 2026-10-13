@@ -56,6 +56,7 @@ NAV_GROUPS = (
             ("/universe", "Universe"),
             ("/history", "History"),
             ("/positions", "Positions"),
+            ("/orders", "Orders"),
             ("/book", "Book"),
         ),
     ),
@@ -543,6 +544,8 @@ button.btn.primary.busy::after { border-color: rgba(255,255,255,.28); border-top
 .skill-doc .json .jb { color: #d2b4f0; }
 .skill-doc .json .jp { color: #6b7684; }
 .card.stat .meta { white-space: pre-line; }
+.stat .meta.up { color: var(--ath-up); }
+.stat .meta.down { color: var(--ath-down); }
 .ath-panel { box-shadow: -24px 0 60px rgba(0,0,0,.45); }
 .ath-panel .p-head b { font-size: 13px; letter-spacing: .04em; font-family: var(--font-mono); text-transform: none; font-weight: 600; }
 .ath-panel .p-body { font-size: 12.5px; color: #c3cad4; }
@@ -644,6 +647,9 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                     status, body = handle(conn, "GET", parsed.path, query, b"", self.headers)
                 self._send_api(status, body)
                 return
+            if parsed.path == "/api/orders/events":
+                self._send_events(_account())
+                return
             if parsed.path == "/api/tasks":
                 self._send(200, json.dumps({"tasks": list_tasks()}), "json")
                 return
@@ -711,6 +717,39 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)
+
+        def _send_events(self, account: str) -> None:
+            from queue import Empty
+
+            from athena_exec.order_watch import subscribe, unsubscribe
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            listener = subscribe(account)
+            try:
+                while True:
+                    try:
+                        order_id = listener.get(timeout=15)
+                    except Empty:
+                        self.wfile.write(b":\n\n")
+                        self.wfile.flush()
+                        continue
+                    with connect(database_url) as conn:
+                        from athena_orchestrator.pages import order_event
+
+                        payload = order_event(conn, order_id)
+                    if payload is None or payload["account"] != account:
+                        continue
+                    line = "data: " + json.dumps(payload) + "\n\n"
+                    self.wfile.write(line.encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                return
+            finally:
+                unsubscribe(account, listener)
 
         def _send_api(self, status: int, body: str) -> None:
             data = body.encode("utf-8")
@@ -2135,7 +2174,11 @@ _CLIENT_JS = r"""
         if (replace) {
           body.innerHTML = html;
           box.scrollTop = 0;
-        } else if (html) body.insertAdjacentHTML("beforeend", html);
+          if (box.id === "orders-feed") box.removeAttribute("data-tail");
+        } else if (html) {
+          body.insertAdjacentHTML("beforeend", html);
+          if (box.id === "orders-feed") box.setAttribute("data-tail", "1");
+        }
         box.setAttribute("data-offset", String(payload.next || 0));
         box.setAttribute("data-more", html && payload.more ? "1" : "0");
       })
@@ -3559,6 +3602,32 @@ _CLIENT_JS = r"""
   }
   bindStatusFeed("decision-filters", "decision-feed", "decision-keyword");
   bindStatusFeed("history-filters", "history-feed", "history-keyword", "history-export");
+  bindStatusFeed("orders-filters", "orders-feed", "");
+  const ordersFeed = document.getElementById("orders-feed");
+  if (ordersFeed && window.EventSource) {
+    const ordersSource = new EventSource("/api/orders/events");
+    ordersSource.onmessage = (event) => {
+      let payload;
+      try { payload = JSON.parse(event.data); } catch (err) { return; }
+      const box = document.getElementById("orders-feed");
+      if (!box || !payload || !payload.id) return;
+      const current = document.querySelector("#orders-filters button.on");
+      const filter = current ? (current.getAttribute("data-status") || "all") : "all";
+      const show = filter === "all" || filter === payload.bucket;
+      const row = box.querySelector('tr[data-order="' + payload.id + '"]');
+      if (row) {
+        if (!show) row.remove();
+        else row.outerHTML = payload.html || "";
+        return;
+      }
+      if (!show || box.getAttribute("data-tail") === "1") return;
+      const body = box.querySelector("tbody");
+      if (!body || !payload.html) return;
+      const empty = body.querySelector("td[colspan]");
+      if (empty && empty.parentElement) empty.parentElement.remove();
+      body.insertAdjacentHTML("afterbegin", payload.html);
+    };
+  }
   function simWindow(count, index) {
     const span = 60;
     const half = span / 2;

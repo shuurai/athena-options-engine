@@ -1418,6 +1418,24 @@ class BudgetSourceTest(unittest.TestCase):
                     self.assertNotIn(word, text, path.name)
 
 
+class OrdersPageTest(unittest.TestCase):
+    def test_orders_sits_in_core_logic(self) -> None:
+        from athena_orchestrator.console import NAV_GROUPS
+
+        core = dict(NAV_GROUPS)["Core logic"]
+        self.assertIn(("/orders", "Orders"), core)
+        self.assertLess(core.index(("/positions", "Positions")), core.index(("/orders", "Orders")))
+
+    def test_the_order_watch_uses_the_next_client_id(self) -> None:
+        from athena_exec.order_watch import order_client_id
+
+        with patch.dict("os.environ", {"IB_CLIENT_ID": "2"}, clear=False):
+            os.environ.pop("IB_ORDER_CLIENT_ID", None)
+            self.assertEqual(order_client_id(), 3)
+        with patch.dict("os.environ", {"IB_ORDER_CLIENT_ID": "9"}, clear=False):
+            self.assertEqual(order_client_id(), 9)
+
+
 class PositionNlvTest(unittest.TestCase):
     def test_one_currency_sums_signed_market_values(self) -> None:
         card = _position_nlv_stat([
@@ -1427,14 +1445,56 @@ class PositionNlvTest(unittest.TestCase):
         self.assertIn("$22,627.00", card)
         self.assertIn("USD", card)
 
-    def test_mixed_currencies_stay_apart(self) -> None:
-        card = _position_nlv_stat([
-            _book_row(Decimal("22627"), "USD"),
-            _book_row(Decimal("-940"), "HKD"),
-        ])
-        self.assertIn(">mixed<", card)
-        self.assertIn("USD 22,627.00", card)
-        self.assertIn("HKD -940.00", card)
+    def test_mixed_currencies_convert_into_the_settings_currency(self) -> None:
+        card = _position_nlv_stat(
+            [
+                _book_row(Decimal("100"), "USD"),
+                _book_row(Decimal("780"), "HKD"),
+            ],
+            "HKD",
+            "HKD",
+            {"USD": Decimal("7.8")},
+        )
+        self.assertIn("$1,560.00", card)
+        self.assertIn("HKD", card)
+        self.assertNotIn("mixed", card)
+
+    def test_open_pnl_converts_and_colors_the_subtitle(self) -> None:
+        from athena_orchestrator.pages import _position_pnl_stat
+
+        card = _position_pnl_stat(
+            [
+                {"pnl": Decimal("10"), "currency": "USD"},
+                {"pnl": Decimal("-7.8"), "currency": "HKD"},
+            ],
+            "HKD",
+            "HKD",
+            {"USD": Decimal("7.8")},
+        )
+        self.assertIn("+70.20", card)
+        self.assertIn('class="value up"', card)
+        self.assertIn('class="meta up"', card)
+        self.assertNotIn("mixed", card)
+        down = _position_pnl_stat(
+            [{"pnl": Decimal("-5"), "currency": "HKD"}],
+            "HKD",
+            "HKD",
+            {},
+        )
+        self.assertIn("-5.00", down)
+        self.assertIn('class="value down"', down)
+        self.assertIn('class="meta down"', down)
+
+    def test_a_missing_fx_rate_stays_blank(self) -> None:
+        card = _position_nlv_stat(
+            [_book_row(Decimal("10"), "USD"), _book_row(Decimal("10"), "HKD")],
+            "HKD",
+            "HKD",
+            {},
+        )
+        self.assertIn(DASH, card)
+        self.assertIn("no HKD rate", card)
+        self.assertNotIn("mixed", card)
 
     def test_a_flat_book_and_a_missing_mark_stay_blank(self) -> None:
         self.assertIn(DASH, _position_nlv_stat([]))

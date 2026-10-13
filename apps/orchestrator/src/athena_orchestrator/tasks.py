@@ -452,6 +452,9 @@ def _store_manual_order(
         (order_id, draft_id, account, symbol, side, quantity, limit_price, ib_order_id, order_type, stop_price),
     )
     conn.commit()
+    from athena_exec.order_watch import publish
+
+    publish(account, order_id)
 
 
 def begin_liquidate(database_url: str, account: str) -> dict:

@@ -157,6 +157,13 @@ PHASES = (
     ("P4", "Repair", "Close or rotate"),
     ("P5", "Euphoria", "Covered-call bias"),
 )
+ORDER_STATUSES = (
+    ("all", "All"),
+    ("working", "Working"),
+    ("filled", "Filled"),
+    ("cancelled", "Cancelled"),
+    ("blocked", "Blocked"),
+)
 HISTORY_STATUSES = (
     ("all", "All"),
     ("filled", "Filled"),
@@ -186,6 +193,7 @@ def build(conn, path: str, query: dict) -> dict | None:
         "/history": _history,
         "/history.csv": _history_csv,
         "/positions": _positions_page,
+        "/orders": _orders_page,
         "/book": _book_page,
         "/accounts": _accounts,
         "/risk": _risk,
@@ -1356,13 +1364,15 @@ def _positions_page(conn, account: str, query: dict) -> dict:
     if _wants_rows(query):
         return _fragment(body_rows, more, nxt)
     synced = _position_clock(rows)
+    currency = report_currency(conn, account) if account else "HKD"
+    base, _balances, rates = ledger(conn, account) if account else ("", {}, {})
     body = (
         '<div class="grid cols-5">'
-        f"{_position_nlv_stat(rows)}"
+        f"{_position_nlv_stat(rows, currency, base, rates)}"
         f"{_position_stat('Open', str(len(rows)), 'on this account')}"
         f"{_position_stat('Stock', str(sum(1 for row in rows if row['sec_type'] == 'STK')), 'shares')}"
         f"{_position_stat('Option', str(sum(1 for row in rows if row['sec_type'] == 'OPT')), 'contracts')}"
-        f"{_position_pnl_stat(rows)}"
+        f"{_position_pnl_stat(rows, currency, base, rates)}"
         "</div>"
         '<div class="card fill"><h2>Open positions '
         '<button class="more" data-cmd="sync-positions" type="button">Sync from IB</button></h2>'
@@ -1472,56 +1482,237 @@ def _position_stat(label: str, value: str, meta: str) -> str:
     )
 
 
-def _position_nlv_stat(rows: list[dict]) -> str:
+def _position_nlv_stat(rows: list[dict], currency: str = "USD", base: str = "", rates: dict | None = None) -> str:
     known = [row for row in rows if row["market"] is not None]
     if not rows:
         return _position_stat("NLV", DASH, "flat")
     if not known:
         return _position_stat("NLV", DASH, "no mark yet")
-    currencies = {row["currency"] or "USD" for row in known}
+    total, failed = _sum_in(known, "market", currency, base, rates)
     missing = len(rows) - len(known)
     gap = "" if missing == 0 else f" · {missing} unmarked"
-    if len(currencies) == 1:
-        currency = next(iter(currencies))
-        total = sum((row["market"] for row in known), Decimal(0))
-        return (
-            '<div class="card stat"><div class="label">NLV</div>'
-            f'<div class="value">{escape(marked(total, currency))}</div>'
-            f'<div class="meta">{escape(currency + gap)}</div></div>'
-        )
-    parts = []
-    for currency in sorted(currencies):
-        total = sum(
-            (row["market"] for row in known if (row["currency"] or "USD") == currency),
-            Decimal(0),
-        )
-        parts.append(f"{currency} {total:,.2f}")
-    return _position_stat("NLV", "mixed", "  ".join(parts) + gap)
+    if failed:
+        return _position_stat("NLV", DASH, f"no {currency} rate{gap}")
+    return (
+        '<div class="card stat"><div class="label">NLV</div>'
+        f'<div class="value">{escape(marked(total, currency))}</div>'
+        f'<div class="meta">{escape(currency + gap)}</div></div>'
+    )
 
 
-def _position_pnl_stat(rows: list[dict]) -> str:
+def _position_pnl_stat(rows: list[dict], currency: str = "USD", base: str = "", rates: dict | None = None) -> str:
     known = [row for row in rows if row["pnl"] is not None]
     if not known:
         return _position_stat("Open P&L", DASH, "no mark yet")
-    currencies = {row["currency"] or "USD" for row in known}
-    if len(currencies) == 1:
-        total = sum((row["pnl"] for row in known), Decimal(0))
-        tone = "up" if total > 0 else "down" if total < 0 else ""
-        return (
-            '<div class="card stat"><div class="label">Open P&amp;L</div>'
-            f'<div class="value {tone}">{escape(_signed(total))}</div>'
-            f'<div class="meta">{escape(next(iter(currencies)))}</div></div>'
-        )
-    parts = []
-    for currency in sorted(currencies):
-        total = sum((row["pnl"] for row in known if (row["currency"] or "USD") == currency), Decimal(0))
-        parts.append(f"{currency} {_signed(total)}")
-    return _position_stat("Open P&L", "mixed", "  ".join(parts))
+    total, failed = _sum_in(known, "pnl", currency, base, rates)
+    if failed:
+        return _position_stat("Open P&L", DASH, f"no {currency} rate")
+    tone = "up" if total > 0 else "down" if total < 0 else ""
+    return (
+        '<div class="card stat"><div class="label">Open P&amp;L</div>'
+        f'<div class="value {tone}">{escape(_signed(total))}</div>'
+        f'<div class="meta {tone}">{escape(currency)}</div></div>'
+    )
+
+
+def _sum_in(rows: list[dict], field: str, currency: str, base: str, rates: dict | None) -> tuple[Decimal, bool]:
+    total = Decimal(0)
+    failed = False
+    table = rates or {}
+    book = base or currency
+    for row in rows:
+        amount = row.get(field)
+        if amount is None:
+            continue
+        moved = convert(Decimal(amount), row.get("currency") or "USD", currency, book, table)
+        if moved is None:
+            failed = True
+            continue
+        total += moved
+    return total, failed
 
 
 def _position_clock(rows: list[dict]) -> str:
     stamps = [row["synced"] for row in rows if row["synced"]]
     return max(stamps) if stamps else ""
+
+
+def _orders_page(conn, account: str, query: dict) -> dict:
+    status = _orders_choice(query)
+    offset = _offset(query)
+    rows, more, nxt = _order_window(conn, account, status, offset)
+    body_rows = "".join(_order_tr(row) for row in rows)
+    if not body_rows and offset == 0:
+        empty = "No orders yet." if status == "all" else "No orders for this filter."
+        body_rows = f'<tr><td colspan="11">{empty}</td></tr>'
+    if _wants_rows(query):
+        return _fragment(body_rows, more, nxt)
+    marks = "".join(
+        f'<button type="button" data-status="{key}"{" class=\"on\"" if key == status else ""}>{label}</button>'
+        for key, label in ORDER_STATUSES
+    )
+    query_text = "" if status == "all" else f"status={quote(status)}"
+    body = (
+        '<div class="card fill"><h2>Orders</h2>'
+        f'<div class="filters" id="orders-filters">{marks}</div>'
+        f'{_feed("/orders", nxt, more, _orders_table(body_rows), "orders-feed", query_text)}</div>'
+    )
+    count = _order_count(conn, account)
+    chips = [("info", f"{count} orders" if count else "none")]
+    return _html(
+        "Orders",
+        "Orders this account sent. A status change from IB replaces the row that is already on screen.",
+        body,
+        chips,
+        _REFRESH,
+    )
+
+
+def order_event(conn, order_id: str) -> dict | None:
+    """One row for the live stream. None when the order is gone."""
+    row = conn.execute(
+        """
+        SELECT id, account_id, created_at, symbol, action, contracts, filled_qty, order_type,
+               limit_price, stop_price, status, ib_status, ib_order_id, tactic
+        FROM orders
+        WHERE id = %s
+        """,
+        (order_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    item = _order_item(row)
+    return {
+        "id": item["id"],
+        "account": item["account"],
+        "bucket": item["bucket"],
+        "html": _order_tr(item),
+    }
+
+
+def _orders_choice(query: dict) -> str:
+    status = (query.get("status") or ["all"])[0]
+    if status not in {key for key, _label in ORDER_STATUSES}:
+        return "all"
+    return status
+
+
+def _order_window(conn, account: str, status: str, offset: int) -> tuple[list[dict], bool, int]:
+    if not account:
+        return [], False, 0
+    found = conn.execute(
+        """
+        SELECT id, account_id, created_at, symbol, action, contracts, filled_qty, order_type,
+               limit_price, stop_price, status, ib_status, ib_order_id, tactic
+        FROM orders
+        WHERE account_id = %s AND (simulated = false OR %s)
+          AND (
+            %s = 'all'
+            OR (%s = 'blocked' AND status = 'blocked')
+            OR (%s = 'filled' AND status <> 'blocked' AND (status = 'filled' OR ib_status = 'Filled'))
+            OR (
+              %s = 'cancelled' AND status <> 'blocked' AND status <> 'filled' AND ib_status <> 'Filled'
+              AND (status = 'cancelled' OR ib_status IN ('Cancelled', 'ApiCancelled', 'Inactive'))
+            )
+            OR (
+              %s = 'working' AND status NOT IN ('blocked', 'filled', 'cancelled')
+              AND ib_status NOT IN ('Filled', 'Cancelled', 'ApiCancelled', 'Inactive')
+            )
+          )
+        ORDER BY created_at DESC, id DESC
+        LIMIT %s OFFSET %s
+        """,
+        (account, _replaying(conn, account), status, status, status, status, status, _PAGE + 1, offset),
+    ).fetchall()
+    more = len(found) > _PAGE
+    page = [_order_item(row) for row in found[:_PAGE]]
+    return page, more, offset + len(page)
+
+
+def _order_count(conn, account: str) -> int:
+    if not account:
+        return 0
+    row = conn.execute(
+        """
+        SELECT count(*) FROM orders
+        WHERE account_id = %s AND (simulated = false OR %s)
+        """,
+        (account, _replaying(conn, account)),
+    ).fetchone()
+    return int(row[0] if row else 0)
+
+
+def _order_item(row) -> dict:
+    order_id, account, created, symbol, action, contracts, filled, order_type, limit_price, stop_price, status, ib_status, ib_order_id, tactic = row
+    bucket = order_bucket(status, ib_status)
+    when = "" if created is None else created.astimezone(HKT).strftime("%Y-%m-%d %H:%M")
+    return {
+        "id": order_id,
+        "account": account,
+        "when": when,
+        "symbol": symbol,
+        "action": action or "",
+        "qty": contracts,
+        "filled": filled,
+        "order_type": order_type or "LMT",
+        "limit": limit_price,
+        "stop": stop_price,
+        "status": ib_status or status or "",
+        "bucket": bucket,
+        "ib": "" if ib_order_id is None else str(ib_order_id),
+        "tactic": tactic or "",
+    }
+
+
+def order_bucket(status: str, ib_status: str) -> str:
+    live = ib_status or ""
+    if status == "blocked":
+        return "blocked"
+    if status == "filled" or live == "Filled":
+        return "filled"
+    if status == "cancelled" or live in {"Cancelled", "ApiCancelled", "Inactive"}:
+        return "cancelled"
+    return "working"
+
+
+def _order_tr(row: dict) -> str:
+    tone = {"filled": "green", "cancelled": "amber", "blocked": "red"}.get(row["bucket"], "blue")
+    return (
+        f'<tr data-order="{escape(row["id"], quote=True)}">'
+        f'<td class="mono">{escape(row["when"] or DASH)}</td>'
+        f'<td class="mono">{escape(row["symbol"])}</td>'
+        f'<td>{escape(row["action"] or DASH)}</td>'
+        f'<td class="mono">{escape(_plain_number(row["qty"]))}</td>'
+        f'<td class="mono">{escape(_order_amount(row["filled"]))}</td>'
+        f'<td>{escape(row["order_type"])}</td>'
+        f'<td class="mono">{escape(_order_money(row["limit"]))}</td>'
+        f'<td class="mono">{escape(_order_money(row["stop"]))}</td>'
+        f'<td><span class="tag {tone}">{escape(row["status"] or DASH)}</span></td>'
+        f'<td class="mono">{escape(row["ib"] or DASH)}</td>'
+        f'<td>{escape(row["tactic"] or DASH)}</td>'
+        "</tr>"
+    )
+
+
+def _orders_table(rows: str) -> str:
+    return (
+        '<table class="data"><thead><tr>'
+        "<th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Filled</th><th>Type</th>"
+        "<th>Limit</th><th>Stop</th><th>Status</th><th>IB id</th><th>Tactic</th>"
+        f"</tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
+def _order_money(value) -> str:
+    if value is None:
+        return DASH
+    return f"{Decimal(value):,.2f}"
+
+
+def _order_amount(value) -> str:
+    if value is None:
+        return DASH
+    return _plain_number(value)
 
 
 def _position_tr(row: dict) -> str:
@@ -3191,12 +3382,13 @@ def _fragment(html: str, more: bool, nxt: int) -> dict:
     }
 
 
-def _feed(path: str, nxt: int, more: bool, inner: str, box_id: str = "") -> str:
+def _feed(path: str, nxt: int, more: bool, inner: str, box_id: str = "", query: str = "") -> str:
     flag = "1" if more else "0"
     ident = f' id="{escape(box_id, quote=True)}"' if box_id else ""
+    extra = f' data-query="{escape(query, quote=True)}"' if query else ""
     return (
         f'<div class="scroll-y"{ident} data-feed="{escape(path, quote=True)}" '
-        f'data-offset="{nxt}" data-more="{flag}">{inner}</div>'
+        f'data-offset="{nxt}" data-more="{flag}"{extra}>{inner}</div>'
     )
 
 

@@ -198,7 +198,9 @@ def _standing_agents() -> dict[str, AgentPrompt]:
         "Trade": AgentPrompt(
             system=(
                 "You suggest a price for one stock order. You do not choose the size and you do not send the order.\n"
-                "Use the last price, today's bar, and today's headlines.\n"
+                "Use the last price, today's bar, today's headlines, the 3-month high and low, and the 52-week high and low.\n"
+                "A 3-month window is 63 sessions. A 52-week window is 252 sessions. The session count says how many of those days are stored.\n"
+                "Set the limit from that range, not from today's bar alone.\n"
                 "limit is the limit price. stop is the stop price for a stop limit, otherwise 0.\n"
                 'Reply with JSON only: {"limit":0,"stop":0,"reason":""}'
             ),
@@ -206,6 +208,17 @@ def _standing_agents() -> dict[str, AgentPrompt]:
                 "Symbol: {{symbol}}\nSide: {{side}}\nOrder: {{order}}\nLast: {{last}}\n"
                 "Today open: {{open}}\nToday high: {{high}}\nToday low: {{low}}\n"
                 "Today close: {{close}}\nToday volume: {{volume}}\n"
+                "3-month high: {{high_63}} ({{sessions_63}} sessions)\n"
+                "3-month low: {{low_63}} ({{sessions_63}} sessions)\n"
+                "Last versus 3-month high: {{vs_high_63}}\n"
+                "Last versus 3-month low: {{vs_low_63}}\n"
+                "Last in the 3-month range: {{place_63}}\n"
+                "52-week high: {{high_252}} ({{sessions_252}} sessions)\n"
+                "52-week low: {{low_252}} ({{sessions_252}} sessions)\n"
+                "Last versus 52-week high: {{vs_high_252}}\n"
+                "Last versus 52-week low: {{vs_low_252}}\n"
+                "Last in the 52-week range: {{place_252}}\n"
+                "Prior close: {{prior_close}}\n"
                 "Headlines:\n{{headlines}}"
             ),
         ),
