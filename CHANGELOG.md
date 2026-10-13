@@ -48,6 +48,8 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-13 | Give Auto Set Price the 52 week and 3 month ranges | [C-20261013-29](logs/2026-10-13.md#c-20261013-29) |
 | 2026-10-13 | Show position totals in the settings currency | [C-20261013-30](logs/2026-10-13.md#c-20261013-30) |
 | 2026-10-13 | Add a live Orders page for the selected account | [C-20261013-31](logs/2026-10-13.md#c-20261013-31) |
+| 2026-10-13 | Show order status and tactic as badges | [C-20261013-32](logs/2026-10-13.md#c-20261013-32) |
+| 2026-10-13 | Show the order side as a badge | [C-20261013-33](logs/2026-10-13.md#c-20261013-33) |
 
 ## Notes
 

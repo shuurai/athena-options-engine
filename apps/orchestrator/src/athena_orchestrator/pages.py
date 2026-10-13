@@ -1677,19 +1677,25 @@ def order_bucket(status: str, ib_status: str) -> str:
 
 def _order_tr(row: dict) -> str:
     tone = {"filled": "green", "cancelled": "amber", "blocked": "red"}.get(row["bucket"], "blue")
+    label = (row["status"] or "").upper() or DASH
+    tactic = _tactic_tag(row["tactic"].upper()) if row["tactic"] else DASH
+    side = (row["action"] or "").upper()
+    side_tone = {"BUY": "green", "SELL": "amber"}.get(side, "")
+    side_class = f"tag {side_tone}".strip()
+    side_badge = f'<span class="{side_class}">{escape(side)}</span>' if side else DASH
     return (
         f'<tr data-order="{escape(row["id"], quote=True)}">'
         f'<td class="mono">{escape(row["when"] or DASH)}</td>'
         f'<td class="mono">{escape(row["symbol"])}</td>'
-        f'<td>{escape(row["action"] or DASH)}</td>'
+        f"<td>{side_badge}</td>"
         f'<td class="mono">{escape(_plain_number(row["qty"]))}</td>'
         f'<td class="mono">{escape(_order_amount(row["filled"]))}</td>'
         f'<td>{escape(row["order_type"])}</td>'
         f'<td class="mono">{escape(_order_money(row["limit"]))}</td>'
         f'<td class="mono">{escape(_order_money(row["stop"]))}</td>'
-        f'<td><span class="tag {tone}">{escape(row["status"] or DASH)}</span></td>'
+        f'<td><span class="tag {tone}">{escape(label)}</span></td>'
         f'<td class="mono">{escape(row["ib"] or DASH)}</td>'
-        f'<td>{escape(row["tactic"] or DASH)}</td>'
+        f"<td>{tactic}</td>"
         "</tr>"
     )
 
