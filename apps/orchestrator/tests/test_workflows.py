@@ -491,17 +491,18 @@ class WorkflowTest(unittest.TestCase):
             (ACCOUNT, SYMBOL),
         ).fetchone()
         self.assertEqual(stored, ("P4", "HOLD"))
-        tactic, _reason = management_tactic(
-            sec_type="OPT",
-            quantity=Decimal("-1"),
-            avg_price=Decimal("2"),
-            market_price=Decimal("1.5"),
-            expiry=date(2026, 10, 20),
-            today=date(2026, 10, 10),
-            roll_dte=21,
-            profit_take_pct=50,
+        self.assertIsNone(
+            management_tactic(
+                sec_type="OPT",
+                quantity=Decimal("-1"),
+                avg_price=Decimal("2"),
+                market_price=Decimal("1.5"),
+                expiry=date(2026, 10, 20),
+                today=date(2026, 10, 10),
+                roll_dte=21,
+                profit_take_pct=50,
+            )
         )
-        self.assertEqual(tactic, "ROLL")
         self.conn.execute(
             """
             INSERT INTO option_plans (
@@ -531,12 +532,12 @@ class WorkflowTest(unittest.TestCase):
         )
         self.conn.commit()
         created = manage_book(self.conn, standard_payload(), ACCOUNT, date(2026, 10, 10))
-        self.assertTrue(created)
+        self.assertEqual(created, [])
         draft = self.conn.execute(
             "SELECT tactic FROM drafts WHERE account_id = %s AND tactic = 'ROLL'",
             (ACCOUNT,),
         ).fetchone()
-        self.assertEqual(draft[0], "ROLL")
+        self.assertIsNone(draft)
         self.assertEqual(record_iv_marks(self.conn, [SYMBOL], date(2026, 10, 10)), 1)
         self.conn.execute(
             """

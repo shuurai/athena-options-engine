@@ -478,13 +478,19 @@ class IbBroker:
             return trade.orderStatus.status or "cancel_sent"
         return "not_open"
 
-    def positions(self) -> list[BrokerPosition]:
+    def positions(self, account: str = "") -> list[BrokerPosition]:
+        """Open book. An account id waits for that account's prices before reading."""
         if self._ib is None:
             return []
-        books = {item.contract.conId: item for item in self._ib.portfolio()}
+        self._load_portfolio(account)
+        books = {
+            item.contract.conId: item
+            for item in (self._ib.portfolio(account) if account else self._ib.portfolio())
+        }
         seen: set[int] = set()
         rows: list[BrokerPosition] = []
-        for item in self._ib.positions():
+        held = self._ib.positions(account) if account else self._ib.positions()
+        for item in held:
             seen.add(item.contract.conId)
             rows.append(
                 _broker_position(
@@ -496,7 +502,7 @@ class IbBroker:
                     books.get(item.contract.conId),
                 )
             )
-        for item in self._ib.portfolio():
+        for item in books.values():
             if item.contract.conId in seen:
                 continue
             rows.append(
@@ -510,6 +516,15 @@ class IbBroker:
                 )
             )
         return rows
+
+    def _load_portfolio(self, account: str) -> None:
+        """IB sends mark, value, and open P&L only after an account update."""
+        if not account or self._ib is None:
+            return
+        try:
+            self._ib.reqAccountUpdates(account)
+        except (TimeoutError, RuntimeError) as exc:
+            log.info("account updates missing account=%s error=%s", account, exc.__class__.__name__)
 
     def net_liquidation(self, account_id: str) -> Decimal | None:
         """Account net liquidation. Paper books here are in HKD, not only USD."""
@@ -606,6 +621,7 @@ class IbBroker:
             return None
         from ib_insync import Forex
 
+        log.info("fx %s%s", left, right)
         contract = Forex(left + right)
         try:
             found = self._ib.qualifyContracts(contract)
@@ -874,14 +890,20 @@ def _broker_position(account: str, contract, quantity, avg_cost, market_price, b
     mark = _positive(market_price)
     if book is not None and mark is None:
         mark = _positive(book.marketPrice)
-    if contract.secType == "OPT" and multiplier > 1 and mark is not None and avg > mark * multiplier / 2:
-        avg = avg / multiplier
-    strike = contract.strike
     value = unrealized = realized = None
     if book is not None:
         value = _number(book.marketValue)
         unrealized = _number(book.unrealizedPNL)
         realized = _number(book.realizedPNL)
+    if mark is None and value is not None:
+        scale = Decimal(str(quantity)) * multiplier
+        if scale != 0:
+            derived = value / scale
+            if derived > 0:
+                mark = derived
+    if contract.secType == "OPT" and multiplier > 1 and mark is not None and avg > mark * multiplier / 2:
+        avg = avg / multiplier
+    strike = contract.strike
     return BrokerPosition(
         account,
         contract.symbol,

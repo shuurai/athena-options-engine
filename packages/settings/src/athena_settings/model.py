@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 Privilege = Literal["all_orders", "opens_only", "auto_within_risk", "paper_only"]
 GlobalCurrency = Literal["HKD", "USD", "AUD", "CNY", "JPY", "CAD"]
-RiskProfile = Literal["defensive", "standard", "income", "aggressive", "test", "paper", "custom"]
+RiskProfile = Literal["defensive", "standard", "income", "harvest", "aggressive", "test", "paper", "custom"]
 
 
 class RiskLimits(BaseModel):
@@ -306,6 +306,26 @@ class SettingsPayload(BaseModel):
                 risk[key] = strategy[key]
         data["risk"] = risk
         return data
+
+
+def enabled_watchlist(settings: SettingsPayload) -> list[str]:
+    """Names this account still screens. A blocked name stays in the stored pool."""
+    blocked = {item.upper() for item in settings.blocked_symbols}
+    return [symbol for symbol in settings.watchlist if symbol.upper() not in blocked]
+
+
+def cycle_book(settings: SettingsPayload) -> SettingsPayload:
+    """A cycle copy whose watchlist is only the enabled names. The original stays stored."""
+    names = enabled_watchlist(settings)
+    if list(settings.watchlist) == names:
+        return settings
+    return settings.model_copy(update={"watchlist": names})
+
+
+def open_symbols(settings: SettingsPayload, names: list[str]) -> list[str]:
+    """Drop names this account has disabled. Other names in the list stay."""
+    blocked = {item.upper() for item in settings.blocked_symbols}
+    return [name for name in names if name.upper() not in blocked]
 
 
 def standard_payload() -> SettingsPayload:

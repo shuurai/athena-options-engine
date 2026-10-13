@@ -157,7 +157,9 @@ def _connect_athena(broker, host: str, port: int, client_id: int, slot: str, att
 
 
 def _refresh_account(conn, broker, settings: SettingsPayload, account: str, moment: datetime) -> None:
-    _sync_positions(conn, account, broker.positions(), replace=True)
+    log.info("positions %s", account)
+    _sync_positions(conn, account, broker.positions(account), replace=True)
+    log.info("account marks %s", account)
     _store_account_mark(conn, account, moment.date(), broker, settings.global_currency)
     nav = broker.net_liquidation(account) if account else None
     if nav is None:

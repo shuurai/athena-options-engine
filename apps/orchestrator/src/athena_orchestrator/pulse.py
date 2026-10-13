@@ -21,6 +21,7 @@ _PROBE_CLIENT = 2
 _LOCK = threading.Lock()
 _URL = ""
 _SYMBOLS: list[str] = []
+_ACCOUNT = ""
 _SEEN = 0.0
 _STARTED = False
 DASH = "—"
@@ -31,11 +32,19 @@ def configure(database_url: str) -> None:
     _URL = database_url
 
 
-def note_view(symbols: list[str]) -> None:
-    """The cockpit is open. Keep refreshing these names."""
-    global _SEEN
+def enabled_symbols(settings) -> list[str]:
+    """Watchlist names this account still screens. A blocked name stays in the pool."""
+    from athena_settings import enabled_watchlist
+
+    return enabled_watchlist(settings)
+
+
+def note_view(symbols: list[str], account: str = "") -> None:
+    """The cockpit is open. Keep refreshing these names for this account."""
+    global _SEEN, _ACCOUNT
     with _LOCK:
         _SYMBOLS[:] = list(symbols)
+        _ACCOUNT = account
         _SEEN = time.time()
     _ensure()
 
@@ -80,8 +89,8 @@ def snapshot(conn, account: str) -> dict:
     from athena_settings import load_active
 
     settings = load_active(conn, account) if account else None
-    symbols = list(settings.watchlist) if settings else []
-    note_view(symbols)
+    symbols = enabled_symbols(settings) if settings else []
+    note_view(symbols, account)
     facts = sleeve(conn, account) if account else {}
     return {
         "quotes": [
@@ -166,21 +175,26 @@ def _refresh(symbols: list[str]) -> None:
 
 
 def _book_markets() -> dict[str, str]:
-    """Markets from the active book. A missing book leaves each name to be inferred."""
+    """Markets for the names on screen. A missing book leaves each name to be inferred."""
     from athena_exec.accounts import active_accounts
     from athena_settings.repository import load_active
 
-    accounts = active_accounts()
-    if not _URL or not accounts:
+    with _LOCK:
+        account = _ACCOUNT
+        symbols = list(_SYMBOLS)
+    if not account:
+        accounts = active_accounts()
+        account = accounts[0] if accounts else ""
+    if not _URL or not account or not symbols:
         return {}
     try:
         with connect(_URL) as conn:
-            settings = load_active(conn, accounts[0])
+            settings = load_active(conn, account)
     except Exception as exc:
         log.info("pulse markets skipped error=%s", exc.__class__.__name__)
         return {}
     found = {}
-    for symbol in settings.watchlist:
+    for symbol in symbols:
         flags = settings.tactic_flags.get(symbol.upper())
         explicit = flags.market if flags is not None and flags.market else ""
         found[symbol.upper()] = symbol_market(symbol, explicit)

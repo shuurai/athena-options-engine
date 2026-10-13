@@ -75,19 +75,23 @@ def ingest_news(conn: psycopg.Connection, symbols: list[str], settings: Settings
     news = settings.news
     if news.yahoo:
         for symbol in symbols:
+            log.info("news yahoo %s", symbol)
             count, rows = _save_headlines(conn, symbol, "yahoo", _yahoo(symbol))
             stored += count
             fresh.extend(rows)
     if news.finviz:
         for symbol in symbols:
+            log.info("news finviz %s", symbol)
             count, rows = _save_headlines(conn, symbol, "finviz", _finviz(symbol))
             stored += count
             fresh.extend(rows)
     if news.fed_calendar:
+        log.info("news fed")
         _save_marks(conn, "FED", "", _fed_meetings())
     for symbol, event_day, title in _earnings(symbols, today, news.earnings_near_days):
         _save_marks(conn, "EARNINGS", symbol, [(event_day, title)])
     conn.commit()
+    log.info("news score")
     updated = enrich_sentiment(
         conn, fresh, scoring_model(settings), settings.ai.provider, deepseek_token(settings)
     )

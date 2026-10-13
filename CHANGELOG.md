@@ -18,6 +18,21 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-12 | Close strategy holes for marks, rails, openings, and option spreads | [C-20261012-1](logs/2026-10-12.md#c-20261012-1) |
 | 2026-10-12 | Read the US session as standard time from 2 Nov 2026 | [C-20261012-2](logs/2026-10-12.md#c-20261012-2) |
 | 2026-10-13 | Cap IB quotes, skip a closed market, and stop after empty option history | [C-20261013-1](logs/2026-10-13.md#c-20261013-1) |
+| 2026-10-13 | Stream live cycle lines in the cockpit header | [C-20261013-2](logs/2026-10-13.md#c-20261013-2) |
+| 2026-10-13 | Run every live account and switch the viewed book | [C-20261013-3](logs/2026-10-13.md#c-20261013-3) |
+| 2026-10-13 | Show blocked drafts and count only the waiting queue | [C-20261013-4](logs/2026-10-13.md#c-20261013-4) |
+| 2026-10-13 | Show budget results as two short badges | [C-20261013-5](logs/2026-10-13.md#c-20261013-5) |
+| 2026-10-13 | Load blocked drafts as the list scrolls | [C-20261013-6](logs/2026-10-13.md#c-20261013-6) |
+| 2026-10-13 | List blocked drafts with the other decisions | [C-20261013-7](logs/2026-10-13.md#c-20261013-7) |
+| 2026-10-13 | Filter recent decisions by status and text | [C-20261013-8](logs/2026-10-13.md#c-20261013-8) |
+| 2026-10-13 | Filter history like drafts and stop drafting rolls | [C-20261013-9](logs/2026-10-13.md#c-20261013-9) |
+| 2026-10-13 | Move Accounts into View and add an account switcher | [C-20261013-10](logs/2026-10-13.md#c-20261013-10) |
+| 2026-10-13 | Move Accounts and paper-only Simulation into Configs | [C-20261013-11](logs/2026-10-13.md#c-20261013-11) |
+| 2026-10-13 | Store IB portfolio marks and pulse the enabled universe | [C-20261013-12](logs/2026-10-13.md#c-20261013-12) |
+| 2026-10-13 | Cycle only each account's enabled universe | [C-20261013-13](logs/2026-10-13.md#c-20261013-13) |
+| 2026-10-13 | Document four risk grades before changing the form | [C-20261013-14](logs/2026-10-13.md#c-20261013-14) |
+| 2026-10-13 | Fill each risk grade from the appetite template | [C-20261013-15](logs/2026-10-13.md#c-20261013-15) |
+| 2026-10-13 | Add a reset card for the selected risk grade | [C-20261013-16](logs/2026-10-13.md#c-20261013-16) |
 
 ## Notes
 

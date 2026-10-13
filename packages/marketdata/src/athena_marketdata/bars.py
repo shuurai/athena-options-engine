@@ -27,6 +27,8 @@ def write_watchlist_bars(
     hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
     written = 0
     for symbol in symbols:
+        if api_key:
+            log.info("bars %s", symbol)
         bar = _from_itick(base_url, api_key, symbol) if api_key else None
         if bar is None:
             if symbol.isdigit() and not has_intraday(conn, symbol):

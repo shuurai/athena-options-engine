@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -21,6 +23,7 @@ _next_at: datetime | None = None
 _step = 0
 _lines = [""] * len(STEPS)
 _marks = ["pending"] * len(STEPS)
+_activity: deque[str] = deque(maxlen=12)
 
 
 def note_cycle(count: int) -> None:
@@ -46,6 +49,7 @@ def begin(count: int) -> None:
             _lines[index] = ""
             _marks[index] = "pending"
         _marks[0] = "running"
+        _activity.clear()
 
 
 def begin_running(count: int) -> None:
@@ -104,6 +108,7 @@ def cycle_view() -> dict:
         count = cycle
         marks = list(_marks)
         lines = list(_lines)
+        activity = list(_activity)
     if state == "waiting" and nxt is not None:
         remaining = max(0, int((nxt - now).total_seconds()))
         progress = min(1.0, (loop - remaining) / loop)
@@ -134,11 +139,46 @@ def cycle_view() -> dict:
         "index": step + 1,
         "skipped": skipped,
         "roll": roll,
+        "activity": activity if state == "running" else [],
         "steps": len(STEPS),
         "uptime": uptime,
         "host": socket.gethostname(),
         "started": started_at.astimezone(ZoneInfo("Asia/Hong_Kong")).strftime("%Y-%m-%d %H:%M"),
     }
+
+
+def note_activity(text: str) -> None:
+    """Keep one short line the cockpit can show while a step is still running."""
+    clean = " ".join(text.split())
+    if not clean:
+        return
+    if len(clean) > 160:
+        clean = clean[:157] + "..."
+    stamp = datetime.now(ZoneInfo("Asia/Hong_Kong")).strftime("%H:%M:%S")
+    with _LOCK:
+        _activity.append(f"{stamp}  {clean}")
+
+
+class _ActivityLog(logging.Handler):
+    """Copy Athena log lines into the cycle strip. Broker position dumps stay out."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        name = record.name or ""
+        if name != "athena" and not name.startswith("athena."):
+            return
+        if record.levelno < logging.INFO:
+            return
+        try:
+            note_activity(record.getMessage())
+        except Exception:
+            return
+
+
+def install_activity_log() -> None:
+    root = logging.getLogger()
+    if any(type(handler) is _ActivityLog for handler in root.handlers):
+        return
+    root.addHandler(_ActivityLog())
 
 
 def note_telegram(polling: bool) -> None:

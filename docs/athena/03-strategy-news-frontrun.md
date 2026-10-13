@@ -141,12 +141,12 @@ These run before a draft can be pending. They use the same account and the same 
 
 ## Position management
 
-Management is one ticket per name, at most two legs, reason `manage_roll` or `manage_close`.
+Management is one ticket per name, at most two legs, reason `manage_close`.
 
-- DTE at or under `roll_dte` drafts a roll.
-- Premium captured at or above `profit_take_pct` drafts a close.
+- A short option closes when captured premium is at or above `profit_take_pct`.
+- Rolls are not drafted. A long option is left in place.
 
-Both stay pending until Approve. The cycle drafts that ticket before a new open. A name with a pending roll or close does not also receive an opening ticket in that pass. A fill Athena did not draft is stored as external and reconciled on the next sync.
+A close stays pending until Approve. The cycle drafts that ticket before a new open. A name with a pending close does not also receive an opening ticket in that pass. A fill Athena did not draft is stored as external and reconciled on the next sync.
 
 ## Cycle budget
 

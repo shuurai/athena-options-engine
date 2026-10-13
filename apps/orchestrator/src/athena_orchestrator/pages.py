@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 from athena_bots.public_url import control_page_url
 from athena_exec.accounts import active_accounts, trading_mode
+from athena_orchestrator.view import current_view
 from athena_exec.slots import HKT
 from . import runtime
 from .cockpit import DASH, sleeve
@@ -72,20 +73,83 @@ FORM_LIMITS = (
     "position", "max_orders", "margin", "blackout",
 )
 PROFILES = {
-    "defensive": (10, 40, 3, 1, 60, 21, 0, 10, 50, 7),
-    "standard": (20, 30, 5, 3, 50, 7, 0, 10, 50, 7),
-    "income": (25, 25, 5, 2, 45, 14, 0, 10, 50, 7),
-    "aggressive": (35, 15, 8, 4, 30, 7, 0, 10, 50, 7),
+    "defensive": (10, 40, 3, 1, 60, 30, 0, 4, 30, 10),
+    "standard": (20, 30, 5, 3, 50, 30, 0, 8, 50, 7),
+    "harvest": (25, 25, 5, 2, 45, 30, 0, 8, 45, 7),
+    "aggressive": (35, 15, 8, 4, 30, 14, 0, 12, 60, 5),
     "paper": (25, 20, 8, 5, 40, 21, 20000, 6, 35, 7),
 }
+# Appetite beyond the ten limits. A grade click writes these with the tuple.
+# Measurement knobs stay out, so the reading does not change with the grade.
+GRADE_KNOBS = {
+    "defensive": {
+        "dte_min": 30, "dte_target": 45, "dte_max": 60,
+        "csp_delta_lo": 0.08, "csp_delta_target": 0.16, "csp_delta_hi": 0.25,
+        "cc_delta_target": 0.20, "strangle_delta_target": 0.16,
+        "profit_take_pct": 40, "otm_floor_pct": 8, "otm_ceiling_pct": 0,
+        "chain_band_pct": 35, "max_bucket": 20, "max_assign": 25,
+        "min_cash_after": 25, "assign_delta": 0.20,
+    },
+    "standard": {
+        "dte_min": 30, "dte_target": 35, "dte_max": 45,
+        "csp_delta_lo": 0.10, "csp_delta_target": 0.25, "csp_delta_hi": 0.40,
+        "cc_delta_target": 0.30, "strangle_delta_target": 0.28,
+        "profit_take_pct": 50, "otm_floor_pct": 5, "otm_ceiling_pct": 40,
+        "chain_band_pct": 25, "max_bucket": 35, "max_assign": 40,
+        "min_cash_after": 15, "assign_delta": 0.30,
+    },
+    "harvest": {
+        "dte_min": 30, "dte_target": 35, "dte_max": 45,
+        "csp_delta_lo": 0.15, "csp_delta_target": 0.30, "csp_delta_hi": 0.40,
+        "cc_delta_target": 0.35, "strangle_delta_target": 0.30,
+        "profit_take_pct": 65, "otm_floor_pct": 4, "otm_ceiling_pct": 20,
+        "chain_band_pct": 25, "max_bucket": 30, "max_assign": 35,
+        "min_cash_after": 15, "assign_delta": 0.30,
+    },
+    "aggressive": {
+        "dte_min": 14, "dte_target": 21, "dte_max": 35,
+        "csp_delta_lo": 0.20, "csp_delta_target": 0.35, "csp_delta_hi": 0.45,
+        "cc_delta_target": 0.40, "strangle_delta_target": 0.35,
+        "profit_take_pct": 45, "otm_floor_pct": 3, "otm_ceiling_pct": 15,
+        "chain_band_pct": 20, "max_bucket": 45, "max_assign": 50,
+        "min_cash_after": 8, "assign_delta": 0.40,
+    },
+}
 PREVIEW_FIELDS = ("rv_high_pctl", "rv_low_pctl", "rv_window", "ivr_min_samples")
+PROFILE_LABELS = {"harvest": "Harvest"}
 PROFILE_COPY = {
-    "defensive": "Tighter name size, more cash, one contract.",
-    "standard": "The book Athena starts with.",
-    "income": "More premium, a shorter DTE floor.",
-    "aggressive": "Larger name size and more contracts.",
+    "defensive": "Farthest strike and the most cash.",
+    "standard": "The monthly book this starts with.",
+    "harvest": "Closer strike, same monthly window.",
+    "aggressive": "Shorter dates and more orders.",
     "paper": "Acceptance limits. Approve still applies.",
 }
+
+
+def shown_profile(name: str) -> str:
+    """Income is the stored name of the Harvest card."""
+    return "harvest" if name == "income" else name
+
+
+def matched_profile(ten: tuple, posted: dict[str, str]) -> str:
+    """The grade whose limits and appetite match. Anything else is custom."""
+    name = next((item for item, preset in PROFILES.items() if preset == ten), None)
+    if name is None:
+        return "custom"
+    for key, expected in GRADE_KNOBS.get(name, {}).items():
+        raw = posted.get(key, "")
+        if raw == "":
+            return "custom"
+        try:
+            got = float(raw) if isinstance(expected, float) else int(float(raw))
+        except ValueError:
+            return "custom"
+        if isinstance(expected, float):
+            if abs(got - expected) > 1e-6:
+                return "custom"
+        elif got != expected:
+            return "custom"
+    return name
 PHASES = (
     ("P1", "Warning", "Watchlist and IV"),
     ("P2", "Panic", "Strangle bias"),
@@ -93,12 +157,10 @@ PHASES = (
     ("P4", "Repair", "Close or rotate"),
     ("P5", "Euphoria", "Covered-call bias"),
 )
-HISTORY_FILTERS = (
+HISTORY_STATUSES = (
     ("all", "All"),
-    ("csp", "CSP"),
-    ("cc", "CC"),
-    ("strangle", "Strangle"),
-    ("roll", "Roll"),
+    ("filled", "Filled"),
+    ("approved", "Approved"),
     ("rejected", "Rejected"),
 )
 PRIVILEGES = {
@@ -156,8 +218,17 @@ def submit(conn, path: str, form: dict, actor: str, allowlist: set[str]) -> dict
 
 
 def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
+    if _wants_rows(query):
+        status, needle = _decision_choice(query)
+        rows, more, nxt = _decision_slice(conn, account, _offset(query), status, needle)
+        html = _decision_trs(rows)
+        if not html and _offset(query) == 0:
+            html = '<tr><td colspan="4">No decision is stored yet.</td></tr>'
+        return _fragment(html, more, nxt)
     pending = []
     recent = []
+    more = False
+    nxt = 0
     if account:
         pending = conn.execute(
             """
@@ -170,45 +241,26 @@ def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
             """,
             (account,),
         ).fetchall()
-        recent = conn.execute(
-            """
-            SELECT a.created_at, a.draft_id, d.symbol, d.tactic, a.decision, a.actor, a.reason
-            FROM approvals a
-            JOIN drafts d ON d.id = a.draft_id
-            WHERE a.account_id = %s
-            ORDER BY a.created_at DESC
-            LIMIT 40
-            """,
-            (account,),
-        ).fetchall()
+        recent, more, nxt = _decision_slice(conn, account, 0)
     cards = "".join(_draft_card(conn, account, row, index == 0) for index, row in enumerate(pending))
     if not cards:
         cards = f'<div class="card draft-empty"><div class="sim-idle">{_SIM_IDLE}<p>No draft is waiting.</p></div></div>'
-    rows = []
-    for created, draft_id, symbol, tactic, decision, actor, reason in recent:
-        label = {"approve": "APPROVED", "reject": "REJECTED"}.get(decision, decision.upper())
-        tag = "green" if decision == "approve" else "red"
-        short = tactic[5:] if tactic.startswith("OPEN_") else tactic
-        rows.append(
-            "<tr>"
-            f"<td class=\"mono\">{escape(_stamp(created))}</td>"
-            f"<td class=\"mono\">{escape(draft_id)} · {escape(symbol)} {escape(short)}</td>"
-            f"<td><span class=\"tag {tag}\">{escape(label)}</span></td>"
-            f"<td>{escape(actor)}</td>"
-            "</tr>"
-        )
-    body_rows = "".join(rows) or "<tr><td colspan=\"4\">No decision is stored yet.</td></tr>"
+    body_rows = _decision_trs(recent) or '<tr><td colspan="4">No decision is stored yet.</td></tr>'
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
     banner = _draft_banner(conn, account)
+    table = (
+        '<table class="data"><thead><tr>'
+        "<th>When</th><th>Draft</th><th>Action Status</th><th>By</th></tr></thead>"
+        f"<tbody>{body_rows}</tbody></table>"
+    )
     body = (
         f"{note_html}{banner}"
         '<div class="draft-cols">'
         f'<div class="draft-stack">{cards}</div>'
         '<div class="card fill">'
         '<h2>Recent decisions <a class="more" href="/history">full history →</a></h2>'
-        '<div class="scroll-y"><table class="data"><thead><tr>'
-        "<th>When</th><th>Draft</th><th>Action Status</th><th>By</th></tr></thead>"
-        f"<tbody>{body_rows}</tbody></table></div></div></div>"
+        f"{_decision_filters()}"
+        f"{_feed('/drafts', nxt, more, table, 'decision-feed')}</div></div>"
     )
     chips = [("info", f"{len(pending)} AWAITING")]
     if account:
@@ -219,6 +271,93 @@ def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
         body,
         chips,
     )
+
+
+def _decision_choice(query: dict) -> tuple[str, str]:
+    status = (query.get("status") or ["all"])[0]
+    if status not in {"blocked", "approve", "reject"}:
+        status = "all"
+    needle = (query.get("q") or [""])[0].strip()[:80]
+    return status, needle
+
+
+def _decision_like(needle: str) -> str:
+    cleaned = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{cleaned}%"
+
+
+def _decision_filters() -> str:
+    buttons = [
+        ("all", "All"),
+        ("blocked", "Blocked"),
+        ("approve", "Approved"),
+        ("reject", "Rejected"),
+    ]
+    marks = "".join(
+        f'<button type="button" data-status="{key}"{" class=\"on\"" if key == "all" else ""}>{label}</button>'
+        for key, label in buttons
+    )
+    return (
+        '<div class="filters" id="decision-filters">'
+        '<input class="input" id="decision-keyword" type="search" placeholder="Symbol or reason" '
+        'autocomplete="off" spellcheck="false">'
+        f"{marks}</div>"
+    )
+
+
+def _decision_slice(conn, account: str, offset: int, status: str = "all", needle: str = "") -> tuple[list, bool, int]:
+    """Approvals and blocked drafts, newest first. One list."""
+    if not account:
+        return [], False, 0
+    if status not in {"blocked", "approve", "reject"}:
+        status = "all"
+    like = _decision_like(needle)
+    rows = conn.execute(
+        """
+        SELECT created_at, draft_id, symbol, tactic, decision, actor
+        FROM (
+            SELECT a.created_at, a.draft_id, d.symbol, d.tactic, a.decision, a.actor
+            FROM approvals a
+            JOIN drafts d ON d.id = a.draft_id
+            WHERE a.account_id = %s
+            UNION ALL
+            SELECT created_at, id, symbol, tactic, 'blocked', COALESCE(reason, '')
+            FROM drafts
+            WHERE account_id = %s AND status = 'blocked'
+        ) events
+        WHERE (%s = 'all' OR decision = %s)
+          AND (
+            %s = ''
+            OR symbol ILIKE %s ESCAPE '\\'
+            OR tactic ILIKE %s ESCAPE '\\'
+            OR actor ILIKE %s ESCAPE '\\'
+            OR draft_id ILIKE %s ESCAPE '\\'
+          )
+        ORDER BY created_at DESC
+        LIMIT %s OFFSET %s
+        """,
+        (account, account, status, status, needle, like, like, like, like, _PAGE + 1, offset),
+    ).fetchall()
+    more = len(rows) > _PAGE
+    shown = rows[:_PAGE]
+    return shown, more, offset + len(shown)
+
+
+def _decision_trs(rows) -> str:
+    body = []
+    for created, draft_id, symbol, tactic, decision, actor in rows:
+        label = {"approve": "APPROVED", "reject": "REJECTED", "blocked": "BLOCKED"}.get(decision, str(decision).upper())
+        tag = {"approve": "green", "blocked": "amber"}.get(decision, "red")
+        short = tactic[5:] if str(tactic).startswith("OPEN_") else tactic
+        body.append(
+            "<tr>"
+            f"<td class=\"mono\">{escape(_stamp(created))}</td>"
+            f"<td class=\"mono\">{escape(draft_id)} · {escape(symbol)} {escape(short)}</td>"
+            f"<td><span class=\"tag {tag}\">{escape(label)}</span></td>"
+            f"<td>{escape(actor or '')}</td>"
+            "</tr>"
+        )
+    return "".join(body)
 
 
 def _draft_card(conn, account: str, row, hot: bool) -> str:
@@ -596,11 +735,12 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
         for code, _badge, _meaning in CLASSIFIERS
     )
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
-    profile = settings.risk.profile if settings else "standard"
+    profile = shown_profile(settings.risk.profile) if settings else "standard"
     tone = {
         "defensive": "tone-defensive",
         "standard": "tone-standard",
-        "income": "tone-income",
+        "income": "tone-harvest",
+        "harvest": "tone-harvest",
         "aggressive": "tone-aggressive",
         "test": "tone-test",
         "paper": "tone-paper",
@@ -651,9 +791,9 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
 
 
 def _history(conn, account: str, query: dict) -> dict:
-    kind = _history_kind(query)
+    status, needle = _history_choice(query)
     everything = _history_rows(conn, account)
-    rows = [item for item in everything if _history_visible(item, kind)]
+    rows = [item for item in everything if _history_visible(item, status, needle)]
     offset = _offset(query)
     page, more, nxt = _window(rows, offset)
     facts = sleeve(conn, account) if account else None
@@ -661,16 +801,16 @@ def _history(conn, account: str, query: dict) -> dict:
     best, worst = _month_stats(facts)
     currency = (facts or {}).get("currency") or "HKD"
     badge = f' <span class="tag">{escape(currency)}</span>'
-    filters = "".join(
-        f'<a class="{"on" if key == kind else ""}" href="/history?kind={key}">{label}</a>'
-        for key, label in HISTORY_FILTERS
-    )
     table_rows = [_history_tr(item) for item in page]
     body_rows = "".join(table_rows)
     if not body_rows and offset == 0:
-        body_rows = '<tr><td colspan="6">No rows for this filter.</td></tr>'
+        body_rows = _history_empty(everything, status, needle)
     if _wants_rows(query):
         return _fragment(body_rows, more, nxt)
+    export = "/history.csv"
+    query_text = _history_query(status, needle)
+    if query_text:
+        export = f"{export}?{query_text}"
     body = (
         '<div class="grid cols-3">'
         f'<div class="card stat"><div class="label">Total premium{badge}</div>'
@@ -681,14 +821,14 @@ def _history(conn, account: str, query: dict) -> dict:
         f'<div class="card stat"><div class="label">Worst month{badge}</div>'
         f'<div class="value {worst[2]}">{escape(worst[0])}</div><div class="meta">{escape(worst[1])}</div></div>'
         "</div>"
-        '<div class="card fill"><h2>Fills &amp; decisions '
-        f'<a class="more" href="/history.csv?kind={quote(kind)}">export csv →</a></h2>'
-        f'<div class="filters">{filters}</div>'
-        f'{_feed(f"/history?kind={quote(kind)}", nxt, more, _history_table(body_rows))}</div></div>'
+        '<div class="card fill"><h2>Fills and approvals '
+        f'<a class="more" id="history-export" data-base="/history.csv" href="{escape(export, quote=True)}">export csv →</a></h2>'
+        f"{_history_filters(status, needle)}"
+        f'{_feed("/history", nxt, more, _history_table(body_rows), "history-feed")}</div></div>'
     )
     return _html(
         "History",
-        "Six months of fills, rolls, rejects, and phase context. Every row was Approve-gated at the time.",
+        "Fills and approvals for this account.",
         body,
         _history_chips(everything),
         _REFRESH,
@@ -1442,12 +1582,12 @@ def _signed(number: Decimal) -> str:
 
 
 def _history_csv(conn, account: str, query: dict) -> dict:
-    kind = _history_kind(query)
+    status, needle = _history_choice(query)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(["date", "symbol", "tactic", "phase", "pnl", "status"])
     for item in _history_rows(conn, account):
-        if not _history_visible(item, kind):
+        if not _history_visible(item, status, needle):
             continue
         writer.writerow([item["when"], item["symbol"], item["tactic"], item["phase"], item["pnl"], item["status"]])
     return {"status": 200, "kind": "csv", "body": buffer.getvalue(), "title": "", "lead": "", "chips": []}
@@ -1464,7 +1604,6 @@ def _accounts(conn, account: str, query: dict, note: str = "") -> dict:
     paper = os.environ.get("ATHENA_IB_PAPER_ACCOUNT_ID", "").strip()
     live = [part.strip() for part in os.environ.get("ATHENA_IB_ACCOUNT_IDS", "").split(",") if part.strip()]
     labels = _account_labels(conn, account)
-    settings = load_active(conn, account) if account else None
     session_ids = set(active_accounts())
     books = [(labels.get(paper, "Paper"), "PAPER", paper)] if paper else []
     books += [(labels.get(item, "Live"), "LIVE", item) for item in live]
@@ -1483,8 +1622,14 @@ def _accounts(conn, account: str, query: dict, note: str = "") -> dict:
         facts = _book_facts(conn, book_id)
         active = book_id == account
         panel_id = f"book-panel-{index}"
-        sync_on = control_flag(settings, book_id, "sync", book_id in session_ids) if settings else book_id in session_ids
-        trading_on = control_flag(settings, book_id, "trading", book_id in session_ids) if settings else book_id in session_ids
+        held = _controls_for(conn, account, book_id)
+        if held is None:
+            sync_on = book_id in session_ids
+            trading_on = book_id in session_ids
+        else:
+            _owner, book_settings = held
+            sync_on = control_flag(book_settings, book_id, "sync", book_id in session_ids)
+            trading_on = control_flag(book_settings, book_id, "trading", book_id in session_ids)
         cards.append(_account_card(name, mode, book_id, active, facts, panel_id))
         rows.append(_account_control_row(name, mode, book_id, facts, sync_on, trading_on))
         panels.append(_book_panel(book_id, mode, facts, panel_id, conn))
@@ -1503,10 +1648,10 @@ def _accounts(conn, account: str, query: dict, note: str = "") -> dict:
     )
     chips = [("info", f"{len(books)} CONFIGURED")]
     if account:
-        chips.append(("ok", "ACTIVE"))
+        chips.append(("ok", "VIEWING"))
     return _html(
         "Accounts",
-        "Configured IB accounts. The active book is the one this Gateway session trades.",
+        "Every listed live account runs its own cycle. Choosing a card only changes these pages.",
         body,
         chips,
     )
@@ -1805,11 +1950,17 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
     risk = current.risk
     strategy = current.strategy
     cards = []
+    viewing = shown_profile(risk.profile)
     for name, values in PROFILES.items():
-        on = " on" if risk.profile == name else ""
+        on = " on" if viewing == name else ""
+        knobs = GRADE_KNOBS.get(name)
+        grade = ""
+        if knobs:
+            grade = f' data-grade="{escape(json.dumps(knobs), quote=True)}"'
+        label = PROFILE_LABELS.get(name, name)
         cards.append(
-            f'<button class="profile{on}" type="button" data-limits="{",".join(str(item) for item in values)}">'
-            f'<div class="name">{name}</div><div class="desc">{PROFILE_COPY[name]}</div></button>'
+            f'<button class="profile{on}" type="button" data-limits="{",".join(str(item) for item in values)}"{grade}>'
+            f'<div class="name">{escape(label)}</div><div class="desc">{PROFILE_COPY[name]}</div></button>'
         )
     priv = []
     for name, copy in PRIVILEGES.items():
@@ -1840,7 +1991,6 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('DTE target', 'dte_target', strategy.dte_target, 'Expiry the chain menu prefers.')}"
         f"{_limit('DTE max', 'dte_max', strategy.dte_max, 'Longest expiry the chain menu will offer.')}"
         f"{_limit('Profit take %', 'profit_take_pct', strategy.profit_take_pct, 'Close a short when this percent of the credit is captured.')}"
-        f"{_limit('Roll DTE', 'roll_dte', strategy.roll_dte, 'Roll when days to expiry are at or below this.')}"
         "</div></div>"
         f"{_volatility_card(risk, strategy)}"
         '<div class="card risk-span-2"><h2>Limits</h2><div class="form-grid">'
@@ -1874,6 +2024,7 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         f'<div class="seg stack">{"".join(priv)}</div>'
         f'<template id="risk-versions">{versions}</template></div>'
         f"{_conflict_card(risk.strict_conflict)}"
+        f"{_reset_card()}"
         "</div></form>"
         "</div>"
     )
@@ -1881,7 +2032,7 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         "Risk & Strategy",
         "Pick a profile to fill the limits, then save. Strategy knobs are on this page. Privilege does not change.",
         body,
-        [("info", risk.profile.upper()), ("", f"V{current.id}")],
+        [("info", shown_profile(risk.profile).upper()), ("", f"V{current.id}")],
     )
 
 
@@ -2235,9 +2386,10 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
     if not 0.1 <= wing_z <= 1.5:
         return _risk(conn, account, {}, "Wing factor must be 0.1 to 1.5.") | {"status": 400}
     symbol, cash, halt, contracts, rv_floor, dte = values
-    profile = next(
-        (name for name, preset in PROFILES.items() if preset == (symbol, cash, halt, contracts, rv_floor, dte, position, orders, margin, blackout)),
-        "custom",
+    posted = {key: (form.get(key) or [""])[0] for key in set().union(*GRADE_KNOBS.values())}
+    profile = matched_profile(
+        (symbol, cash, halt, contracts, rv_floor, dte, position, orders, margin, blackout),
+        posted,
     )
     payload = SettingsPayload.model_validate(current.model_dump())
     payload.risk = RiskLimits(
@@ -2267,7 +2419,6 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
     )
     payload.privilege = current.privilege
     strategy_ranges = {
-        "roll_dte": (1, 60),
         "profit_take_pct": (1, 100),
         "ivr_high": (1, 100),
         "chain_band_pct": (1, 80),
@@ -2325,7 +2476,6 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
             "otm_floor_pct": wing_floor,
             "otm_ceiling_pct": wing_ceiling,
             "screener_top_n": strategy_numbers["screener_top_n"],
-            "roll_dte": strategy_numbers["roll_dte"],
             "profit_take_pct": strategy_numbers["profit_take_pct"],
             "dte_min": strategy_numbers["dte_min"],
             "dte_target": strategy_numbers["dte_target"],
@@ -2591,7 +2741,10 @@ def _audit(conn, account: str, query: dict) -> dict:
         f"</tr></thead><tbody>{rendered}</tbody></table>"
     )
     body = (
-        '<div class="card fill"><h2>Calls and decisions</h2>'
+        '<div class="card fill"><h2><span>Calls and decisions '
+        '<button class="help-q" type="button" data-cmd="view-book" data-panel="audit-legend" '
+        'data-title="Result types" aria-label="Result types">?</button></span></h2>'
+        f"{_result_legend()}"
         '<div class="filters" id="audit-filters">'
         '<input class="input" id="audit-keyword" type="search" placeholder="Keyword" autocomplete="off" spellcheck="false">'
         f'{"".join(filters)}</div>'
@@ -2621,7 +2774,7 @@ def _audit_tr(row: dict) -> str:
         f'<td class="mono">{model}</td>'
         f'<td class="mono">{escape(row["latency"])}</td>'
         f'<td class="mono">{escape(row["tokens"])}</td>'
-        f'<td>{_audit_result_tag(row["result"], row["status"])}</td>'
+        f'<td>{_audit_result_html(row)}</td>'
         "</tr>"
     )
 
@@ -2677,21 +2830,149 @@ def _audit_thinking_tag(thinking: str, note: str) -> str:
     return DASH
 
 
-def _audit_result_tag(result: str, status: str) -> str:
-    shown = _audit_shown(result)
+_BUDGET_LINE = re.compile(
+    r"^cycle_order=(?P<order>\d+)\s+prob_source=\S+(?:\s+(?P<reason>.*))?$",
+    re.I,
+)
+_BUDGET_SHOWN = re.compile(
+    r"^CYCLE_ORDER=(?P<order>\d+)_PROB_SOURCE=[A-Z0-9]+_(?P<reason>.+)$",
+)
+_BUDGET_LABEL = {
+    "kept": "KEPT",
+    "cycle margin": "CYCLE MARGIN",
+    "cycle symbol cap": "SYMBOL CAP",
+    "cycle cash reserve": "CASH RESERVE",
+    "cycle orders": "DAY ORDERS",
+    "cycle assignment cap": "ASSIGN CAP",
+    "assignment would breach min cash": "MIN CASH",
+    "missing mark": "NO MARK",
+}
+
+
+def _budget_label(reason: str) -> str:
+    text = " ".join((reason or "").replace("_", " ").split())
+    key = text.lower()
+    if key in _BUDGET_LABEL:
+        return _BUDGET_LABEL[key]
+    bucket = re.match(r"cycle bucket \S+ at (\d+)%", key)
+    if bucket:
+        return f"BUCKET {bucket.group(1)}%"
+    if key.startswith("missing fx"):
+        return "NO FX"
+    if key.startswith("cycle "):
+        return key[6:].upper()
+    return key.upper()
+
+
+def _audit_badges(result: str, status: str) -> list[dict]:
+    """One badge, or the budget reason plus its place in the walk."""
+    raw = (result or "").strip()
+    match = _BUDGET_LINE.match(raw) or _BUDGET_SHOWN.match(raw)
+    if match:
+        reason = (match.group("reason") or "kept").strip()
+        state = (status or "").lower()
+        kind = "green" if reason.replace("_", " ").lower() == "kept" or state in {"ok", "drafted"} else "red"
+        if state in {"error", "dropped", "invalid"}:
+            kind = "red"
+        return [
+            {"text": _budget_label(reason), "kind": kind},
+            {"text": f"ORDER {match.group('order')}", "kind": ""},
+        ]
+    shown = _audit_shown(raw)
+    if not shown:
+        return []
+    return [{"text": shown, "kind": _audit_result_kind(shown, status)}]
+
+
+def _audit_result_kind(shown: str, status: str) -> str:
     state = (status or "").lower()
     key = shown.strip().lower()
     if key == "quiet":
-        kind = ""
-    elif state in {"error", "dropped", "invalid"}:
-        kind = "red"
-    elif "wash" in key:
-        kind = "amber"
-    elif state in {"ok", "drafted"}:
-        kind = "green"
-    else:
-        kind = "blue"
-    return _tag(shown, kind)
+        return ""
+    if state in {"error", "dropped", "invalid"}:
+        return "red"
+    if "wash" in key:
+        return "amber"
+    if state in {"ok", "drafted"}:
+        return "green"
+    return "blue"
+
+
+def _audit_result_html(row: dict) -> str:
+    badges = row.get("badges")
+    if not badges:
+        badges = _audit_badges(row.get("result") or "", row.get("status") or "")
+    tags = "".join(_tag(item["text"], item.get("kind") or "") for item in badges if item.get("text"))
+    return f'<span class="badges">{tags}</span>' if tags else ""
+
+
+def _audit_result_tag(result: str, status: str) -> str:
+    return _audit_result_html({"result": result, "status": status})
+
+
+def _result_legend() -> str:
+    """Slide-in glossary for the audit Result and Status columns."""
+    status = [
+        ("OK", "The model reply was readable."),
+        ("QUIET", "Nothing was proposed."),
+        ("ERROR", "The call failed. Result names the error."),
+        ("INVALID", "The reply did not match the expected JSON."),
+        ("DRAFTED", "A draft is waiting for Approve."),
+        ("DROPPED", "The ticket was not kept. Result names why."),
+        ("OBSERVED", "Tags were stored. This pass did not write a ticket."),
+        ("NO_DATA", "Bars or another input was missing, so the symbol was skipped."),
+    ]
+    result = [
+        ("QUIET", "The agent had no tag and no proposal."),
+        ("NEWS_WASH", "News sentiment is under the wash line."),
+        ("LOWER_RAIL", "A chart tag from Location. Several tags can share one badge."),
+        ("170 LIMIT 2", "A tactic proposal: strike and limit, a share price, or both strangle strikes."),
+        ("INVALID_SCHEMA", "The reply failed the schema check."),
+        ("CYCLE MARGIN", "This ticket would push short-option margin over the cycle cap."),
+        ("SYMBOL CAP", "This ticket would push the symbol over its share of NAV."),
+        ("CASH RESERVE", "Cash would fall through the reserve."),
+        ("DAY ORDERS", "The day's order count would be passed."),
+        ("ASSIGN CAP", "Assignment exposure would pass its cap."),
+        ("MIN CASH", "After assignment, cash would sit under the floor."),
+        ("BUCKET 40%", "A classifier bucket would pass its cap. The percent is on the badge."),
+        ("NO MARK", "A price was missing, so the size could not be checked."),
+        ("NO FX", "A currency rate was missing."),
+        ("KEPT", "The cycle walk left this draft pending."),
+        ("ORDER 5", "Place in the walk. 1 is checked first. A later number was dropped after earlier tickets used the room."),
+        ("DELTA PROXY", "How the walk estimates a short put. Stored on the decision, and left off the badge."),
+        ("HALTED", "The account is halted."),
+        ("NO_BARS", "Not enough daily bars."),
+        ("SYMBOL_BLOCKED", "The symbol is on the blocked list."),
+        ("NO_CHAIN", "No option chain is stored, so only tags can run."),
+        ("OPTIONS_OFF", "CSP, covered call, and strangle are off for this symbol."),
+        ("OUTSIDE_DRAFT_SLOT", "Location and News ran. The draft slot was closed."),
+        ("OPENING_ALREADY_TODAY", "An opening draft for this symbol is already stored today."),
+        ("MANAGE_PENDING", "A roll or close is already waiting, so no new opening is written."),
+        ("NARRATOR_OVERRULED", "The narrator replaced the code ticket."),
+        ("NAKED_CALL", "The book would be a naked call, so the opening was dropped."),
+        ("MULTI_CONFLICT", "The position does not match one wheel state."),
+    ]
+
+    def table(pairs: list[tuple[str, str]]) -> str:
+        body = "".join(
+            f"<tr><td>{_tag(name)}</td><td>{escape(meaning)}</td></tr>"
+            for name, meaning in pairs
+        )
+        return (
+            '<table class="data"><thead><tr><th>Badge</th><th>Meaning</th></tr></thead>'
+            f"<tbody>{body}</tbody></table>"
+        )
+
+    return (
+        '<template id="audit-legend">'
+        '<p class="card-lead">Status is what happened. Result is the short reason on that row. '
+        "A budget row uses two badges: the reason, then its place in the walk.</p>"
+        "<h2>Status</h2>"
+        f"{table(status)}"
+        "<h2>Result</h2>"
+        f"{table(result)}"
+        "</template>"
+    )
 
 
 def _audit_counts(conn, account: str) -> tuple[int, int, int]:
@@ -2734,6 +3015,7 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
     for called, agent, symbol, model, provider, thinking, latency_ms, tokens, status, result, response, request, simulated in stored:
         when = called.astimezone(HKT) if called.tzinfo else called
         payload = response if isinstance(response, dict) else {}
+        badges = _audit_badges(result, status)
         rows.append({
             "_at": when,
             "kind": "model",
@@ -2746,7 +3028,8 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
             "latency": f"{(latency_ms or 0) / 1000:.1f}s",
             "tokens": f"{tokens or 0:,}",
             "status": _audit_status_label(status),
-            "result": _audit_shown(result),
+            "badges": badges,
+            "result": " ".join(item["text"] for item in badges),
             "json": payload,
             "prompt": request if isinstance(request, dict) else {},
             "simulated": bool(simulated),
@@ -2765,6 +3048,7 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
         when = logged.astimezone(HKT) if logged.tzinfo else logged
         payload = steps if isinstance(steps, dict) else {}
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        badges = _audit_badges(summary, outcome)
         rows.append({
             "_at": when,
             "kind": "decision",
@@ -2777,7 +3061,8 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
             "latency": "—",
             "tokens": "—",
             "status": _audit_status_label(outcome),
-            "result": _audit_shown(summary),
+            "result": " ".join(item["text"] for item in badges),
+            "badges": badges,
             "phase": payload.get("phase") or "",
             "intent": payload.get("intent") or "",
             "long": payload.get("long") or "",
@@ -2860,10 +3145,11 @@ def _fragment(html: str, more: bool, nxt: int) -> dict:
     }
 
 
-def _feed(path: str, nxt: int, more: bool, inner: str) -> str:
+def _feed(path: str, nxt: int, more: bool, inner: str, box_id: str = "") -> str:
     flag = "1" if more else "0"
+    ident = f' id="{escape(box_id, quote=True)}"' if box_id else ""
     return (
-        f'<div class="scroll-y" data-feed="{escape(path, quote=True)}" '
+        f'<div class="scroll-y"{ident} data-feed="{escape(path, quote=True)}" '
         f'data-offset="{nxt}" data-more="{flag}">{inner}</div>'
     )
 
@@ -2873,8 +3159,7 @@ def _html(title: str, lead: str, body: str, chips: list[tuple[str, str]], action
 
 
 def _account() -> str:
-    accounts = active_accounts()
-    return accounts[0] if accounts else ""
+    return current_view()
 
 
 def _contract_line(conn, draft_id: str) -> dict:
@@ -3408,9 +3693,42 @@ def _toggle(symbol: str, field: str, on: bool, green: bool = False) -> str:
     )
 
 
-def _history_kind(query: dict) -> str:
-    kind = (query.get("kind") or ["all"])[0]
-    return kind if kind in {key for key, _label in HISTORY_FILTERS} else "all"
+def _history_choice(query: dict) -> tuple[str, str]:
+    status = (query.get("status") or ["all"])[0]
+    if status not in {key for key, _label in HISTORY_STATUSES if key != "all"}:
+        status = "all"
+    needle = (query.get("q") or [""])[0].strip()[:80]
+    return status, needle
+
+
+def _history_query(status: str, needle: str) -> str:
+    parts = []
+    if status != "all":
+        parts.append(f"status={quote(status)}")
+    if needle:
+        parts.append(f"q={quote(needle)}")
+    return "&".join(parts)
+
+
+def _history_filters(status: str, needle: str) -> str:
+    marks = "".join(
+        f'<button type="button" data-status="{key}"{" class=\"on\"" if key == status else ""}>{label}</button>'
+        for key, label in HISTORY_STATUSES
+    )
+    return (
+        '<div class="filters" id="history-filters">'
+        f'<input class="input" id="history-keyword" type="search" placeholder="Symbol or reason" '
+        f'value="{escape(needle, quote=True)}" autocomplete="off" spellcheck="false">'
+        f"{marks}</div>"
+    )
+
+
+def _history_empty(everything: list, status: str, needle: str) -> str:
+    if not everything and status == "all" and not needle:
+        text = "No fills or approvals yet."
+    else:
+        text = "No fills or approvals for this filter."
+    return f'<tr><td colspan="6">{text}</td></tr>'
 
 
 def _history_rows(conn, account: str) -> list[dict]:
@@ -3502,12 +3820,13 @@ def _history_item(created, symbol, tactic, phase, status, pnl, actor, reason) ->
     }
 
 
-def _history_visible(item: dict, kind: str) -> bool:
-    if kind == "rejected":
-        return item["status"] == "rejected"
-    if kind == "all":
+def _history_visible(item: dict, status: str, needle: str = "") -> bool:
+    if status != "all" and item["status"] != status:
+        return False
+    if not needle:
         return True
-    return _tactic_matches(item["tactic"], kind)
+    hay = " ".join((item["symbol"], item["tactic"], item["reason"])).lower()
+    return needle.lower() in hay
 
 
 def _history_tr(item: dict) -> str:
@@ -3648,24 +3967,15 @@ def _month_meta(month: dict) -> str:
     return f"{trades} {word}"
 
 
-def _tactic_matches(tactic: str, kind: str) -> bool:
-    text = tactic.upper()
-    if kind == "all":
-        return True
-    if kind == "csp":
-        return "CSP" in text
-    if kind == "cc":
-        return text.endswith("_CC") or text == "CC" or "OPEN_CC" in text
-    if kind == "strangle":
-        return "STRANGLE" in text
-    if kind == "roll":
-        return "ROLL" in text
-    return True
-
-
 def _account_card(name: str, mode: str, book_id: str, active: bool, facts: dict, panel_id: str) -> str:
-    badge = '<span class="tag blue">ACTIVE</span>' if active else ""
-    current = '<button class="btn ghost" type="button" disabled>Current</button>' if active else ""
+    badge = '<span class="tag blue">VIEWING</span>' if active else ""
+    if active:
+        switch = '<button class="btn ghost" type="button" disabled>Viewing</button>'
+    else:
+        switch = (
+            f'<button class="btn ghost" type="button" data-cmd="view-account" '
+            f'data-account="{escape(book_id, quote=True)}">View this book</button>'
+        )
     title = f"{name} sleeve"
     return (
         f'<div class="acct{" active" if active else ""}"><div class="a-head"><div>'
@@ -3680,7 +3990,7 @@ def _account_card(name: str, mode: str, book_id: str, active: bool, facts: dict,
         f'<div class="a-stat"><div class="l">Mode</div><div class="v" style="font-size:12px">{escape(mode)}</div></div>'
         "</div>"
         '<div class="row-actions">'
-        f"{current}"
+        f"{switch}"
         f'<button class="btn ghost" type="button" data-cmd="view-book" data-panel="{panel_id}" data-title="{escape(title, quote=True)}">View</button>'
         "</div></div>"
     )
@@ -3707,12 +4017,26 @@ def _switch_button(book_id: str, field: str, on: bool, label: str) -> str:
     )
 
 
+def _controls_for(conn, viewed: str, book_id: str):
+    """Session accounts keep Sync and Trading on their own row."""
+    owner = book_id if book_id in set(active_accounts()) else viewed
+    if not owner:
+        return None
+    try:
+        return owner, load_active(conn, owner)
+    except RuntimeError:
+        return None
+
+
 def _toggle_account(conn, account: str, form: dict, actor: str) -> dict:
     account_id = (form.get("account_id") or [""])[0].strip()
     field = (form.get("field") or [""])[0]
     if field not in {"sync", "trading"} or not account_id:
         return {"status": 400, "kind": "json", "body": '{"error":"unknown toggle"}'}
-    current = load_active(conn, account)
+    held = _controls_for(conn, account, account_id)
+    if held is None:
+        return {"status": 400, "kind": "json", "body": '{"error":"no settings for that account"}'}
+    owner, current = held
     session = account_id in set(active_accounts())
     previous = control_flag(current, account_id, field, session)
     updated = not previous
@@ -3721,7 +4045,7 @@ def _toggle_account(conn, account: str, form: dict, actor: str) -> dict:
     payload.account_controls[account_id] = entry.model_copy(update={field: updated})
     payload.privilege = current.privilege
     try:
-        save_settings(conn, account, payload, f"console:{actor}", f"{field} {account_id}")
+        save_settings(conn, owner, payload, f"console:{actor}", f"{field} {account_id}")
     except ValueError as exc:
         return {"status": 400, "kind": "json", "body": json.dumps({"error": str(exc)})}
     if field == "sync":
@@ -4359,6 +4683,14 @@ def _conflict_card(on: bool) -> str:
         '<input type="hidden" name="strict_conflict" value="0">'
         f'<input type="checkbox" name="strict_conflict" value="1"{checked}>'
         f"{badge}</div></div></div>"
+    )
+
+
+def _reset_card() -> str:
+    return (
+        '<div class="card"><h2>Reset to Default</h2>'
+        '<p class="card-lead">Put every appetite number back to the selected grade.</p>'
+        '<button class="btn" type="button" data-reset-grade>Reset to Default</button></div>'
     )
 
 

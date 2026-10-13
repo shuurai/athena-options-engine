@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from athena_exec.accounts import active_accounts, trading_mode
+from athena_exec.accounts import trading_mode
 from athena_exec.halt import active_reason
 from athena_exec.ops import gateway_open
 from athena_exec.slots import HKT, slot_state
@@ -30,6 +30,7 @@ from athena_settings import load_active
 from athena_store import connect
 from athena_orchestrator import pages
 from athena_orchestrator.tasks import begin_fill, begin_positions, list_tasks
+from athena_orchestrator.view import bind_view, current_view
 
 _MARK = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
   <defs><linearGradient id="strangle" x1="8" y1="0" x2="56" y2="64" gradientUnits="userSpaceOnUse">
@@ -43,11 +44,11 @@ _MARK = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidd
 _MARK_HREF = " ".join(_MARK.split()).replace("#", "%23").replace('"', "'")
 
 NAV_GROUPS = (
+    ("View", ()),
     (
         "Core logic",
         (
             ("/", "Cockpit"),
-            ("/simulation", "Simulation"),
             ("/drafts", "Drafts"),
             ("/phase", "NFR board"),
             ("/audit", "Audit"),
@@ -56,12 +57,13 @@ NAV_GROUPS = (
             ("/history", "History"),
             ("/positions", "Positions"),
             ("/book", "Book"),
-            ("/accounts", "Accounts"),
         ),
     ),
     (
         "Configs",
         (
+            ("/accounts", "Accounts"),
+            ("/simulation", "Simulation"),
             ("/orchestration", "Orchestration"),
             ("/risk", "Risk & Strategy"),
             ("/volatility", "Volatility"),
@@ -75,6 +77,11 @@ _EXTRA_CSS = """
 html, body.console { height: 100%; overflow: hidden; }
 .app { height: 100vh; min-height: 0; overflow: hidden; }
 .nav { height: 100vh; min-height: 0; overflow: auto; }
+.nav select.nav-view {
+  width: calc(100% - 20px); margin: 0 10px 8px; padding: 6px 8px;
+  font-family: var(--font-mono); font-size: 11px;
+  background: #10141b; color: var(--site-text); border: 1px solid var(--site-border);
+}
 .main {
   height: 100vh; min-height: 0; overflow: hidden;
   display: flex; flex-direction: column; padding: 16px 24px;
@@ -267,6 +274,7 @@ tr.hit { cursor: pointer; }
 .err { color: var(--ath-down); }
 .think { color: #93c5fd; }
 .meta { display: grid; grid-template-columns: 120px 1fr; gap: 4px 10px; margin: 0 0 14px; font-size: 12px; }
+.badges { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .meta span { color: var(--site-text-4); font-family: var(--font-mono); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
 .trail { display: flex; flex-direction: column; gap: 6px; margin: 0 0 14px; font-size: 12.5px; line-height: 1.4; }
 .json-block .k { display: block; margin: 0 0 6px; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
@@ -296,12 +304,13 @@ tr.hit { cursor: pointer; }
 .chg-up { color: var(--ath-up); }
 .chg-down { color: var(--ath-down); }
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; flex: none; }
-.filters a {
+.filters a, .filters button {
   padding: 6px 12px; font-size: 11px; font-weight: 600; font-family: var(--font-mono);
-  background: transparent; border: 1px solid var(--site-border-strong); color: var(--site-text-3);
+  background: transparent; border: 1px solid var(--site-border-strong); color: var(--site-text-3); cursor: pointer;
 }
-.filters a:hover { border-color: var(--site-primary); color: var(--site-primary); }
-.filters a.on { background: #101c33; border-color: var(--site-primary); color: #93c5fd; }
+.filters a:hover, .filters button:hover { border-color: var(--site-primary); color: var(--site-primary); }
+.filters a.on, .filters button.on { background: #101c33; border-color: var(--site-primary); color: #93c5fd; }
+.filters input { width: 160px; margin: 0; }
 .pnl-pos { color: var(--ath-up); font-family: var(--font-mono); }
 .pnl-neg { color: var(--ath-down); font-family: var(--font-mono); }
 tr[data-cmd="history-row"] { cursor: pointer; }
@@ -398,6 +407,7 @@ table.data tbody tr.phase-pick.selected:hover {
 .risk-span-2 { grid-column: span 2; min-width: 0; }
 .risk-span-1 { grid-column: span 1; min-width: 0; }
 .risk-stack { display: flex; flex-direction: column; gap: 14px; }
+.risk-stack [data-reset-grade] { width: 100%; }
 .risk-span-1 h2 { flex-wrap: wrap; align-items: flex-start; }
 @media (max-width: 1100px) {
   .risk-cols { grid-template-columns: 1fr; }
@@ -409,7 +419,7 @@ table.data tbody tr.phase-pick.selected:hover {
 .profile .name { font-weight: 700; font-size: 13px; }
 .stat .value.tone-defensive { color: #4ade80; }
 .stat .value.tone-standard { color: #93c5fd; }
-.stat .value.tone-income { color: #67e8f9; }
+.stat .value.tone-income, .stat .value.tone-harvest { color: #67e8f9; }
 .stat .value.tone-aggressive { color: #fbbf24; }
 .stat .value.tone-test { color: #c4b5fd; }
 .stat .value.tone-custom { color: #fb7185; }
@@ -516,6 +526,12 @@ button.btn.primary.busy::after { border-color: rgba(255,255,255,.28); border-top
 .cycle-strip { border: 1px solid var(--site-border); background: var(--site-surface); padding: 10px 12px; margin: 0; flex: none; }
 .cycle-strip-head { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--site-text-2); }
 .cycle-strip [data-strip=clock] { color: #fbbf24; font-weight: 700; }
+.cycle-strip [data-strip=activity] {
+  flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  color: #93c5fd; font-weight: 500;
+}
+.cycle-roll .stream { font-family: var(--font-mono); color: #93c5fd; }
+.cycle-roll .stream .st { color: #6b96f2; }
 .cycle-fold {
   margin-left: auto; width: 22px; height: 22px; padding: 0; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
@@ -593,6 +609,7 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
             self.end_headers()
 
         def do_GET(self) -> None:
+            bind_view(self.headers.get("Cookie"))
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
             if parsed.path.startswith("/api/v1"):
@@ -628,6 +645,7 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
             self._send(status, body, kind)
 
         def do_POST(self) -> None:
+            bind_view(self.headers.get("Cookie"))
             path = urlparse(self.path).path
             length = int(self.headers.get("Content-Length", "0"))
             raw = self.rfile.read(length)
@@ -872,8 +890,8 @@ def _nav_badges(conn) -> dict[str, tuple[int | str, bool, str]]:
         return {}
     start = datetime.now(HKT).replace(hour=0, minute=0, second=0, microsecond=0)
     drafts = conn.execute(
-        "SELECT count(*) FROM drafts WHERE account_id = %s AND created_at >= %s",
-        (account, start),
+        "SELECT count(*) FROM drafts WHERE account_id = %s AND status = 'pending'",
+        (account,),
     ).fetchone()[0]
     news = conn.execute(
         "SELECT count(*) FROM news_events WHERE ts >= %s AND NOT dismissed",
@@ -919,7 +937,7 @@ def _nav_badges(conn) -> dict[str, tuple[int | str, bool, str]]:
         (account, account, start),
     ).fetchone()[0]
     found: dict[str, tuple[int | str, bool, str]] = {
-        "/drafts": (int(drafts), False, "new today"),
+        "/drafts": (int(drafts), False, "awaiting"),
         "/news": (int(news), True, "new today"),
         "/history": (int(fills), False, "new today"),
         "/audit": (int(calls) + int(decisions), False, "today"),
@@ -950,8 +968,10 @@ def _layout(
 ) -> str:
     badges = _nav_badges(conn)
     links = []
-    for group, items in NAV_GROUPS:
+    for group, items in _nav_entries():
         links.append(f'<div class="nav-group">{escape(group)}</div>')
+        if group == "View":
+            links.append(_view_switch(conn))
         for href, label in items:
             current = " class=\"active\"" if href == path else ""
             badge = badges.get(href)
@@ -1025,9 +1045,51 @@ def _current_window(now: datetime, athena_slots: str, mobile_slots: str, state: 
     return state
 
 
+def _nav_entries() -> list[tuple[str, tuple[tuple[str, str], ...]]]:
+    """Menu groups in order. Simulation is listed only in paper mode."""
+    paper = trading_mode() == "paper"
+    shown = []
+    for group, items in NAV_GROUPS:
+        kept = tuple((href, label) for href, label in items if href != "/simulation" or paper)
+        shown.append((group, kept))
+    return shown
+
+
 def _account() -> str:
+    return current_view()
+
+
+def _view_switch(conn) -> str:
+    """Account picker for this mode. An id outside the list cannot become the view."""
+    from athena_exec.accounts import active_accounts
+
     accounts = active_accounts()
-    return accounts[0] if accounts else ""
+    if not accounts:
+        return ""
+    current = current_view()
+    labels: dict[str, str] = {}
+    if conn is not None and current:
+        try:
+            settings = load_active(conn, current)
+        except RuntimeError:
+            settings = None
+        if settings is not None:
+            labels = {
+                entry.account_id: entry.label
+                for entry in settings.extra_accounts
+                if entry.label and entry.label != entry.account_id
+            }
+    options = []
+    for account_id in accounts:
+        selected = " selected" if account_id == current else ""
+        label = labels.get(account_id, "")
+        text = f"{label} · {account_id}" if label else account_id
+        options.append(
+            f'<option value="{escape(account_id, quote=True)}"{selected}>{escape(text)}</option>'
+        )
+    return (
+        f'<select class="nav-view" data-view-pick aria-label="Account">{"".join(options)}</select>'
+    )
 
 
 def _cockpit(conn) -> str:
@@ -1040,10 +1102,11 @@ def _cockpit(conn) -> str:
     facts = sleeve(conn, account, now)
     slots = schedule(now, settings.ib.athena_slots, settings.ib.mobile_slots)
     health = health_report(conn)
-    from athena_orchestrator.pulse import note_view
+    from athena_orchestrator.pulse import enabled_symbols, note_view
 
-    note_view(list(settings.watchlist))
-    rows = watchlist(conn, account, settings.watchlist, settings.strategy.ivr_min_samples, now.date())
+    names = enabled_symbols(settings)
+    note_view(names, account)
+    rows = watchlist(conn, account, names, settings.strategy.ivr_min_samples, now.date())
     halted = active_reason(conn, account)
     payload = json.dumps({"nlv": facts["nlv"], "months": facts["months"], "pnl": facts["pnl"]}).replace("<", "\\u003c")
     body = _cockpit_body(
@@ -1123,6 +1186,7 @@ def _cockpit_body(
     <span class="cycle-mark" data-strip="mark"></span>
     <span data-strip="title">Cycle</span>
     <span data-strip="meta"></span>
+    <span data-strip="activity"></span>
     <span data-strip="clock"></span>
     <button class="cycle-fold" type="button" data-cmd="cycle-fold" aria-label="Collapse cycle">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 14l6-6 6 6"/></svg>
@@ -1777,7 +1841,7 @@ _CLIENT_JS = r"""
           const name = picked.textContent.trim().toUpperCase();
           document.querySelectorAll(".chips .chip").forEach((chip) => {
             const label = chip.childNodes[chip.childNodes.length - 1];
-            if (label && /^(DEFENSIVE|STANDARD|INCOME|AGGRESSIVE|TEST|PAPER|CUSTOM)$/.test(label.textContent || "")) label.textContent = name;
+            if (label && /^(DEFENSIVE|STANDARD|INCOME|HARVEST|AGGRESSIVE|TEST|PAPER|CUSTOM)$/.test(label.textContent || "")) label.textContent = name;
           });
         }
         toast("Saved", sub, "ok");
@@ -1833,17 +1897,36 @@ _CLIENT_JS = r"""
       saveRisk();
     });
   }
-  document.querySelectorAll("[data-limits]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const parts = (btn.getAttribute("data-limits") || "").split(",");
-      ["max_symbol", "cash", "halt", "contracts", "min_rv", "min_dte", "position", "max_orders", "margin", "blackout"].forEach((name, index) => {
-        const input = document.querySelector("[name=" + name + "]");
-        if (input) input.value = parts[index];
+  function applyGrade(btn) {
+    const parts = (btn.getAttribute("data-limits") || "").split(",");
+    ["max_symbol", "cash", "halt", "contracts", "min_rv", "min_dte", "position", "max_orders", "margin", "blackout"].forEach((name, index) => {
+      const input = document.querySelector("#risk-form [name=" + name + "]");
+      if (input) input.value = parts[index];
+    });
+    const extra = btn.getAttribute("data-grade");
+    if (extra) {
+      const knobs = JSON.parse(extra);
+      Object.keys(knobs).forEach((name) => {
+        const input = document.querySelector("#risk-form [name=" + name + "]");
+        if (input) input.value = knobs[name];
       });
-      document.querySelectorAll("[data-limits]").forEach((node) => node.classList.remove("on"));
-      btn.classList.add("on");
-      const first = document.querySelector("#risk-form [name=max_symbol]");
-      if (first) first.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    document.querySelectorAll("[data-limits]").forEach((node) => node.classList.remove("on"));
+    btn.classList.add("on");
+    const first = document.querySelector("#risk-form [name=max_symbol]");
+    if (first) first.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  document.querySelectorAll("[data-limits]").forEach((btn) => {
+    btn.addEventListener("click", () => applyGrade(btn));
+  });
+  document.querySelectorAll("[data-reset-grade]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const picked = document.querySelector("[data-limits].on");
+      if (!picked) {
+        toast("No grade", "Select a grade first.", "err");
+        return;
+      }
+      applyGrade(picked);
     });
   });
   function post(url, body) {
@@ -2009,8 +2092,9 @@ _CLIENT_JS = r"""
     feedBusy = true;
     const offset = replace ? 0 : Number(box.getAttribute("data-offset") || "0");
     const path = box.getAttribute("data-feed") || "";
+    const extra = box.getAttribute("data-query") || "";
     const join = path.indexOf("?") >= 0 ? "&" : "?";
-    return fetch(path + join + "offset=" + offset + "&partial=rows")
+    return fetch(path + join + "offset=" + offset + "&partial=rows" + (extra ? "&" + extra : ""))
       .then((res) => res.json())
       .then((payload) => {
         if (gen !== feedGen) return;
@@ -2034,6 +2118,15 @@ _CLIENT_JS = r"""
   document.addEventListener("scroll", () => {
     document.querySelectorAll(".help-pop").forEach((node) => node.remove());
   }, true);
+  const viewPick = document.querySelector("[data-view-pick]");
+  if (viewPick) {
+    viewPick.addEventListener("change", () => {
+      const accountId = viewPick.value;
+      if (!accountId) return;
+      document.cookie = "athena_view=" + encodeURIComponent(accountId) + "; Path=/; Max-Age=31536000; SameSite=Lax";
+      location.reload();
+    });
+  }
   document.addEventListener("click", (event) => {
     if (!event.target.closest(".help-q") && !event.target.closest(".help-pop")) {
       document.querySelectorAll(".help-pop").forEach((node) => node.remove());
@@ -2352,7 +2445,18 @@ _CLIENT_JS = r"""
           const k = document.createElement("span");
           k.textContent = pair[0];
           const v = document.createElement("div");
-          v.textContent = pair[1];
+          if (pair[0] === "Summary" && row.badges && row.badges.length) {
+            v.className = "badges";
+            row.badges.forEach((badge) => {
+              if (!badge.text) return;
+              const tag = document.createElement("span");
+              tag.className = badge.kind ? "tag " + badge.kind : "tag";
+              tag.textContent = badge.text;
+              v.appendChild(tag);
+            });
+          } else {
+            v.textContent = pair[1];
+          }
           meta.appendChild(k);
           meta.appendChild(v);
         });
@@ -2425,6 +2529,13 @@ _CLIENT_JS = r"""
       if (placed.bottom > window.innerHeight - 8) {
         pop.style.top = Math.max(8, rect.top - placed.height - 6) + "px";
       }
+      return;
+    }
+    if (cmd === "view-account") {
+      const accountId = btn.getAttribute("data-account");
+      if (!accountId) return;
+      document.cookie = "athena_view=" + encodeURIComponent(accountId) + "; Path=/; Max-Age=31536000; SameSite=Lax";
+      location.reload();
       return;
     }
     if (cmd === "view-book") {
@@ -3028,21 +3139,27 @@ _CLIENT_JS = r"""
     const title = document.querySelector("[data-strip=title]");
     const mark = document.querySelector("[data-strip=mark]");
     const meta = document.querySelector("[data-strip=meta]");
+    const activity = document.querySelector("[data-strip=activity]");
     const clock = document.querySelector("[data-strip=clock]");
     const bar = document.querySelector("[data-strip=bar]");
     const roll = document.querySelector("[data-strip=roll]");
     if (!title || !mark || !meta || !clock || !bar || !roll) return;
     const mins = Math.floor((view.remaining || 0) / 60);
     const secs = String((view.remaining || 0) % 60).padStart(2, "0");
+    const lines = view.activity || [];
+    const latest = lines.length ? lines[lines.length - 1] : "";
+    const runningItem = (view.roll || []).find((item) => item.status === "running");
     if (view.state === "running") {
       mark.className = "cycle-mark ath-spin";
       title.textContent = "step " + (view.index || 1) + "/8";
-      meta.textContent = (view.step || "").toLowerCase();
+      meta.textContent = (runningItem && runningItem.detail) ? runningItem.detail : (view.step || "").toLowerCase();
+      if (activity) activity.textContent = latest;
       clock.textContent = "";
     } else {
       mark.className = "cycle-mark";
       title.textContent = "Cycle " + view.cycle + " · waiting";
       meta.textContent = "next in";
+      if (activity) activity.textContent = "";
       clock.textContent = mins + ":" + secs;
     }
     bar.style.width = Math.round((view.progress || 0) * 100) + "%";
@@ -3061,6 +3178,20 @@ _CLIENT_JS = r"""
       row.append(state, name, detail);
       roll.appendChild(row);
     });
+    if (view.state === "running") {
+      lines.slice(-7, -1).forEach((line) => {
+        const row = document.createElement("div");
+        row.className = "stream";
+        const prompt = document.createElement("span");
+        prompt.className = "st";
+        prompt.textContent = ">";
+        const text = document.createElement("span");
+        text.textContent = line;
+        row.append(prompt, text);
+        roll.appendChild(row);
+      });
+      roll.scrollTop = roll.scrollHeight;
+    }
   }
   function pollTasks() {
     fetch("/api/tasks").then((res) => res.json()).then((body) => paintTasks(body.tasks || [])).catch(() => {});
@@ -3220,6 +3351,45 @@ _CLIENT_JS = r"""
     document.addEventListener("ath-feed", pump);
     feed.addEventListener("scroll", pump, { passive: true });
   }
+  function bindStatusFeed(filtersId, feedId, keywordId, exportId) {
+    const filters = document.getElementById(filtersId);
+    const box = document.getElementById(feedId);
+    if (!filters || !box) return;
+    const keyword = document.getElementById(keywordId);
+    const exporter = exportId ? document.getElementById(exportId) : null;
+    const current = filters.querySelector("button.on");
+    let status = current ? (current.getAttribute("data-status") || "all") : "all";
+    let wait = null;
+    const apply = () => {
+      const parts = [];
+      if (status !== "all") parts.push("status=" + encodeURIComponent(status));
+      const needle = keyword ? (keyword.value || "").trim() : "";
+      if (needle) parts.push("q=" + encodeURIComponent(needle));
+      const query = parts.join("&");
+      box.setAttribute("data-query", query);
+      if (exporter) {
+        const base = exporter.getAttribute("data-base") || "/history.csv";
+        exporter.href = base + (query ? "?" + query : "");
+      }
+      pullFeed(box, true);
+    };
+    if (keyword) {
+      keyword.addEventListener("input", () => {
+        clearTimeout(wait);
+        wait = setTimeout(apply, 200);
+      });
+    }
+    filters.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-status]");
+      if (!button) return;
+      status = button.getAttribute("data-status") || "all";
+      filters.querySelectorAll("button").forEach((node) => node.classList.remove("on"));
+      button.classList.add("on");
+      apply();
+    });
+  }
+  bindStatusFeed("decision-filters", "decision-feed", "decision-keyword");
+  bindStatusFeed("history-filters", "history-feed", "history-keyword", "history-export");
   function simWindow(count, index) {
     const span = 60;
     const half = span / 2;

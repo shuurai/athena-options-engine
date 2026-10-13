@@ -846,19 +846,14 @@ class WheelDbTest(unittest.TestCase):
         )
         self.conn.commit()
         ids = manage_book(self.conn, self._settings(), ACCOUNT)
-        self.assertTrue(ids)
+        self.assertEqual(ids, [])
         row = self.conn.execute(
-            "SELECT reason FROM tickets WHERE account_id = %s",
+            "SELECT tactic FROM drafts WHERE account_id = %s AND tactic = 'ROLL'",
             (ACCOUNT,),
         ).fetchone()
-        self.assertEqual(row[0], "manage_roll")
-        tactic = self.conn.execute(
-            "SELECT tactic FROM drafts WHERE account_id = %s",
-            (ACCOUNT,),
-        ).fetchone()
-        self.assertEqual(tactic[0], "ROLL")
+        self.assertIsNone(row)
 
-    def test_a_pending_roll_blocks_a_new_open(self) -> None:
+    def test_a_pending_close_blocks_a_new_open(self) -> None:
         self._choices(Decimal("100"), "P", ("0.90",))
         self.conn.execute(
             """
@@ -866,7 +861,7 @@ class WheelDbTest(unittest.TestCase):
                 account_id, symbol, quantity, avg_price, sec_type, expiry,
                 contract_right, strike, market_price, simulated
             )
-            VALUES (%s, %s, -1, 2, 'OPT', %s, 'P', 90, 2, false)
+            VALUES (%s, %s, -1, 2, 'OPT', %s, 'P', 90, 0.4, false)
             """,
             (ACCOUNT, SYMBOL, date.today() + timedelta(days=5)),
         )
@@ -878,7 +873,7 @@ class WheelDbTest(unittest.TestCase):
             "SELECT tactic FROM drafts WHERE account_id = %s",
             (ACCOUNT,),
         ).fetchall()
-        self.assertEqual(tactics, [("ROLL",)])
+        self.assertEqual(tactics, [("CLOSE",)])
         trail = self.conn.execute(
             "SELECT outcome, summary FROM decision_trails WHERE account_id = %s AND source = 'wheel'",
             (ACCOUNT,),
@@ -1467,7 +1462,9 @@ class WheelDbTest(unittest.TestCase):
         self.assertNotIn('name="strict_conflict"', limits)
         right = body.split('class="risk-stack risk-span-1"', 1)[1]
         self.assertLess(right.index("Approval privilege"), right.index("Strict conflict"))
+        self.assertLess(right.index("Strict conflict"), right.index("Reset to Default"))
         self.assertIn('name="strict_conflict"', right)
+        self.assertIn("data-reset-grade", right)
         self.assertIn("It does not tag a symbol.", strategy)
         self.assertIn('class="strategy-scroll"', body)
         self.assertIn('id="strategy-card"', body)
@@ -1539,7 +1536,7 @@ class RiskReadingTest(unittest.TestCase):
         self.assertNotIn("max_bucket_pct_nav", PROFILE_LIMITS)
         self.assertNotIn("assign_delta", PROFILE_LIMITS)
         self.assertNotIn("test", PROFILES)
-        self.assertEqual(list(PROFILES), ["defensive", "standard", "income", "aggressive", "paper"])
+        self.assertEqual(list(PROFILES), ["defensive", "standard", "harvest", "aggressive", "paper"])
         for copy in PROFILE_COPY.values():
             self.assertLessEqual(len(copy.split()), 7)
         paper = paper_payload().risk

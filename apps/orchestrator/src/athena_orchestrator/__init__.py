@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from athena_orchestrator.loop import run_loop
+from athena_orchestrator.runtime import install_activity_log
 
 
 def load_env_file() -> None:
@@ -32,4 +33,5 @@ def main() -> None:
     log_path = Path("var/athena.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.getLogger().addHandler(logging.FileHandler(log_path, encoding="utf-8"))
+    install_activity_log()
     asyncio.run(run_loop())

@@ -1,4 +1,4 @@
-"""Roll and profit-take drafts. They stay pending until Approve."""
+"""Profit-take drafts. They stay pending until Approve. Rolls are not drafted."""
 
 from __future__ import annotations
 
@@ -27,14 +27,11 @@ def management_tactic(
     roll_dte: int,
     profit_take_pct: int,
 ) -> tuple[str, str] | None:
-    """ROLL when DTE is short. CLOSE when a short has captured enough premium."""
-    if sec_type != "OPT" or quantity == 0:
+    """CLOSE when a short option has captured enough premium. A long option stays put."""
+    del expiry, today, roll_dte
+    if sec_type != "OPT" or quantity >= 0:
         return None
-    if expiry is not None:
-        dte = (expiry - today).days
-        if 0 <= dte <= roll_dte:
-            return "ROLL", f"DTE {dte} is within {roll_dte}."
-    if quantity < 0 and avg_price > 0 and market_price is not None:
+    if avg_price > 0 and market_price is not None:
         captured = (avg_price - market_price) / avg_price * 100
         if captured >= profit_take_pct:
             return "CLOSE", f"Premium captured {captured:.0f}%."

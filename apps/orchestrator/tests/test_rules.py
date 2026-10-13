@@ -15,7 +15,17 @@ from athena_exec.slots import cash_open, draft_allowed, observe_allowed, slot_st
 from athena_marketdata.pricing import Bar
 from athena_orchestrator.money import DASH, cash_rows, convert, ledger, marked, report_currency, show
 from athena_orchestrator.pages import PROFILES, _audit_result_tag, _audit_status_tag, _audit_tr, _position_nlv_stat, sim_targets
-from athena_orchestrator.runtime import begin, cycle_view, finish, mark, note_cycle, note_loop, wait
+from athena_orchestrator.runtime import (
+    begin,
+    cycle_view,
+    finish,
+    install_activity_log,
+    mark,
+    note_activity,
+    note_cycle,
+    note_loop,
+    wait,
+)
 from athena_orchestrator.sim import _add_months, duration_for
 from athena_risk import CycleBook, allowed_open, block_reason, block_ticket_reason, book_amount
 from athena_settings.model import AISettings, AgentPrompt, IBSlots, RiskLimits, SettingsPayload, TacticFlags, standard_payload
@@ -419,6 +429,39 @@ class OptionsAndSlotsTest(unittest.TestCase):
         self.assertFalse(cash_open("RY", morning, "ca"))
         self.assertTrue(cash_open("RY", evening, "ca"))
 
+    def test_positions_wait_for_that_accounts_prices(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from athena_exec.broker import IbBroker
+
+        contract = SimpleNamespace(
+            conId=7, symbol="ZZT", multiplier="100", secType="OPT", strike=90,
+            right="P", currency="USD", lastTradeDateOrContractMonth="20261218",
+        )
+        book = SimpleNamespace(
+            contract=contract, position=-1, averageCost=150, marketPrice=0,
+            marketValue=-150, unrealizedPNL=40, realizedPNL=0, account="U1",
+        )
+        held = SimpleNamespace(account="U1", contract=contract, position=-1, avgCost=150)
+        ib = Mock()
+        ib.portfolio.return_value = [book]
+        ib.positions.return_value = [held]
+        broker = IbBroker()
+        broker._ib = ib
+        rows = broker.positions("U1")
+        ib.reqAccountUpdates.assert_called_once_with("U1")
+        ib.portfolio.assert_called_with("U1")
+        self.assertEqual(rows[0].market_price, Decimal("1.50"))
+        self.assertEqual(rows[0].market_value, Decimal("-150"))
+        self.assertEqual(rows[0].unrealized_pnl, Decimal("40"))
+        self.assertEqual(rows[0].avg_price, Decimal("1.50"))
+        ib.reqAccountUpdates.side_effect = TimeoutError()
+        ib.portfolio.return_value = []
+        late = broker.positions("U1")
+        self.assertEqual(late[0].quantity, Decimal("-1"))
+        self.assertIsNone(late[0].market_price)
+
     def test_one_empty_history_quiets_the_symbol(self) -> None:
         from athena_exec.broker import IbBroker
 
@@ -460,6 +503,15 @@ class OptionsAndSlotsTest(unittest.TestCase):
         self.assertEqual(next(name for name, preset in PROFILES.items() if preset == paper), "paper")
         changed = paper[:7] + (50,) + paper[8:]
         self.assertIsNone(next((name for name, preset in PROFILES.items() if preset == changed), None))
+        from athena_orchestrator.pages import GRADE_KNOBS, matched_profile
+
+        self.assertEqual(list(PROFILES), ["defensive", "standard", "harvest", "aggressive", "paper"])
+        for name, knobs in GRADE_KNOBS.items():
+            self.assertEqual(PROFILES[name][5], knobs["dte_min"])
+            self.assertEqual(matched_profile(PROFILES[name], {key: str(value) for key, value in knobs.items()}), name)
+        self.assertEqual(matched_profile(PROFILES["defensive"], {}), "custom")
+        self.assertEqual(matched_profile(PROFILES["paper"], {}), "paper")
+        self.assertNotIn(7, {preset[5] for name, preset in PROFILES.items() if name != "paper"})
 
 
 class PricePhaseTest(unittest.TestCase):
@@ -524,18 +576,19 @@ class PricePhaseTest(unittest.TestCase):
 
 
 class ManageTest(unittest.TestCase):
-    def test_short_dated_option_rolls(self) -> None:
-        tactic, _reason = management_tactic(
-            sec_type="OPT",
-            quantity=Decimal("-1"),
-            avg_price=Decimal("2"),
-            market_price=Decimal("1.8"),
-            expiry=date(2026, 10, 20),
-            today=TODAY,
-            roll_dte=21,
-            profit_take_pct=50,
+    def test_a_short_dated_option_does_not_roll(self) -> None:
+        self.assertIsNone(
+            management_tactic(
+                sec_type="OPT",
+                quantity=Decimal("-1"),
+                avg_price=Decimal("2"),
+                market_price=Decimal("1.8"),
+                expiry=date(2026, 10, 20),
+                today=TODAY,
+                roll_dte=21,
+                profit_take_pct=50,
+            )
         )
-        self.assertEqual(tactic, "ROLL")
 
     def test_captured_premium_closes_a_short(self) -> None:
         tactic, reason = management_tactic(
@@ -669,6 +722,11 @@ class AgentsTest(unittest.TestCase):
         self.assertIn(">NEWS_WASH<", _audit_result_tag("News wash", "ok"))
         self.assertIn(">INVALID_SCHEMA<", _audit_result_tag("invalid schema", "invalid"))
         self.assertIn(">CHANNEL_RISING,UPPER_RAIL<", _audit_result_tag("CHANNEL_RISING, UPPER_RAIL", "ok"))
+        budget = _audit_result_tag("cycle_order=5 prob_source=delta_proxy cycle margin", "dropped")
+        self.assertIn(">CYCLE MARGIN<", budget)
+        self.assertIn(">ORDER 5<", budget)
+        self.assertNotIn("DELTA", budget)
+        self.assertNotIn("PROB_SOURCE", budget)
         self.assertIn("tag red", _audit_status_tag("invalid"))
         self.assertIn("tag red", _audit_status_tag("error"))
         self.assertIn(">OK<", _audit_status_tag("ok"))
@@ -1279,6 +1337,27 @@ class SimMathAndRuntimeTest(unittest.TestCase):
         self.assertEqual(waiting["state"], "waiting")
         self.assertEqual(waiting["remaining"], 0)
         self.assertEqual(waiting["roll"][1]["detail"], "2 bars")
+        self.assertEqual(waiting["activity"], [])
+
+    def test_a_running_step_keeps_recent_log_lines(self) -> None:
+        import logging
+
+        begin(5)
+        note_activity("news yahoo NVDA")
+        install_activity_log()
+        news = logging.getLogger("athena.news")
+        news.setLevel(logging.INFO)
+        news.info("news yahoo QCOM")
+        broker = logging.getLogger("ib_insync.wrapper")
+        broker.setLevel(logging.INFO)
+        broker.info("position: skipped")
+        running = cycle_view()
+        self.assertEqual(running["state"], "running")
+        self.assertTrue(any(line.endswith("news yahoo NVDA") for line in running["activity"]))
+        self.assertTrue(any(line.endswith("news yahoo QCOM") for line in running["activity"]))
+        self.assertFalse(any("position:" in line for line in running["activity"]))
+        wait(0)
+        self.assertEqual(cycle_view()["activity"], [])
 
 
 class PayloadTest(unittest.TestCase):
@@ -1335,3 +1414,299 @@ class PositionNlvTest(unittest.TestCase):
         card = _position_nlv_stat([_book_row(None), _book_row(Decimal("10"))])
         self.assertIn("$10.00", card)
         self.assertIn("1 unmarked", card)
+
+
+class ViewAndCycleTest(unittest.TestCase):
+    def tearDown(self) -> None:
+        from athena_orchestrator.view import bind_view
+
+        bind_view(None)
+        wait(0)
+
+    def test_the_pulse_keeps_enabled_names_for_this_account(self) -> None:
+        from athena_orchestrator.pulse import enabled_symbols
+        from athena_settings.model import standard_payload
+
+        settings = standard_payload().model_copy(update={
+            "watchlist": ["AAA", "BBB", "CCC"],
+            "blocked_symbols": ["BBB"],
+        })
+        self.assertEqual(enabled_symbols(settings), ["AAA", "CCC"])
+
+    def test_a_cycle_copy_keeps_only_enabled_names(self) -> None:
+        from athena_settings.model import cycle_book, open_symbols, standard_payload
+
+        settings = standard_payload().model_copy(update={
+            "watchlist": ["AAA", "BBB"],
+            "blocked_symbols": ["BBB"],
+        })
+        scoped = cycle_book(settings)
+        self.assertEqual(scoped.watchlist, ["AAA"])
+        self.assertEqual(settings.watchlist, ["AAA", "BBB"])
+        self.assertIsNot(scoped, settings)
+        self.assertEqual(open_symbols(settings, ["AAA", "BBB", "CCC"]), ["AAA", "CCC"])
+
+    def test_the_view_menu_switches_listed_accounts(self) -> None:
+        from unittest.mock import patch
+
+        from athena_orchestrator.console import _nav_entries, _view_switch
+        from athena_orchestrator.view import bind_view
+
+        with patch("athena_orchestrator.console.trading_mode", return_value="live"):
+            groups = dict(_nav_entries())
+        self.assertEqual(next(iter(groups)), "View")
+        self.assertEqual(groups["View"], ())
+        self.assertIn(("/accounts", "Accounts"), groups["Configs"])
+        self.assertNotIn(("/accounts", "Accounts"), groups["Core logic"])
+        self.assertNotIn(("/simulation", "Simulation"), groups["Configs"])
+        self.assertNotIn(("/simulation", "Simulation"), groups["Core logic"])
+        with patch("athena_orchestrator.console.trading_mode", return_value="paper"):
+            paper = dict(_nav_entries())
+        self.assertIn(("/simulation", "Simulation"), paper["Configs"])
+        with (
+            patch("athena_exec.accounts.active_accounts", return_value=["U1", "U2"]),
+            patch("athena_orchestrator.view.active_accounts", return_value=["U1", "U2"]),
+        ):
+            bind_view("athena_view=U2")
+            html = _view_switch(None)
+        self.assertIn('data-view-pick', html)
+        self.assertIn('value="U2" selected', html)
+        self.assertIn(">U1<", html)
+
+    def test_the_view_cookie_selects_a_listed_account(self) -> None:
+        from unittest.mock import patch
+
+        from athena_orchestrator.view import bind_view, current_view
+
+        with patch("athena_orchestrator.view.active_accounts", return_value=["A", "B"]):
+            bind_view(None)
+            self.assertEqual(current_view(), "A")
+            bind_view("athena_view=B")
+            self.assertEqual(current_view(), "B")
+            bind_view("other=1; athena_view=NOPE")
+            self.assertEqual(current_view(), "A")
+
+    def test_view_this_book_replaces_the_current_button(self) -> None:
+        from athena_orchestrator.pages import _account_card
+
+        facts = {"nlv": "1", "cash": "1", "positions": 0}
+        other = _account_card("Live", "LIVE", "U2", False, facts, "p")
+        self.assertIn("View this book", other)
+        self.assertIn('data-cmd="view-account"', other)
+        self.assertNotIn("Current", other)
+        viewing = _account_card("Live", "LIVE", "U1", True, facts, "p")
+        self.assertIn("VIEWING", viewing)
+        self.assertIn(">Viewing<", viewing)
+
+    def test_a_session_switch_is_stored_on_that_account(self) -> None:
+        from unittest.mock import patch
+
+        from athena_orchestrator.pages import _controls_for
+
+        with (
+            patch("athena_orchestrator.pages.active_accounts", return_value=["A", "B"]),
+            patch("athena_orchestrator.pages.load_active", side_effect=lambda _conn, owner: owner),
+        ):
+            self.assertEqual(_controls_for(None, "A", "B"), ("B", "B"))
+            self.assertEqual(_controls_for(None, "A", "EXTRA"), ("A", "A"))
+
+    def test_a_replay_leaves_the_other_account_on_the_live_session(self) -> None:
+        from datetime import date
+        from unittest.mock import MagicMock, patch
+
+        from athena_orchestrator.paper import extra_sync_ids, run_paper_cycle
+        from athena_settings.model import AccountEntry, AccountSwitches, standard_payload
+        from athena_settings.repository import SettingsVersion
+
+        def version() -> SettingsVersion:
+            data = standard_payload().model_dump()
+            data.update(id=1, author="t", note="t")
+            return SettingsVersion.model_validate(data)
+
+        book_a = version()
+        book_a.extra_accounts = [AccountEntry(account_id="B", label="B")]
+        book_a.account_controls = {"B": AccountSwitches(sync=True)}
+        book_b = version()
+        self.assertEqual(extra_sync_ids(book_a, "A", {"A", "B"}), [])
+        self.assertEqual(extra_sync_ids(book_a, "A", {"A"}), ["B"])
+
+        def load(_conn, account: str):
+            return book_a if account == "A" else book_b
+
+        def gate(_conn, account: str):
+            if account == "A":
+                return "live", None
+            return "play", date(2026, 1, 2)
+
+        snap = MagicMock()
+        snap.name = "athena.json"
+        seen: list[tuple] = []
+
+        def spy(index: int, status: str, detail: str = "") -> None:
+            seen.append((index, status, detail))
+            mark(index, status, detail)
+
+        with (
+            patch("athena_orchestrator.paper.active_accounts", return_value=["A", "B"]),
+            patch("athena_orchestrator.paper.mark", side_effect=spy),
+            patch("athena_orchestrator.paper.seed_standard_if_empty"),
+            patch("athena_orchestrator.paper.load_active", side_effect=load),
+            patch("athena_orchestrator.paper.cycle_gate", side_effect=gate),
+            patch("athena_orchestrator.paper.run_session", return_value=[]) as session,
+            patch("athena_orchestrator.paper.prepare_mock_orders"),
+            patch("athena_orchestrator.paper.write_watchlist_bars", return_value=0),
+            patch("athena_orchestrator.paper.ingest_news", return_value=0),
+            patch("athena_orchestrator.paper.record_iv_marks", return_value=0),
+            patch("athena_orchestrator.paper.expire_pending", return_value=[]),
+            patch("athena_orchestrator.paper.evaluate_watchlist", return_value=[]),
+            patch("athena_orchestrator.paper.manage_book", return_value=[]),
+            patch("athena_orchestrator.paper.run_signaled", return_value=[]),
+            patch("athena_orchestrator.paper.run_observe"),
+            patch("athena_orchestrator.paper.apply_cycle_budget", side_effect=lambda _c, _s, _a, ids: ids),
+            patch("athena_orchestrator.paper.symbols_for", return_value=["NVDA"]),
+            patch("athena_orchestrator.paper.write_snapshot", return_value=snap),
+            patch("athena_orchestrator.paper.prune_snapshots", return_value=0),
+            patch("athena_orchestrator.paper.sync_snapshot", return_value=None),
+        ):
+            run_paper_cycle(MagicMock())
+        self.assertEqual(session.call_count, 1)
+        self.assertEqual(session.call_args.args[2], "A")
+        self.assertEqual(session.call_args.kwargs["also_sync"], [])
+        self.assertIn((0, "running", "session A"), seen)
+        self.assertNotIn((0, "running", "session B"), seen)
+        self.assertIn((5, "running", "phases A"), seen)
+        self.assertIn((5, "running", "phases B"), seen)
+
+
+class BlockedDraftsTest(unittest.TestCase):
+    def test_blocked_rows_stay_off_approve(self) -> None:
+        from datetime import UTC, datetime
+
+        from athena_orchestrator.pages import _decision_trs
+
+        html = _decision_trs([
+            (datetime(2026, 10, 13, 8, 3, tzinfo=UTC), "draft_a", "SKHY", "ROLL", "blocked", "cycle margin"),
+            (datetime(2026, 10, 13, 8, 4, tzinfo=UTC), "draft_b", "INTC", "OPEN_CC", "approve", "ada"),
+        ])
+        self.assertIn("SKHY", html)
+        self.assertIn("cycle margin", html)
+        self.assertIn(">BLOCKED<", html)
+        self.assertIn(">APPROVED<", html)
+        self.assertIn("CC", html)
+        self.assertNotIn("Approve", html)
+        self.assertNotIn("Blocked ·", html)
+        self.assertEqual(_decision_trs([]), "")
+
+    def test_the_drafts_badge_counts_pending(self) -> None:
+        from unittest.mock import patch
+
+        from athena_orchestrator.console import _nav_badges
+
+        seen = []
+
+        class Conn:
+            def execute(self, sql, params=None):
+                seen.append(" ".join(sql.split()))
+                return self
+
+            def fetchone(self):
+                return (0,)
+
+        with (
+            patch("athena_orchestrator.console._account", return_value="U9390859"),
+            patch("athena_orchestrator.sim.progress", return_value={"status": "idle", "total": 0, "day": 0}),
+        ):
+            badges = _nav_badges(Conn())
+        draft_sql = next(sql for sql in seen if "FROM drafts" in sql)
+        self.assertIn("status = 'pending'", draft_sql)
+        self.assertNotIn("created_at", draft_sql)
+        self.assertNotIn("/drafts", badges)
+
+    def test_the_audit_heading_opens_result_types(self) -> None:
+        from athena_orchestrator.pages import _audit, _result_legend
+
+        page = _audit(None, "", {})
+        self.assertIn('data-panel="audit-legend"', page["body"])
+        self.assertIn("Result types", page["body"])
+        legend = _result_legend()
+        self.assertIn('id="audit-legend"', legend)
+        self.assertIn("CYCLE MARGIN", legend)
+        self.assertIn("ORDER 5", legend)
+        self.assertIn("DELTA PROXY", legend)
+        self.assertIn("short-option margin", legend)
+
+    def test_blocked_rows_load_one_page(self) -> None:
+        import json
+        from datetime import UTC, datetime
+
+        from athena_orchestrator.pages import _PAGE, _decision_slice, _drafts
+
+        stamp = datetime(2026, 10, 13, 8, 3, tzinfo=UTC)
+        stored = [(stamp, "draft_a", "SKHY", "ROLL", "blocked", "cycle margin")] * (_PAGE + 1)
+
+        class Conn:
+            def execute(self, sql, params=None):
+                self.sql = sql
+                self.params = params
+                return self
+
+            def fetchall(self):
+                return stored
+
+        conn = Conn()
+        rows, more, nxt = _decision_slice(conn, "U9390859", 0)
+        self.assertIn("status = 'blocked'", " ".join(conn.sql.split()))
+        self.assertEqual(conn.params[9], _PAGE + 1)
+        self.assertEqual(len(rows), _PAGE)
+        self.assertTrue(more)
+        self.assertEqual(nxt, _PAGE)
+        page = _drafts(conn, "U9390859", {"partial": ["rows"], "offset": ["50"]})
+        payload = json.loads(page["body"])
+        self.assertIn("SKHY", payload["html"])
+        self.assertIn(">BLOCKED<", payload["html"])
+        self.assertTrue(payload["more"])
+        self.assertNotIn("Approve", payload["html"])
+        self.assertNotIn("Blocked ·", payload["html"])
+
+    def test_decision_filters_narrow_the_list(self) -> None:
+        from athena_orchestrator.pages import _decision_choice, _decision_slice, _drafts
+
+        self.assertEqual(_decision_choice({"status": ["nope"], "q": ["  SKHY  "]}), ("all", "SKHY"))
+        self.assertEqual(_decision_choice({"status": ["blocked"]}), ("blocked", ""))
+
+        class Conn:
+            def execute(self, sql, params=None):
+                self.sql = " ".join(sql.split())
+                self.params = params
+                return self
+
+            def fetchall(self):
+                return []
+
+        conn = Conn()
+        _decision_slice(conn, "U9390859", 0, "blocked", "margin%")
+        self.assertIn("decision = %s", conn.sql)
+        self.assertEqual(conn.params[2], "blocked")
+        self.assertIn("%margin\\%%", conn.params)
+        page = _drafts(None, "", {})
+        self.assertIn('data-status="blocked"', page["body"])
+        self.assertIn('id="decision-keyword"', page["body"])
+        self.assertIn('class="on"', page["body"])
+        self.assertIn(">Approved<", page["body"])
+
+    def test_history_filters_keep_fills_and_a_symbol(self) -> None:
+        from athena_orchestrator.pages import _history, _history_visible
+
+        filled = {"status": "filled", "symbol": "SKHY", "tactic": "OPEN_CSP", "reason": "dip", "actor": "ada"}
+        rejected = {"status": "rejected", "symbol": "NVDA", "tactic": "ROLL", "reason": "no", "actor": "ada"}
+        self.assertTrue(_history_visible(filled, "filled", ""))
+        self.assertFalse(_history_visible(rejected, "filled", ""))
+        self.assertTrue(_history_visible(filled, "all", "skhy"))
+        self.assertFalse(_history_visible(filled, "all", "nvda"))
+        page = _history(None, "", {})
+        self.assertEqual(page["lead"], "Fills and approvals for this account.")
+        self.assertIn('data-status="filled"', page["body"])
+        self.assertIn('data-status="approved"', page["body"])
+        self.assertIn('data-status="rejected"', page["body"])
+        self.assertIn("No fills or approvals yet.", page["body"])
+        self.assertIn('id="history-keyword"', page["body"])

@@ -134,7 +134,7 @@ def _run_positions(task_id: str, database_url: str, account: str) -> None:
             if not broker.connect(host, port, _PROBE_CLIENT, True):
                 raise RuntimeError("IB Gateway did not connect.")
             try:
-                rows = broker.positions()
+                rows = broker.positions(account)
             finally:
                 broker.disconnect()
         with connect(database_url) as conn:
