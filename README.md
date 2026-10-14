@@ -129,9 +129,49 @@ Full surface: [docs/athena/04-settings-and-risk.md](docs/athena/04-settings-and-
 5. Respect **mobile slots**: opening Mobile IB can disconnect the API client;
    Athena is built to idle and reconnect around those windows.
 
-Athena uses IB for daily bars, chains, account sync, and execution. Optional
-iTick is for live prints outside that path. Delayed IB data is enough for many
-drafts until you subscribe to more market data.
+Athena uses IB for daily bars, option chains, account sync, streaming quotes, and
+execution. Optional iTick is a separate live-print path outside the IB daily
+window.
+
+### IB market data subscriptions (for streaming quotes)
+
+Subscribe in **IB Account Management → Settings → User settings → Market Data
+Subscriptions**. Packages are billed per **username** (shared by paper and live
+under that login). Names below match IBKR’s usual catalog labels; IB renames
+bundles occasionally — pick the Level I / Top-of-Book line for each venue.
+
+Athena’s API client currently requests **delayed** market data
+(`reqMarketDataType(3)`). That still needs exchange entitlements for the watchlist
+to stream into the cockpit, universe, positions, and orders pages. Without the
+right package, IB returns permission errors (e.g. code **162** / no market data)
+and rows stay frozen on the last stored print.
+
+| Your universe | Subscribe (Level I / streaming Top of Book) | Why Athena needs it |
+|---------------|---------------------------------------------|---------------------|
+| **US stocks** (SMART / USD) | **NYSE (Network A/CTA)**, **NASDAQ (Network C/UTP)**, and **NYSE American (Network B/CTA)** — or the combined **US Equity and Options Add-On Streaming** (or similar) bundle that includes those three | Streaming last/bid/ask for US names; pulse and live P&L |
+| **US equity options** | **OPRA** (US Options Exchanges Top of Book), usually in the same US equity+options add-on | Option chain asks, CSP/CC limit marks, option quotes |
+| **Hong Kong stocks** (SEHK / HKD digit codes) | **Hong Kong Securities Exchange (Stocks, Warrants & CBBCs)** Level I | Streaming quotes for HK names (`700`, `1810`, …) |
+| **Canada stocks** (if used) | **Toronto Stock Exchange (TSX)** Level I | CAD SMART names |
+
+**Historical daily bars (HMDS)** — Athena also pulls IB history for indicators and
+backfill. History often works with the same equity entitlements; if you see
+permission **162** on history while quotes work, enable the US/HK equity package
+that includes historical for that venue (IB’s snapshot/value bundles alone may
+not cover every permission).
+
+**Practical defaults**
+
+| Goal | What to buy |
+|------|-------------|
+| US NFR book (stocks + short options) | US equity Network A/B/C **and** OPRA (or one US equity+options streaming add-on) |
+| HK + US book | Above **plus** Hong Kong Securities Exchange Level I |
+| Quotes “good enough” without paying | IB free **delayed** data where available — cockpit still updates, but prints lag (~10–15 minutes on US). Athena is built around that delayed path today. |
+| Non-IB live prints | Optional `ITICK_API_KEY` — does not replace IB for chains, history, or orders |
+
+After changing subscriptions, restart Gateway/TWS (and Athena) so the session picks
+up the new entitlements. Confirm in TWS/Gateway that a watchlist symbol shows a
+live or delayed last without a market-data warning before expecting Athena pulse
+rows to move.
 
 ### Optional
 
@@ -139,6 +179,7 @@ drafts until you subscribe to more market data.
 |-------|---------|
 | DeepSeek token | News + Narrator / agent calls |
 | Telegram bot | Draft cards, Approve, fill notices |
+| iTick API key | Optional live prints outside IB delayed path |
 | cloudflared | Public Approve URL (`ATHENA_TUNNEL=cloudflared`) |
 | MinIO / S3 | Offsite backup of local snapshots |
 
