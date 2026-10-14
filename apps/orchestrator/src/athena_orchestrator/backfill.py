@@ -6,11 +6,16 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from athena_exec.accounts import active_accounts
 from athena_exec.broker import IbBroker
-from athena_marketdata.pricing import ib_daily_count, set_history_short, store_ib_daily
+from athena_marketdata.pricing import (
+    ib_daily_count,
+    set_history_from,
+    set_history_short,
+    store_ib_daily,
+)
 from athena_exec.clients import client_id
 from athena_orchestrator.tasks import _IB_LOCK
 from athena_settings import load_active
@@ -22,7 +27,25 @@ from athena_store import connect
 log = logging.getLogger("athena.history")
 
 _RANGE = 252
+_YEAR_DAYS = 365
 _RANGE_AGENTS = ("Location", "CSP", "Call", "Purchase", "Consolidator")
+
+
+def second_span(oldest: date, head: date | None) -> str | None:
+    """IB duration for the second pull, or None when the first year already reached head.
+
+    Never asks for bars before head. Caps at one calendar year.
+    """
+    if head is not None and oldest <= head:
+        return None
+    if head is None:
+        return "1 Y"
+    year_back = oldest - timedelta(days=_YEAR_DAYS)
+    start = max(head, year_back)
+    days = (oldest - start).days
+    if days < 1:
+        return None
+    return f"{min(days, _YEAR_DAYS)} D"
 
 
 def start_history_backfill(database_url: str) -> None:
@@ -91,14 +114,41 @@ def rename_watch_symbol(conn, account_id: str, old: str, new: str) -> None:
 
 
 def pull_symbol(conn, broker, symbol: str) -> int:
-    """Two documented 1 Y daily requests. Returns the stored ib-daily day count."""
+    """Up to two daily requests, clamped to IB's earliest bar. Returns stored day count."""
+    head = None
+    if hasattr(broker, "head_day"):
+        try:
+            head = broker.head_day(symbol)
+        except Exception as exc:
+            log.info("head day symbol=%s error=%s", symbol.upper(), exc.__class__.__name__)
+            head = None
+    if head is not None:
+        set_history_from(conn, symbol, head)
     first = broker.history_span(symbol, "1 Y", "")
     store_ib_daily(conn, symbol, first)
     if first:
         time.sleep(1)
         oldest = min(_as_day(bar[0]) for bar in first)
-        second = broker.history_span(symbol, "1 Y", f"{oldest:%Y%m%d}-00:00:00")
-        store_ib_daily(conn, symbol, second)
+        duration = second_span(oldest, head)
+        if duration is None:
+            log.info(
+                "history clamp symbol=%s head=%s oldest=%s skip_second",
+                symbol.upper(),
+                head,
+                oldest,
+            )
+        else:
+            if head is not None and duration != "1 Y":
+                log.info(
+                    "history clamp symbol=%s head=%s duration=%s",
+                    symbol.upper(),
+                    head,
+                    duration,
+                )
+            second = broker.history_span(symbol, duration, f"{oldest:%Y%m%d}-00:00:00")
+            store_ib_daily(conn, symbol, second)
+    elif head is None:
+        set_history_from(conn, symbol, None)
     return ib_daily_count(conn, symbol)
 
 

@@ -30,7 +30,8 @@ from athena_orchestrator.pages import (
     vol_tag,
 )
 from athena_settings.model import TacticFlags, standard_payload
-from athena_settings.repository import load_active
+from athena_settings.prompts import default_agents
+from athena_settings.repository import load_active, sync_standing_agents
 from athena_strategy.iv import sanity_label
 from athena_store.migrate import apply_migrations, connect
 from athena_strategy.agents import run_observe, run_signaled
@@ -38,11 +39,13 @@ from athena_strategy.budget import apply_cycle_budget
 from athena_strategy.indicators import indicators_enabled, read_indicators
 from athena_strategy.manage import manage_book
 from athena_strategy.screener import screener_enabled
+from athena_strategy.tags import WEEK_DIP
 from athena_strategy.wheel import (
     WheelState,
     alias_of,
     buy_access,
     commit_refused,
+    decide_opening,
     dry_run_enabled,
     execute_opening,
     may_buy,
@@ -249,10 +252,9 @@ class WheelDbTest(unittest.TestCase):
         return closes[-1]
 
     def _dip_closes(self) -> list[Decimal]:
+        """Rising channel, then a ~5-session pullback with a slight reclaim (week dip)."""
         closes = [Decimal("100") + Decimal(index) * Decimal("0.8") for index in range(80)]
-        closes.extend([Decimal("190")] * 4)
-        closes.extend([Decimal("170")] * 8)
-        closes.extend([Decimal("172"), Decimal("176"), Decimal("180")])
+        closes.extend([Decimal("190"), Decimal("188"), Decimal("182"), Decimal("178"), Decimal("180")])
         return closes
 
     def _high_closes(self) -> list[Decimal]:
@@ -390,9 +392,7 @@ class WheelDbTest(unittest.TestCase):
         self._choices(spot, "P", ("0.97", "0.95", "0.93"))
         self._rv_history()
         reading = read_indicators(self.conn, standard_payload(), SYMBOL)
-        self.assertIn("TREND_STRONG", reading.tags, reading.tags)
-        self.assertIn("RECLAIM", reading.tags, reading.tags)
-        self.assertIsNotNone(reading.drawdown_pct)
+        self.assertTrue(reading.week_dip, reading)
         self.assertIn("RV_HIGH", reading.tags, reading.tags)
         ids = execute_opening(
             self.conn, self._settings(long=True, intent="both"), ACCOUNT, SYMBOL,
@@ -438,6 +438,71 @@ class WheelDbTest(unittest.TestCase):
                 (ACCOUNT,),
             ).fetchone()
         )
+
+    def test_a_week_dip_with_a_slight_reclaim_sells_a_csp(self) -> None:
+        """Oct-13 style: WEEK_DIP candidate → dip_csp when code stages (AI gate is separate)."""
+        from athena_strategy.wheel import _dip
+
+        closes = [Decimal("200") + Decimal(index) * Decimal("0.2") for index in range(70)]
+        closes.extend([
+            Decimal("239"),
+            Decimal("230"),
+            Decimal("229"),
+            Decimal("226"),
+            Decimal("227"),
+        ])
+        spot = self._bars(closes)
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._rv_history()
+        reading = read_indicators(self.conn, standard_payload(), SYMBOL)
+        self.assertTrue(reading.week_dip, reading)
+        self.assertIn(WEEK_DIP, reading.tags, reading.tags)
+        self.assertTrue(_dip(reading, set(), standard_payload()))
+        opening = decide_opening(
+            self.conn, self._settings(long=False, intent="income", csp=True), ACCOUNT, SYMBOL,
+        )
+        self.assertEqual(opening.reason, "dip_csp", opening)
+        self.assertNotEqual(opening.quiet, "not_a_dip")
+        ids = execute_opening(
+            self.conn, self._settings(long=False, intent="income", csp=True), ACCOUNT, SYMBOL,
+        )
+        self.assertEqual(len(ids), 1)
+        self.assertEqual(
+            self.conn.execute("SELECT tactic FROM drafts WHERE id = %s", (ids[0],)).fetchone()[0],
+            "OPEN_CSP",
+        )
+
+    def test_a_flat_week_is_not_a_dip(self) -> None:
+        from athena_strategy.wheel import _dip
+
+        closes = [Decimal("100") + Decimal(index) * Decimal("0.05") for index in range(80)]
+        self._bars(closes)
+        reading = read_indicators(self.conn, standard_payload(), SYMBOL)
+        self.assertFalse(reading.week_dip)
+        self.assertNotIn(WEEK_DIP, reading.tags)
+        self.assertFalse(_dip(reading, set(), standard_payload()))
+        opening = decide_opening(
+            self.conn,
+            self._settings(long=False, intent="income", csp=True, cc=False, strangle=False),
+            ACCOUNT,
+            SYMBOL,
+        )
+        self.assertEqual(opening.quiet, "not_a_dip")
+
+    def test_multi_conflict_stays_refused_before_narrator(self) -> None:
+        self._short("P", "9")
+        self._short("P", "8")
+        state = wheel_state(self.conn, ACCOUNT, SYMBOL)
+        self.assertEqual(alias_of(state), "MULTI_CONFLICT")
+        opening = decide_opening(
+            self.conn, self._settings(long=False, intent="income", csp=True), ACCOUNT, SYMBOL,
+        )
+        self.assertEqual(opening.outcome, "dropped")
+        self.assertEqual(opening.quiet, "MULTI_CONFLICT")
+        ids = execute_opening(
+            self.conn, self._settings(long=False, intent="income", csp=True), ACCOUNT, SYMBOL,
+        )
+        self.assertEqual(ids, [])
 
     def test_assigned_shares_sell_a_call_above_cost(self) -> None:
         spot = self._bars(self._high_closes())
@@ -758,10 +823,11 @@ class WheelDbTest(unittest.TestCase):
     def test_one_full_pass_calls_three_agents(self) -> None:
         spot = self._bars(self._dip_closes())
         self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._rv_history()
         replies = [
             '{"tags":[]}',
             '{"news_wash":false}',
-            '{"sentence":"dip","strike":null}',
+            '{"open":true,"sentence":"dip","strike":null}',
         ]
 
         def _chat(_system, _user, _model, _provider, _token, _thinking):
@@ -775,6 +841,101 @@ class WheelDbTest(unittest.TestCase):
             (ACCOUNT,),
         ).fetchall()
         self.assertEqual([row[0] for row in rows], ["Location", "News", "Narrator"])
+
+    def test_narrator_quiet_refuses_a_week_dip_draft(self) -> None:
+        spot = self._bars(self._dip_closes())
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._rv_history()
+        replies = [
+            '{"tags":[]}',
+            '{"news_wash":false}',
+            '{"open":false,"sentence":"52w high and weak trend","strike":null}',
+        ]
+
+        def _chat(_system, _user, _model, _provider, _token, _thinking):
+            text = replies.pop(0)
+            return {"text": text, "error": "", "latency_ms": 1, "tokens": 1, "request": {"user": _user}}
+
+        with patch("athena_strategy.agents.chat", side_effect=_chat):
+            ids = run_signaled(
+                self.conn, self._settings(long=False, intent="income", csp=True), ACCOUNT,
+            )
+        self.assertEqual(ids, [])
+        self.assertIsNone(
+            self.conn.execute("SELECT 1 FROM drafts WHERE account_id = %s", (ACCOUNT,)).fetchone()
+        )
+        trail = self.conn.execute(
+            "SELECT outcome, summary FROM decision_trails WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(trail, ("quiet", "narrator_quiet"))
+
+    def test_narrator_open_allows_a_week_dip_csp(self) -> None:
+        spot = self._bars(self._dip_closes())
+        self._choices(spot, "P", ("0.97", "0.95", "0.93"))
+        self._rv_history()
+        replies = [
+            '{"tags":[]}',
+            '{"news_wash":false}',
+            '{"open":true,"sentence":"week dip CSP","strike":null}',
+        ]
+        narrator_users: list[str] = []
+
+        def _chat(_system, _user, _model, _provider, _token, _thinking):
+            if "Ticket:" in _user:
+                narrator_users.append(_user)
+            text = replies.pop(0)
+            return {"text": text, "error": "", "latency_ms": 1, "tokens": 1, "request": {"user": _user}}
+
+        with patch("athena_strategy.agents.chat", side_effect=_chat):
+            ids = run_signaled(
+                self.conn, self._settings(long=False, intent="income", csp=True), ACCOUNT,
+            )
+        self.assertEqual(len(ids), 1)
+        self.assertEqual(
+            self.conn.execute("SELECT tactic, reason FROM drafts WHERE id = %s", (ids[0],)).fetchone(),
+            ("OPEN_CSP", "week dip CSP"),
+        )
+        self.assertEqual(len(narrator_users), 1)
+        self.assertIn("Dip window sessions:", narrator_users[0])
+        self.assertIn("Cash reserve pct:", narrator_users[0])
+        self.assertIn("Min RV pctl new short:", narrator_users[0])
+
+    def test_sync_standing_agents_writes_narrator_marker(self) -> None:
+        previous = self._settings_id()
+        try:
+            # ZZTEST is skipped by sync; use a temporary live-style id.
+            live = "UTESTWDIP"
+            payload = standard_payload().model_copy(
+                update={"agents": {"CSP": default_agents()["CSP"]}},
+            )
+            self.conn.execute(
+                "UPDATE settings_versions SET active = false WHERE account_id = %s",
+                (live,),
+            )
+            next_id = self.conn.execute("SELECT coalesce(max(id), 0) + 1 FROM settings_versions").fetchone()[0]
+            from psycopg.types.json import Jsonb
+
+            self.conn.execute(
+                """
+                INSERT INTO settings_versions (id, author, note, payload, active, account_id)
+                VALUES (%s, 'test', 'sync fixture', %s, true, %s)
+                """,
+                (next_id, Jsonb(payload.model_dump()), live),
+            )
+            self.conn.commit()
+            written = sync_standing_agents(self.conn, account_ids=[live])
+            self.assertEqual(len(written), 1)
+            self.assertEqual(written[0][0], live)
+            saved = load_active(self.conn, live)
+            self.assertIn("WEEK_DIP", saved.agents["Narrator"].system)
+            self.assertIn("WEEK_DIP", saved.agents["CSP"].system)
+            self.assertIn('"open":true', saved.agents["Narrator"].system)
+        finally:
+            self.conn.execute("DELETE FROM settings_versions WHERE account_id = %s", ("UTESTWDIP",))
+            self.conn.execute("DELETE FROM settings_audits WHERE account_id = %s", ("UTESTWDIP",))
+            self.conn.commit()
+            self._restore_settings(previous)
 
     def fixture_june_dip(self) -> Decimal:
         spot = self._bars(self._dip_closes())

@@ -4,7 +4,12 @@ reference/
 # Secrets / local env
 .env
 .env.local
+.env.*
+!.env.example
 *.pem
+*.key
+credentials.json
+.workbuddy/
 
 # OS / editor
 .DS_Store

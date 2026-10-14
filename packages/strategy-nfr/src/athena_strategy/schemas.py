@@ -40,7 +40,7 @@ _SCHEMA = {
     "Purchase": '{"quiet":false,"limit":1,"reason":""}',
     "Strangle": '{"quiet":false,"expiry":"YYYY-MM-DD","put_strike":1,"put_limit":1,"call_strike":1,"call_limit":1,"reason":""}',
     "Consolidator": '{"thinking":"","drafts":[{"tactic":"BUY","limit":1,"reason":""}]}',
-    "Narrator": '{"sentence":"","strike":null}',
+    "Narrator": '{"open":true,"sentence":"","strike":null}',
 }
 
 
@@ -108,6 +108,8 @@ def _location_tags(payload: dict) -> bool:
 
 
 def _narrator(payload: dict) -> bool:
+    if not isinstance(payload.get("open"), bool):
+        return False
     if not isinstance(payload.get("sentence"), str):
         return False
     strike = payload.get("strike")

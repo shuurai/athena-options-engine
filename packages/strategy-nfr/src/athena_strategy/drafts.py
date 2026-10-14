@@ -376,9 +376,10 @@ def apply_ticket_block(
     orders = conn.execute(
         """
         SELECT count(*) FROM orders
-        WHERE account_id = %s AND status <> 'blocked' AND created_at::date = CURRENT_DATE
+        WHERE account_id = %s AND upper(symbol) = %s
+          AND status <> 'blocked' AND created_at::date = CURRENT_DATE
         """,
-        (account_id,),
+        (account_id, symbol.upper()),
     ).fetchone()[0]
     rates = {}
     if mark is not None and mark[3]:
@@ -449,9 +450,10 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
     orders = conn.execute(
         """
         SELECT count(*) FROM orders
-        WHERE account_id = %s AND status <> 'blocked' AND created_at::date = CURRENT_DATE
+        WHERE account_id = %s AND upper(symbol) = %s
+          AND status <> 'blocked' AND created_at::date = CURRENT_DATE
         """,
-        (account_id,),
+        (account_id, symbol.upper()),
     ).fetchone()[0]
     found = {"orders_today": int(orders)}
     if not opening:
@@ -1225,15 +1227,17 @@ def _book_simulated(
     if limit_price is None or Decimal(limit_price) <= 0 or contracts <= 0:
         return
     price = Decimal(limit_price)
-    conn.execute(
-        """
-        INSERT INTO fills (draft_id, symbol, tactic, contracts, price, simulated, account_id)
-        VALUES (%s, %s, %s, %s, %s, true, %s)
-        """,
-        (draft_id, symbol, tactic, contracts, price, account_id),
-    )
     signed = Decimal(contracts) if action == "BUY" else Decimal(-contracts)
     sec_type = "OPT" if right else "STK"
+    conn.execute(
+        """
+        INSERT INTO fills (
+            draft_id, symbol, tactic, contracts, price, simulated, account_id, side, sec_type
+        )
+        VALUES (%s, %s, %s, %s, %s, true, %s, %s, %s)
+        """,
+        (draft_id, symbol, tactic, contracts, price, account_id, action or "", sec_type),
+    )
     existing = conn.execute(
         """
         SELECT quantity, avg_price FROM positions

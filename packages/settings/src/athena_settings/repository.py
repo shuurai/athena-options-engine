@@ -165,6 +165,62 @@ def _flat(value: object, prefix: str = "") -> dict[str, object]:
     return {prefix[:-1]: value}
 
 
+def sync_standing_agents(
+    conn: psycopg.Connection,
+    *,
+    names: tuple[str, ...] = ("Narrator", "CSP"),
+    author: str = "athena",
+    note: str = "week-dip tag + Narrator open gate",
+    account_ids: list[str] | None = None,
+) -> list[tuple[str, int]]:
+    """Replace named agents with standing defaults on each active settings row.
+
+    Stored agents override defaults at resolve time, so live books need a new
+    settings_versions row. ZZ* accounts are skipped (they keep empty agents).
+    """
+    from athena_settings.prompts import default_agents
+
+    standing = default_agents()
+    wanted = [name for name in names if name in standing]
+    if not wanted:
+        return []
+    if account_ids is None:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT account_id
+            FROM settings_versions
+            WHERE active
+            ORDER BY account_id
+            """
+        ).fetchall()
+        account_ids = [str(row[0]) for row in rows]
+    written: list[tuple[str, int]] = []
+    for account_id in account_ids:
+        if account_id.upper().startswith("ZZ"):
+            continue
+        current = _payload_of(load_active(conn, account_id))
+        agents = dict(current.agents)
+        changed = False
+        for name in wanted:
+            fresh = standing[name]
+            old = agents.get(name)
+            if (
+                old is not None
+                and old.system == fresh.system
+                and old.execution == fresh.execution
+                and old.reasoning == fresh.reasoning
+            ):
+                continue
+            agents[name] = fresh
+            changed = True
+        if not changed:
+            continue
+        payload = current.model_copy(update={"agents": agents})
+        new_id, _changes = save_settings(conn, account_id, payload, author, note)
+        written.append((account_id, new_id))
+    return written
+
+
 def load_active(conn: psycopg.Connection, account_id: str) -> SettingsVersion:
     row = conn.execute(
         """

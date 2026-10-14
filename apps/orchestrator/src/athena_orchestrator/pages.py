@@ -723,6 +723,10 @@ def _pct_tone(text: str) -> str:
 def _universe(conn, account: str, query: dict, note: str = "") -> dict:
     settings = load_active(conn, account) if account else None
     symbols = list(settings.watchlist) if settings else []
+    if account and not _wants_rows(query) and (query.get("partial") or [""])[0] != "symbol":
+        from athena_orchestrator.pulse import note_view, watch_symbols
+
+        note_view(watch_symbols(conn, account), account)
     offset = _offset(query)
     page, more, nxt = _window(symbols, offset)
     if (query.get("partial") or [""])[0] == "symbol":
@@ -836,7 +840,7 @@ def _history(conn, account: str, query: dict) -> dict:
     )
     return _html(
         "History",
-        "Fills and approvals for this account.",
+        "Fills and approvals for this account. Open a row for size, cost, fees, and the approval trail.",
         body,
         _history_chips(everything),
         _REFRESH,
@@ -846,7 +850,8 @@ def _history(conn, account: str, query: dict) -> dict:
 def _history_table(rows: str) -> str:
     return (
         '<table class="data"><thead><tr>'
-        "<th>Date</th><th>Symbol</th><th>Tactic</th><th>Phase</th><th>P&amp;L</th><th>Status</th>"
+        "<th>Date</th><th>Symbol</th><th>Tactic</th><th>Phase</th>"
+        "<th>P&amp;L</th><th>Detail</th><th>Status</th>"
         f"</tr></thead><tbody>{rows}</tbody></table>"
     )
 
@@ -1351,6 +1356,10 @@ def _positions_page(conn, account: str, query: dict) -> dict:
     if kind not in {"all", "stock", "option"}:
         kind = "all"
     rows = _position_rows(conn, account)
+    if account and not _wants_rows(query):
+        from athena_orchestrator.pulse import note_view, watch_symbols
+
+        note_view(watch_symbols(conn, account), account)
     visible = [row for row in rows if _position_visible(row, kind)]
     offset = _offset(query)
     page, more, nxt = _window(visible, offset)
@@ -1458,7 +1467,8 @@ def _position_rows(conn, account: str) -> list[dict]:
             "value": "" if market_value is None else f"{market_value:,.2f}",
             "pnl": pnl,
             "currency": currency or "",
-            "multiplier": "" if sec_type != "OPT" else _plain_number(mult),
+            "mult": _plain_number(mult),
+            "multiplier": "" if sec != "OPT" else _plain_number(mult),
             "realized": "" if realized is None else f"{Decimal(realized):,.2f}",
             "synced": "" if snapshot_at is None else snapshot_at.astimezone(HKT).strftime("%Y-%m-%d %H:%M"),
             "simulated": bool(simulated),
@@ -1538,13 +1548,17 @@ def _position_clock(rows: list[dict]) -> str:
 
 
 def _orders_page(conn, account: str, query: dict) -> dict:
+    if account and not _wants_rows(query):
+        from athena_orchestrator.pulse import note_view, watch_symbols
+
+        note_view(watch_symbols(conn, account), account)
     status = _orders_choice(query)
     offset = _offset(query)
     rows, more, nxt = _order_window(conn, account, status, offset)
-    body_rows = "".join(_order_tr(row) for row in rows)
+    body_rows = "".join(_order_tr(conn, row) for row in rows)
     if not body_rows and offset == 0:
         empty = "No orders yet." if status == "all" else "No orders for this filter."
-        body_rows = f'<tr><td colspan="11">{empty}</td></tr>'
+        body_rows = f'<tr><td colspan="13">{empty}</td></tr>'
     if _wants_rows(query):
         return _fragment(body_rows, more, nxt)
     marks = "".join(
@@ -1573,7 +1587,8 @@ def order_event(conn, order_id: str) -> dict | None:
     row = conn.execute(
         """
         SELECT id, account_id, created_at, symbol, action, contracts, filled_qty, order_type,
-               limit_price, stop_price, status, ib_status, ib_order_id, tactic
+               limit_price, stop_price, status, ib_status, ib_order_id, tactic,
+               multiplier, expiry, strike, contract_right
         FROM orders
         WHERE id = %s
         """,
@@ -1586,7 +1601,7 @@ def order_event(conn, order_id: str) -> dict | None:
         "id": item["id"],
         "account": item["account"],
         "bucket": item["bucket"],
-        "html": _order_tr(item),
+        "html": _order_tr(conn, item),
     }
 
 
@@ -1603,7 +1618,8 @@ def _order_window(conn, account: str, status: str, offset: int) -> tuple[list[di
     found = conn.execute(
         """
         SELECT id, account_id, created_at, symbol, action, contracts, filled_qty, order_type,
-               limit_price, stop_price, status, ib_status, ib_order_id, tactic
+               limit_price, stop_price, status, ib_status, ib_order_id, tactic,
+               multiplier, expiry, strike, contract_right
         FROM orders
         WHERE account_id = %s AND (simulated = false OR %s)
           AND (
@@ -1643,9 +1659,15 @@ def _order_count(conn, account: str) -> int:
 
 
 def _order_item(row) -> dict:
-    order_id, account, created, symbol, action, contracts, filled, order_type, limit_price, stop_price, status, ib_status, ib_order_id, tactic = row
+    (
+        order_id, account, created, symbol, action, contracts, filled, order_type,
+        limit_price, stop_price, status, ib_status, ib_order_id, tactic,
+        multiplier, expiry, strike, contract_right,
+    ) = row
     bucket = order_bucket(status, ib_status)
     when = "" if created is None else created.astimezone(HKT).strftime("%Y-%m-%d %H:%M")
+    option = expiry is not None or (strike is not None and Decimal(strike) != 0) or bool(contract_right)
+    mult = str(multiplier or ("100" if option else "1"))
     return {
         "id": order_id,
         "account": account,
@@ -1661,6 +1683,8 @@ def _order_item(row) -> dict:
         "bucket": bucket,
         "ib": "" if ib_order_id is None else str(ib_order_id),
         "tactic": tactic or "",
+        "kind": "opt" if option else "stk",
+        "mult": mult,
     }
 
 
@@ -1675,7 +1699,43 @@ def order_bucket(status: str, ib_status: str) -> str:
     return "working"
 
 
-def _order_tr(row: dict) -> str:
+def _order_last(conn, row: dict) -> Decimal | None:
+    """Latest underlying print for a stock order. Option rows stay blank."""
+    if row.get("kind") != "stk":
+        return None
+    text, _change, _tone = _closes(conn, row["symbol"])
+    if text == DASH:
+        return None
+    try:
+        return Decimal(str(text).replace(",", ""))
+    except Exception:
+        return None
+
+
+def _order_gap(limit, last) -> tuple[str, str]:
+    """How far the limit sits from the latest print, as a signed percent."""
+    if limit is None or last is None or last == 0:
+        return DASH, ""
+    change = (Decimal(limit) - Decimal(last)) / Decimal(last) * Decimal(100)
+    tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
+    return f"{change:+.2f}%", tone
+
+
+def _order_cost(qty, limit, last, multiplier) -> str:
+    """Predicted cash at the limit, or at last when the order has no limit."""
+    unit = limit if limit is not None else last
+    if unit is None or qty is None:
+        return DASH
+    try:
+        mult = Decimal(str(multiplier or "1"))
+    except Exception:
+        mult = Decimal(1)
+    if mult <= 0:
+        mult = Decimal(1)
+    return f"{abs(Decimal(qty) * Decimal(unit) * mult):,.2f}"
+
+
+def _order_tr(conn, row: dict) -> str:
     tone = {"filled": "green", "cancelled": "amber", "blocked": "red"}.get(row["bucket"], "blue")
     label = (row["status"] or "").upper() or DASH
     tactic = _tactic_tag(row["tactic"].upper()) if row["tactic"] else DASH
@@ -1683,8 +1743,17 @@ def _order_tr(row: dict) -> str:
     side_tone = {"BUY": "green", "SELL": "amber"}.get(side, "")
     side_class = f"tag {side_tone}".strip()
     side_badge = f'<span class="{side_class}">{escape(side)}</span>' if side else DASH
+    last = _order_last(conn, row)
+    gap, gap_tone = _order_gap(row["limit"], last)
+    cost = _order_cost(row["qty"], row["limit"], last, row.get("mult"))
+    limit_attr = "" if row["limit"] is None else format(Decimal(row["limit"]), "f")
     return (
-        f'<tr data-order="{escape(row["id"], quote=True)}">'
+        f'<tr data-order="{escape(row["id"], quote=True)}"'
+        f' data-symbol="{escape(row["symbol"], quote=True)}"'
+        f' data-kind="{escape(row.get("kind") or "stk", quote=True)}"'
+        f' data-qty="{escape(format(Decimal(row["qty"]), "f"), quote=True)}"'
+        f' data-limit="{escape(limit_attr, quote=True)}"'
+        f' data-mult="{escape(str(row.get("mult") or "1"), quote=True)}">'
         f'<td class="mono">{escape(row["when"] or DASH)}</td>'
         f'<td class="mono">{escape(row["symbol"])}</td>'
         f"<td>{side_badge}</td>"
@@ -1692,6 +1761,8 @@ def _order_tr(row: dict) -> str:
         f'<td class="mono">{escape(_order_amount(row["filled"]))}</td>'
         f'<td>{escape(row["order_type"])}</td>'
         f'<td class="mono">{escape(_order_money(row["limit"]))}</td>'
+        f'<td class="mono order-gap{" " + gap_tone if gap_tone else ""}">{escape(gap)}</td>'
+        f'<td class="mono order-cost">{escape(cost)}</td>'
         f'<td class="mono">{escape(_order_money(row["stop"]))}</td>'
         f'<td><span class="tag {tone}">{escape(label)}</span></td>'
         f'<td class="mono">{escape(row["ib"] or DASH)}</td>'
@@ -1702,9 +1773,10 @@ def _order_tr(row: dict) -> str:
 
 def _orders_table(rows: str) -> str:
     return (
-        '<table class="data"><thead><tr>'
+        '<table class="data" id="orders-table"><thead><tr>'
         "<th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Filled</th><th>Type</th>"
-        "<th>Limit</th><th>Stop</th><th>Status</th><th>IB id</th><th>Tactic</th>"
+        "<th>Limit</th><th>vs last</th><th>Est. cost</th><th>Stop</th>"
+        "<th>Status</th><th>IB id</th><th>Tactic</th>"
         f"</tr></thead><tbody>{rows}</tbody></table>"
     )
 
@@ -1730,6 +1802,9 @@ def _position_tr(row: dict) -> str:
     pnl = row["pnl"]
     pnl_class = "" if pnl is None else "chg-up" if pnl > 0 else "chg-down" if pnl < 0 else ""
     pnl_text = DASH if pnl is None else _signed(pnl)
+    ccy = (row.get("currency") or "").strip()
+    if pnl is not None and ccy:
+        pnl_text = f"{pnl_text} {ccy}"
     attrs = " ".join(
         f'{name}="{escape(str(row[key]), quote=True)}"'
         for name, key in (
@@ -1744,7 +1819,7 @@ def _position_tr(row: dict) -> str:
             ("data-dte", "dte"),
             ("data-strike", "strike"),
             ("data-ccy", "currency"),
-            ("data-mult", "multiplier"),
+            ("data-mult", "mult"),
             ("data-realized", "realized"),
             ("data-synced", "synced"),
         )
@@ -1763,11 +1838,11 @@ def _position_tr(row: dict) -> str:
         f'<td><span class="tag {side_tag}">{side}</span></td>'
         f'<td class="mono">{escape(qty)}</td>'
         f'<td class="mono">{escape(average)}</td>'
-        f'<td class="mono">{escape(row["mark"] or DASH)}'
+        f'<td class="mono pos-mark">{escape(row["mark"] or DASH)}'
         + ('<div class="sym-name">close</div>' if row.get("stored_close") else "")
         + "</td>"
-        f'<td class="mono">{escape(row["value"] or DASH)}</td>'
-        f'<td class="mono {pnl_class}">{escape(pnl_text)}</td>'
+        f'<td class="mono pos-value">{escape(row["value"] or DASH)}</td>'
+        f'<td class="mono pos-pnl {pnl_class}">{escape(pnl_text)}</td>'
         f'<td class="mono">{escape(row["expiry"] or DASH)}'
         + (f'<div class="sym-name">{escape(row["dte"])}d</div>' if row["dte"] else "")
         + "</td>"
@@ -1797,11 +1872,20 @@ def _history_csv(conn, account: str, query: dict) -> dict:
     status, needle = _history_choice(query)
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["date", "symbol", "tactic", "phase", "pnl", "status"])
+    writer.writerow([
+        "date", "symbol", "tactic", "phase", "side", "qty", "price", "notional",
+        "commission", "commission_currency", "status", "actor", "reason", "exec_id", "detail",
+    ])
     for item in _history_rows(conn, account):
         if not _history_visible(item, status, needle):
             continue
-        writer.writerow([item["when"], item["symbol"], item["tactic"], item["phase"], item["pnl"], item["status"]])
+        writer.writerow([
+            item["when"], item["symbol"], item["tactic"], item["phase"],
+            item.get("side") or "", item.get("qty") or "", item.get("price") or "",
+            item["pnl"], item.get("commission") or "", item.get("commission_currency") or "",
+            item["status"], item.get("actor") or "", item.get("reason") or "",
+            item.get("exec_id") or "", item.get("detail") or "",
+        ])
     return {"status": 200, "kind": "csv", "body": buffer.getvalue(), "title": "", "lead": "", "chips": []}
 
 
@@ -2211,7 +2295,7 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Daily loss halt %', 'halt', risk.daily_loss_halt_pct, 'Trading pauses when today drops this percent from the first mark. Zero turns this off.')}"
         f"{_limit('Max contracts / symbol', 'contracts', risk.max_contracts_per_symbol, 'Most contracts one symbol may use. A draft above this is blocked.')}"
         f"{_limit('Max position / symbol', 'position', risk.max_position_per_symbol, 'Ticker currency. One contract is the latest price times the multiplier. A total within 10% still fits. When one contract is already above this, the contract limit is used. Zero turns this off.')}"
-        f"{_limit('Max orders / day', 'max_orders', risk.max_orders_per_day, 'New orders stop for the day after this many. A profile that differs here is custom.')}"
+        f"{_limit('Max orders / day', 'max_orders', risk.max_orders_per_day, 'Per symbol. New orders for a name stop for the day after this many on that name. A profile that differs here is custom.')}"
         f"{_limit('Min DTE new', 'min_dte', risk.min_dte_new, 'A new open is blocked when days to expiry are below this.')}"
         f"{_limit('Seller margin budget %', 'margin', risk.max_short_opt_margin_pct, 'Short-option margin may not exceed this percent of net liquidation.')}"
         f"{_limit('Earnings blackout days', 'blackout', risk.earnings_blackout_days, 'No new open within this many days of earnings.')}"
@@ -2407,8 +2491,8 @@ def _pool_row(conn, account: str, settings, symbol: str) -> str:
         f' data-classifiers="{escape(classifiers, quote=True)}">'
         f'<td><span class="sym-line"><span class="pool-spin sim-spin" aria-hidden="true"></span>'
         f"<span><b>{escape(symbol)}</b><div class=\"sym-name\">{escape(name) if name else DASH}</div></span></span></td>"
-        f"<td class=\"mono\" style=\"font-weight:600\">{escape(last)}</td>"
-        f"<td class=\"mono {tone}\">{escape(change)}</td>"
+        f'<td class="mono pool-px" style="font-weight:600">{escape(last)}</td>'
+        f'<td class="mono pool-chg {tone}">{escape(change)}</td>'
         f"{_band_cell(band, high_pct, low_pct)}"
         f"<td class=\"mono\" style=\"color:var(--site-text-3)\">{escape(_cap_text(cap))}</td>"
         f"<td>{_market_select(symbol, flags.market or '')}</td>"
@@ -4043,7 +4127,7 @@ def _history_empty(everything: list, status: str, needle: str) -> str:
         text = "No fills or approvals yet."
     else:
         text = "No fills or approvals for this filter."
-    return f'<tr><td colspan="6">{text}</td></tr>'
+    return f'<tr><td colspan="7">{text}</td></tr>'
 
 
 def _history_rows(conn, account: str) -> list[dict]:
@@ -4052,8 +4136,11 @@ def _history_rows(conn, account: str) -> list[dict]:
     fills = conn.execute(
         """
         SELECT f.created_at, f.symbol, f.tactic, COALESCE(d.phase, ''), f.draft_id,
-               f.price, f.contracts, o.action, o.multiplier,
-               COALESCE(a.actor, ''), COALESCE(a.reason, ''), COALESCE(d.reason, '')
+               f.price, f.contracts, COALESCE(NULLIF(f.side, ''), o.action, ''),
+               COALESCE(o.multiplier, '100'),
+               COALESCE(a.actor, ''), COALESCE(a.reason, ''), COALESCE(d.reason, ''),
+               f.commission, COALESCE(f.commission_currency, ''), COALESCE(f.exec_id, ''),
+               COALESCE(NULLIF(f.sec_type, ''), 'STK')
         FROM fills f
         LEFT JOIN drafts d ON d.id = f.draft_id
         LEFT JOIN LATERAL (
@@ -4074,7 +4161,10 @@ def _history_rows(conn, account: str) -> list[dict]:
     ).fetchall()
     filled_drafts = set()
     rows = []
-    for created, symbol, tactic, phase, draft_id, price, contracts, action, multiplier, actor, approval_reason, draft_reason in fills:
+    for (
+        created, symbol, tactic, phase, draft_id, price, contracts, action, multiplier,
+        actor, approval_reason, draft_reason, commission, commission_ccy, exec_id, sec_type,
+    ) in fills:
         if draft_id:
             filled_drafts.add(draft_id)
         rows.append(
@@ -4087,6 +4177,14 @@ def _history_rows(conn, account: str) -> list[dict]:
                 _fill_cash(price, contracts, action, multiplier),
                 actor,
                 approval_reason or draft_reason,
+                side=action or "",
+                qty=contracts,
+                price=price,
+                multiplier=multiplier,
+                commission=commission,
+                commission_currency=commission_ccy or "",
+                exec_id=exec_id or "",
+                sec_type=sec_type or "STK",
             )
         )
     approvals = conn.execute(
@@ -4119,9 +4217,27 @@ def _history_rows(conn, account: str) -> list[dict]:
     return rows
 
 
-def _history_item(created, symbol, tactic, phase, status, pnl, actor, reason) -> dict:
+def _history_item(
+    created,
+    symbol,
+    tactic,
+    phase,
+    status,
+    pnl,
+    actor,
+    reason,
+    *,
+    side: str = "",
+    qty=None,
+    price=None,
+    multiplier: str = "",
+    commission=None,
+    commission_currency: str = "",
+    exec_id: str = "",
+    sec_type: str = "",
+) -> dict:
     local = created.astimezone(HKT)
-    return {
+    item = {
         "when": local.strftime("%Y-%m-%d"),
         "clock": local.strftime("%m-%d %H:%M"),
         "symbol": symbol,
@@ -4131,8 +4247,49 @@ def _history_item(created, symbol, tactic, phase, status, pnl, actor, reason) ->
         "pnl": pnl,
         "actor": actor or "",
         "reason": reason or "",
+        "side": (side or "").upper(),
+        "qty": qty,
+        "price": price,
+        "multiplier": multiplier or "",
+        "commission": commission,
+        "commission_currency": commission_currency or "",
+        "exec_id": exec_id or "",
+        "sec_type": sec_type or "",
         "sort": created,
     }
+    item["detail"] = _history_detail(item)
+    return item
+
+
+def _history_detail(item: dict) -> str:
+    """One-line audit summary. Fills show size, cost, and fee when known."""
+    if item["status"] != "filled":
+        return (item.get("reason") or item.get("actor") or "").strip()
+    parts: list[str] = []
+    side = (item.get("side") or "").upper()
+    qty = item.get("qty")
+    price = item.get("price")
+    head = " ".join(
+        bit for bit in (
+            side,
+            None if qty is None else _plain_number(qty),
+            None if price is None else f"@ {_order_money(price)}",
+        ) if bit
+    )
+    if head:
+        parts.append(head)
+    cash = item.get("pnl")
+    if cash is not None:
+        label = "credit" if cash > 0 else "cost" if cash < 0 else "flat"
+        parts.append(f"{label} ${_cash_text(abs(cash))}")
+    fee = item.get("commission")
+    if fee is not None:
+        ccy = (item.get("commission_currency") or "").strip()
+        fee_text = f"fee {_order_money(abs(Decimal(fee)))}"
+        if ccy:
+            fee_text = f"{fee_text} {ccy}"
+        parts.append(fee_text)
+    return " · ".join(parts)
 
 
 def _history_visible(item: dict, status: str, needle: str = "") -> bool:
@@ -4140,7 +4297,14 @@ def _history_visible(item: dict, status: str, needle: str = "") -> bool:
         return False
     if not needle:
         return True
-    hay = " ".join((item["symbol"], item["tactic"], item["reason"])).lower()
+    hay = " ".join((
+        item["symbol"],
+        item["tactic"],
+        item.get("reason") or "",
+        item.get("detail") or "",
+        item.get("side") or "",
+        item.get("actor") or "",
+    )).lower()
     return needle.lower() in hay
 
 
@@ -4151,19 +4315,43 @@ def _history_tr(item: dict) -> str:
     pnl_class = "mono" if item["pnl"] is None else ("pnl-pos" if item["pnl"] > 0 else "pnl-neg" if item["pnl"] < 0 else "mono")
     by = f"{item['actor']} {item['clock']} HKT" if item["actor"] else "—"
     title = f"{item['symbol']} {item['tactic']} {item['when']}"
+    detail = item.get("detail") or ""
+    fee = item.get("commission")
+    fee_text = DASH
+    if fee is not None:
+        fee_text = _order_money(abs(Decimal(fee)))
+        ccy = (item.get("commission_currency") or "").strip()
+        if ccy:
+            fee_text = f"{fee_text} {ccy}"
+    blob = escape(
+        json.dumps({
+            "title": title,
+            "phase": item["phase"] or DASH,
+            "status": status,
+            "pnl": pnl,
+            "side": item.get("side") or DASH,
+            "qty": DASH if item.get("qty") is None else _plain_number(item["qty"]),
+            "price": DASH if item.get("price") is None else _order_money(item["price"]),
+            "notional": pnl,
+            "fee": fee_text,
+            "multiplier": item.get("multiplier") or DASH,
+            "sec_type": item.get("sec_type") or DASH,
+            "exec_id": item.get("exec_id") or DASH,
+            "by": by,
+            "reason": item.get("reason") or DASH,
+            "detail": detail or DASH,
+        }),
+        quote=True,
+    )
+    shown = detail or DASH
     return (
-        '<tr data-cmd="history-row"'
-        f' data-title="{escape(title, quote=True)}"'
-        f' data-phase="{escape(item["phase"] or "—", quote=True)}"'
-        f' data-status="{status}"'
-        f' data-pnl="{escape(pnl, quote=True)}"'
-        f' data-by="{escape(by, quote=True)}"'
-        f' data-reason="{escape(item["reason"] or "—", quote=True)}">'
+        f'<tr data-cmd="history-row" data-json="{blob}">'
         f'<td class="mono">{escape(item["when"])}</td>'
         f"<td><b>{escape(item['symbol'])}</b></td>"
         f"<td>{_tactic_tag(item['tactic'])}</td>"
         f"<td>{_phase_tag(item['phase'])}</td>"
         f'<td class="{pnl_class}">{escape(pnl)}</td>'
+        f'<td class="mono hist-detail">{escape(shown)}</td>'
         f'<td><span class="{tag}">{status}</span></td></tr>'
     )
 

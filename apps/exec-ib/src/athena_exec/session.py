@@ -584,19 +584,31 @@ def _sync_order_status(conn, broker, account: str) -> list[tuple]:
         return noticed
     rows = conn.execute(
         """
-        SELECT id, ib_order_id, symbol, tactic, action, draft_id FROM orders
+        SELECT id, ib_order_id, symbol, tactic, action, draft_id,
+               contracts, multiplier, avg_fill, filled_qty, expiry, strike, contract_right
+        FROM orders
         WHERE account_id = %s AND status = 'submitted' AND ib_order_id IS NOT NULL
         """,
         (account,),
     ).fetchall()
-    for order_id, ib_order_id, symbol, tactic, action, draft_id in rows:
+    for (
+        order_id, ib_order_id, symbol, tactic, action, draft_id,
+        contracts, multiplier, avg_fill, filled_qty, expiry, strike, contract_right,
+    ) in rows:
         live = states.get(int(ib_order_id))
         if live is None:
             log.info("order unseen id=%s ib=%s", order_id, ib_order_id)
             continue
         if live == "Filled":
             conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
-            noticed.append((account, symbol, tactic, action, draft_id, None))
+            option = expiry is not None or strike is not None or bool(contract_right)
+            qty = filled_qty if filled_qty is not None else contracts
+            shares = None if qty is None else abs(int(qty))
+            noticed.append((
+                account, symbol, tactic, action, draft_id, avg_fill,
+                shares, multiplier or ("100" if option else "1"), None, "",
+                "OPT" if option else "STK",
+            ))
             changed.append(order_id)
             log.info("order filled id=%s ib=%s", order_id, ib_order_id)
         elif live in {"Cancelled", "ApiCancelled", "Inactive"}:
@@ -619,6 +631,8 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
         exec_id = str(item[5]) if len(item) > 5 and item[5] else f"{ib_order_id}:{symbol}:{quantity}:{price}"
         side = item[6] if len(item) > 6 else ""
         sec_type = item[7] if len(item) > 7 and item[7] else "STK"
+        commission = item[8] if len(item) > 8 else None
+        commission_ccy = str(item[9] or "") if len(item) > 9 else ""
         if fill_account and fill_account != account:
             continue
         if conn.execute(
@@ -628,7 +642,7 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
             continue
         row = conn.execute(
             """
-            SELECT id, draft_id, tactic, contracts, action
+            SELECT id, draft_id, tactic, contracts, action, multiplier
             FROM orders
             WHERE ib_order_id = %s AND account_id = %s AND status = 'submitted'
             """,
@@ -636,12 +650,18 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
         ).fetchone()
         if row is None:
             signed = -quantity if side == "SLD" else quantity
+            book_side = "SELL" if side == "SLD" else "BUY"
+            shares = abs(int(quantity))
+            mult = "100" if (sec_type or "").upper() == "OPT" else "1"
             conn.execute(
                 """
-                INSERT INTO fills (draft_id, symbol, tactic, contracts, price, simulated, account_id, exec_id)
-                VALUES (NULL, %s, 'EXTERNAL', %s, %s, false, %s, %s)
+                INSERT INTO fills (
+                    draft_id, symbol, tactic, contracts, price, simulated, account_id, exec_id,
+                    side, sec_type, commission, commission_currency
+                )
+                VALUES (NULL, %s, 'EXTERNAL', %s, %s, false, %s, %s, %s, %s, %s, %s)
                 """,
-                (symbol, abs(int(quantity)), price, account, exec_id),
+                (symbol, shares, price, account, exec_id, book_side, sec_type, commission, commission_ccy),
             )
             conn.execute(
                 """
@@ -652,17 +672,25 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
             )
             conn.commit()
             noticed.append((
-                account, symbol, "EXTERNAL", "SELL" if side == "SLD" else "BUY", "", price, abs(int(quantity)),
+                account, symbol, "EXTERNAL", book_side, "", price, shares,
+                mult, commission, commission_ccy, sec_type or "STK",
             ))
             log.info("external fill symbol=%s price=%s", symbol, price)
             continue
-        order_id, draft_id, tactic, contracts, action = row
+        order_id, draft_id, tactic, contracts, action, multiplier = row
+        shares = abs(int(quantity)) if quantity is not None else (
+            None if contracts is None else abs(int(contracts))
+        )
+        mult = multiplier or ("100" if (sec_type or "").upper() == "OPT" else "1")
         conn.execute(
             """
-            INSERT INTO fills (draft_id, symbol, tactic, contracts, price, simulated, account_id, exec_id)
-            VALUES (%s, %s, %s, %s, %s, false, %s, %s)
+            INSERT INTO fills (
+                draft_id, symbol, tactic, contracts, price, simulated, account_id, exec_id,
+                side, sec_type, commission, commission_currency
+            )
+            VALUES (%s, %s, %s, %s, %s, false, %s, %s, %s, %s, %s, %s)
             """,
-            (draft_id, symbol, tactic, contracts, price, account, exec_id),
+            (draft_id, symbol, tactic, contracts, price, account, exec_id, action or "", sec_type, commission, commission_ccy),
         )
         conn.execute(
             """
@@ -674,7 +702,10 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
         conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
         conn.commit()
         _publish_order(account, order_id)
-        noticed.append((account, symbol, tactic, action, draft_id, price))
+        noticed.append((
+            account, symbol, tactic, action, draft_id, price, shares,
+            mult, commission, commission_ccy, sec_type or "STK",
+        ))
         log.info("fill order=%s symbol=%s price=%s", order_id, symbol, price)
     return noticed
 

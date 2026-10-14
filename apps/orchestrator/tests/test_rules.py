@@ -4,7 +4,7 @@ import logging
 import os
 import unittest
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -271,7 +271,7 @@ class RiskTest(unittest.TestCase):
             nav=Decimal("100000"),
             cash=Decimal("100000"),
             margin=Decimal("0"),
-            orders=0,
+            orders={},
             base="HKD",
             currency="HKD",
         )
@@ -289,7 +289,7 @@ class RiskTest(unittest.TestCase):
             nav=Decimal("1000"),
             cash=Decimal("1000"),
             margin=Decimal("0"),
-            orders=0,
+            orders={},
             base="HKD",
             currency="HKD",
             rates={"USD": Decimal("7.8")},
@@ -310,7 +310,7 @@ class RiskTest(unittest.TestCase):
             nav=Decimal("1000"),
             cash=Decimal("1000"),
             margin=Decimal("0"),
-            orders=0,
+            orders={},
             base="USD",
             currency="USD",
         )
@@ -322,7 +322,7 @@ class RiskTest(unittest.TestCase):
             nav=Decimal("100000"),
             cash=Decimal("100000"),
             margin=Decimal("0"),
-            orders=0,
+            orders={},
             base="USD",
             currency="USD",
         )
@@ -330,6 +330,48 @@ class RiskTest(unittest.TestCase):
             block_ticket_reason([unmarked], limits, {}, book=usd, symbol="ZZT", currency="USD"),
             "missing mark",
         )
+
+    def test_max_orders_per_day_is_per_symbol(self) -> None:
+        from athena_risk import walk_cycle
+
+        limits = _limits(max_orders_per_day=2, cash_reserve_pct=0, max_symbol_pct_nav=100, max_short_opt_margin_pct=100)
+        # Account already has two NVDA orders today; AMD still has room.
+        self.assertEqual(
+            block_reason(1, limits, orders_today=2),
+            "orders exceed max_orders_per_day",
+        )
+        self.assertIsNone(block_reason(1, limits, orders_today=1))
+        book = CycleBook(
+            nav=Decimal("1000000"),
+            cash=Decimal("1000000"),
+            margin=Decimal("0"),
+            orders={"NVDA": 2, "AMD": 0},
+            base="USD",
+            currency="USD",
+        )
+        leg = {
+            "tactic": "OPEN_CSP",
+            "contracts": 1,
+            "limit": Decimal("1"),
+            "put_strike": Decimal("100"),
+            "call_strike": None,
+            "multiplier": Decimal("100"),
+            "orders": 1,
+            "price": Decimal("100"),
+        }
+        judged = walk_cycle(
+            [
+                {"symbol": "NVDA", "reason": "open", "currency": "USD", "legs": [leg], "draft_ids": ["a"]},
+                {"symbol": "AMD", "reason": "open", "currency": "USD", "legs": [leg], "draft_ids": ["b"]},
+            ],
+            book,
+            limits,
+        )
+        by_symbol = {ticket["symbol"]: reason for ticket, reason, _order in judged}
+        self.assertEqual(by_symbol["NVDA"], "cycle orders")
+        self.assertIsNone(by_symbol["AMD"])
+        self.assertEqual(book.orders["AMD"], 1)
+        self.assertEqual(book.orders["NVDA"], 2)
 
     def test_position_cap_blocks_when_the_open_does_not_fit(self) -> None:
         limits = _limits(max_position_per_symbol=1000)
@@ -502,6 +544,21 @@ class OptionsAndSlotsTest(unittest.TestCase):
         broker.note_history_gap("QCOM", 200)
         self.assertFalse(broker.history_quiet("QCOM"))
 
+    def test_history_162_and_head_day_parsing(self) -> None:
+        from athena_exec.broker import _as_head_day, _history_162_kind
+        from athena_orchestrator.backfill import second_span
+
+        self.assertEqual(_history_162_kind("HMDS query returned no data"), "no_data")
+        self.assertEqual(_history_162_kind("No market data permissions for ISLAND STK"), "permission")
+        self.assertEqual(_history_162_kind("something else"), "other")
+        self.assertEqual(_as_head_day(datetime(2024, 3, 15, 9, 30, tzinfo=timezone.utc)), date(2024, 3, 15))
+        self.assertEqual(_as_head_day("20240315"), date(2024, 3, 15))
+        self.assertEqual(_as_head_day("2024-03-15"), date(2024, 3, 15))
+        self.assertIsNone(_as_head_day(""))
+        self.assertIsNone(second_span(date(2024, 3, 15), date(2024, 3, 15)))
+        self.assertEqual(second_span(date(2024, 6, 15), date(2024, 3, 15)), "92 D")
+        self.assertEqual(second_span(date(2024, 6, 15), None), "1 Y")
+
     def test_slot_clock(self) -> None:
         slots = IBSlots()
         monday = date(2026, 10, 5)
@@ -575,14 +632,32 @@ class OptionsAndSlotsTest(unittest.TestCase):
     def test_filled_is_only_an_athena_order(self) -> None:
         from athena_bots.telegram import fill_text
 
-        own = fill_text("U1", "SKHY", "MANUAL", "BUY", "draft_1", "151.5")
+        own = fill_text(
+            "U1", "SKHY", "MANUAL", "BUY", "draft_1", "151.5",
+            shares=10, multiplier="1", commission="1.25", commission_currency="USD",
+        )
         self.assertTrue(own.startswith("Filled BUY SKHY MANUAL"))
+        self.assertIn("10 @ 151.50", own)
+        self.assertIn("Cost $1,515", own)
+        self.assertIn("Fee 1.25 USD", own)
         self.assertIn("Draft draft_1", own)
         external = fill_text("U1", "SKHY", "EXTERNAL", "BOT", "", "152.12", 100)
-        self.assertEqual(external, "External buy SKHY\n100 at 152.12\nAccount U1")
+        self.assertEqual(
+            external,
+            "External buy SKHY\n100 @ 152.12\nCost $15,212\nAccount U1",
+        )
         self.assertNotIn("Filled", external)
         sold = fill_text("U1", "SKHY", "EXTERNAL", "SLD", "", "10", 5)
         self.assertTrue(sold.startswith("External sell SKHY"))
+        self.assertIn("Credit $50", sold)
+        option = fill_text(
+            "U1", "NVDA", "OPEN_CSP", "SELL", "draft_p", "2.15",
+            shares=1, multiplier="100", commission="0.65", commission_currency="USD", sec_type="OPT",
+        )
+        self.assertIn("1 @ 2.15", option)
+        self.assertIn("Credit $215", option)
+        self.assertIn("Multiplier 100", option)
+        self.assertIn("Fee 0.65 USD", option)
 
     def test_a_strike_from_another_class_is_not_quoted(self) -> None:
         from athena_exec.broker import _class_strikes
@@ -979,6 +1054,20 @@ class AgentsTest(unittest.TestCase):
         self.assertEqual(status, "ok")
         self.assertEqual(payload["drafts"], [])
         _payload, status, stage = parse_response("News", '{"news_wash":false,"sentiment":2}')
+        self.assertEqual((status, stage), ("invalid", "schema"))
+        payload, status, _stage = parse_response(
+            "Narrator", '{"open":true,"sentence":"ok","strike":null}'
+        )
+        self.assertEqual(status, "ok")
+        self.assertTrue(payload["open"])
+        payload, status, _stage = parse_response(
+            "Narrator", '{"open":false,"sentence":"quiet","strike":null}'
+        )
+        self.assertEqual(status, "ok")
+        self.assertFalse(payload["open"])
+        _payload, status, stage = parse_response(
+            "Narrator", '{"sentence":"missing open","strike":null}'
+        )
         self.assertEqual((status, stage), ("invalid", "schema"))
 
     def test_context_reads_rails_from_bars(self) -> None:
@@ -1548,6 +1637,43 @@ class PulseStreamTest(unittest.TestCase):
         self.assertIn('data-fit="left"', html)
         self.assertIn("SKHY", html)
 
+    def test_pulse_option_legs_are_expiry_right_strike_badges(self) -> None:
+        from athena_orchestrator.cockpit import _watch_row, option_badge
+        from athena_orchestrator.console import _watch_html
+
+        expiry = date(2026, 11, 20)
+        short_put = option_badge(expiry, "P", Decimal("210"), -1)
+        long_call = option_badge(expiry, "C", Decimal("250"), 2)
+        self.assertEqual(short_put, {"t": "20'NOV P 210", "cls": "red"})
+        self.assertEqual(long_call, {"t": "20'NOV C 250", "cls": "green"})
+        self.assertIsNone(option_badge(expiry, "P", Decimal("210"), 0))
+
+        positions = [
+            (Decimal("-1"), "OPT", expiry, "P", Decimal("210"), None),
+            (Decimal("2"), "OPT", expiry, "C", Decimal("250"), None),
+        ]
+        row = _watch_row(
+            "NVDA", None, "180.00", "—", "", "—", "", "", [], None,
+            positions, (expiry, Decimal("200"), Decimal("220")), False, date(2026, 10, 14),
+        )
+        self.assertEqual(
+            row["strikes"],
+            [
+                {"t": "20'NOV C 250", "cls": "green"},
+                {"t": "20'NOV P 210", "cls": "red"},
+            ],
+        )
+        html = _watch_html([row])
+        self.assertIn('class="tag red">20&#x27;NOV P 210</span>', html)
+        self.assertIn('class="tag green">20&#x27;NOV C 250</span>', html)
+        # Plan strikes alone do not fill the option column.
+        plan_only = _watch_row(
+            "FLAT", None, "10.00", "—", "", "—", "", "", [], None,
+            [], (expiry, Decimal("9"), Decimal("11")), False, date(2026, 10, 14),
+        )
+        self.assertEqual(plan_only["strikes"], [])
+        self.assertEqual(plan_only["dte"], str((expiry - date(2026, 10, 14)).days))
+
     def test_the_cockpit_log_column_spans_both_chart_rows(self) -> None:
         from athena_orchestrator.console import _cockpit_body
 
@@ -1647,6 +1773,157 @@ class PositionNlvTest(unittest.TestCase):
         self.assertIn("$1,560.00", card)
         self.assertIn("HKD", card)
         self.assertNotIn("mixed", card)
+
+    def test_open_pnl_row_shows_native_currency(self) -> None:
+        from athena_orchestrator.pages import _position_tr
+
+        html = _position_tr({
+            "symbol": "NVDA",
+            "qty": Decimal("10"),
+            "avg": Decimal("100"),
+            "sec_type": "STK",
+            "right": "",
+            "expiry": "",
+            "dte": "",
+            "strike": "",
+            "mark": "110.00",
+            "stored_close": False,
+            "market": Decimal("1100"),
+            "value": "1,100.00",
+            "pnl": Decimal("100"),
+            "currency": "USD",
+            "mult": "1",
+            "multiplier": "",
+            "realized": "",
+            "synced": "",
+            "simulated": False,
+        })
+        self.assertIn('class="mono pos-pnl chg-up">+100.00 USD</td>', html)
+        self.assertIn('class="mono pos-mark"', html)
+        self.assertIn('data-mult="1"', html)
+        short = _position_tr({
+            "symbol": "0700",
+            "qty": Decimal("-100"),
+            "avg": Decimal("300"),
+            "sec_type": "STK",
+            "right": "",
+            "expiry": "",
+            "dte": "",
+            "strike": "",
+            "mark": "310.00",
+            "stored_close": False,
+            "market": Decimal("-31000"),
+            "value": "-31,000.00",
+            "pnl": Decimal("-1000"),
+            "currency": "HKD",
+            "mult": "1",
+            "multiplier": "",
+            "realized": "",
+            "synced": "",
+            "simulated": False,
+        })
+        self.assertIn('class="mono pos-pnl chg-down">-1,000.00 HKD</td>', short)
+
+    def test_pulse_watch_includes_held_stocks(self) -> None:
+        from athena_orchestrator.pulse import held_stock_symbols, watch_symbols, working_order_symbols
+        from athena_settings.model import standard_payload
+
+        class Conn:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params=None):
+                self.calls.append((sql, params))
+                class Rows:
+                    def fetchall(self_inner):
+                        if "FROM positions" in sql:
+                            return [("NVDA",), ("AAPL",)]
+                        if "FROM orders" in sql:
+                            return [("AMD",)]
+                        return []
+                return Rows()
+
+        conn = Conn()
+        self.assertEqual(held_stock_symbols(conn, "U1"), ["NVDA", "AAPL"])
+        self.assertEqual(working_order_symbols(conn, "U1"), ["AMD"])
+        settings = standard_payload().model_copy(
+            update={"watchlist": ["TSLA", "META"], "blocked_symbols": ["META"]},
+        )
+        with patch("athena_settings.load_active", return_value=settings):
+            # Disabled pool names stay on the pulse list so universe rows can update.
+            self.assertEqual(watch_symbols(conn, "U1"), ["TSLA", "META", "NVDA", "AAPL", "AMD"])
+
+    def test_universe_pool_row_has_live_price_hooks(self) -> None:
+        from athena_orchestrator.console import _CLIENT_JS
+        from athena_orchestrator.pages import _pool_row
+        from athena_settings.model import standard_payload
+
+        settings = standard_payload().model_copy(update={"blocked_symbols": ["ZZT"]})
+        with patch("athena_orchestrator.pages._closes", return_value=("10.00", "+1.00%", "chg-up")), patch(
+            "athena_orchestrator.pages._year_band", return_value=(DASH, DASH, DASH)
+        ), patch(
+            "athena_orchestrator.pages._phase_row", return_value=("", "", "")
+        ), patch(
+            "athena_orchestrator.pages._pool_profile", return_value=("", None, "", "")
+        ), patch(
+            "athena_orchestrator.pages._rank_text", return_value=DASH
+        ):
+            html = _pool_row(object(), "ZZTEST", settings, "ZZT")
+        self.assertIn('class="mono pool-px"', html)
+        self.assertIn('class="mono pool-chg chg-up"', html)
+        self.assertIn('data-symbol="ZZT"', html)
+        self.assertIn('style="opacity:.45"', html)
+        self.assertIn("function paintPoolTick", _CLIENT_JS)
+        self.assertIn('getElementById("pool-table")', _CLIENT_JS)
+
+    def test_order_gap_and_cost_from_limit_and_last(self) -> None:
+        from athena_orchestrator.pages import _order_cost, _order_gap
+
+        text, tone = _order_gap(Decimal("105"), Decimal("100"))
+        self.assertEqual(text, "+5.00%")
+        self.assertEqual(tone, "chg-up")
+        below, down = _order_gap(Decimal("95"), Decimal("100"))
+        self.assertEqual(below, "-5.00%")
+        self.assertEqual(down, "chg-down")
+        self.assertEqual(_order_gap(None, Decimal("100")), (DASH, ""))
+        self.assertEqual(_order_cost(10, Decimal("12.5"), None, "1"), "125.00")
+        self.assertEqual(_order_cost(2, Decimal("1.5"), None, "100"), "300.00")
+        self.assertEqual(_order_cost(10, None, Decimal("20"), "1"), "200.00")
+
+    def test_order_row_has_live_price_hooks(self) -> None:
+        from athena_orchestrator.console import _CLIENT_JS
+        from athena_orchestrator.pages import _order_tr, _orders_table
+
+        row = {
+            "id": "ord_zz",
+            "account": "U1",
+            "when": "2026-10-14 12:00",
+            "symbol": "ZZT",
+            "action": "BUY",
+            "qty": 10,
+            "filled": None,
+            "order_type": "LMT",
+            "limit": Decimal("100"),
+            "stop": None,
+            "status": "Submitted",
+            "bucket": "working",
+            "ib": "1",
+            "tactic": "MANUAL",
+            "kind": "stk",
+            "mult": "1",
+        }
+        with patch("athena_orchestrator.pages._closes", return_value=("98.00", "-1.00%", "chg-down")):
+            html = _order_tr(object(), row)
+        self.assertIn('class="mono order-gap chg-up"', html)
+        self.assertIn("+2.04%", html)
+        self.assertIn('class="mono order-cost">1,000.00</td>', html)
+        self.assertIn('data-symbol="ZZT"', html)
+        self.assertIn('data-kind="stk"', html)
+        table = _orders_table("")
+        self.assertIn(">vs last<", table)
+        self.assertIn(">Est. cost<", table)
+        self.assertIn("function paintOrderTick", _CLIENT_JS)
+        self.assertIn('getElementById("orders-feed")', _CLIENT_JS)
 
     def test_open_pnl_converts_and_colors_the_subtitle(self) -> None:
         from athena_orchestrator.pages import _position_pnl_stat
@@ -1889,7 +2166,7 @@ class BlockedDraftsTest(unittest.TestCase):
                 return (0,)
 
         with (
-            patch("athena_orchestrator.console._account", return_value="U9390859"),
+            patch("athena_orchestrator.console._account", return_value="U1"),
             patch("athena_orchestrator.sim.progress", return_value={"status": "idle", "total": 0, "day": 0}),
         ):
             badges = _nav_badges(Conn())
@@ -1935,13 +2212,13 @@ class BlockedDraftsTest(unittest.TestCase):
                 return stored
 
         conn = Conn()
-        rows, more, nxt = _decision_slice(conn, "U9390859", 0)
+        rows, more, nxt = _decision_slice(conn, "U1", 0)
         self.assertIn("status = 'blocked'", " ".join(conn.sql.split()))
         self.assertEqual(conn.params[9], _PAGE + 1)
         self.assertEqual(len(rows), _PAGE)
         self.assertTrue(more)
         self.assertEqual(nxt, _PAGE)
-        page = _drafts(conn, "U9390859", {"partial": ["rows"], "offset": ["50"]})
+        page = _drafts(conn, "U1", {"partial": ["rows"], "offset": ["50"]})
         payload = json.loads(page["body"])
         self.assertIn("SKHY", payload["html"])
         self.assertIn(">BLOCKED<", payload["html"])
@@ -1965,7 +2242,7 @@ class BlockedDraftsTest(unittest.TestCase):
                 return []
 
         conn = Conn()
-        _decision_slice(conn, "U9390859", 0, "blocked", "margin%")
+        _decision_slice(conn, "U1", 0, "blocked", "margin%")
         self.assertIn("decision = %s", conn.sql)
         self.assertEqual(conn.params[2], "blocked")
         self.assertIn("%margin\\%%", conn.params)
@@ -1985,9 +2262,38 @@ class BlockedDraftsTest(unittest.TestCase):
         self.assertTrue(_history_visible(filled, "all", "skhy"))
         self.assertFalse(_history_visible(filled, "all", "nvda"))
         page = _history(None, "", {})
-        self.assertEqual(page["lead"], "Fills and approvals for this account.")
+        self.assertIn("Open a row for size, cost, fees", page["lead"])
         self.assertIn('data-status="filled"', page["body"])
         self.assertIn('data-status="approved"', page["body"])
         self.assertIn('data-status="rejected"', page["body"])
         self.assertIn("No fills or approvals yet.", page["body"])
         self.assertIn('id="history-keyword"', page["body"])
+        self.assertIn(">Detail<", page["body"])
+
+    def test_history_detail_summarizes_fill_cost_and_fee(self) -> None:
+        from athena_orchestrator.console import _CLIENT_JS
+        from athena_orchestrator.pages import _history_detail, _history_item, _history_tr
+
+        when = datetime(2026, 10, 14, 4, 0, tzinfo=timezone.utc)
+        item = _history_item(
+            when, "ZZT", "MANUAL", "P2", "filled", Decimal("-1000"), "ada", "buy dip",
+            side="BUY", qty=10, price=Decimal("100"), multiplier="1",
+            commission=Decimal("1.25"), commission_currency="USD", exec_id="exec1", sec_type="STK",
+        )
+        self.assertEqual(item["detail"], "BUY 10 @ 100.00 · cost $1,000 · fee 1.25 USD")
+        self.assertEqual(_history_detail({"status": "approved", "reason": "ok", "actor": "ada"}), "ok")
+        html = _history_tr(item)
+        self.assertIn('class="mono hist-detail"', html)
+        self.assertIn("data-json=", html)
+        self.assertIn("fee 1.25 USD", html)
+        self.assertIn('cmd === "history-row"', _CLIENT_JS)
+        self.assertIn("Notional", _CLIENT_JS)
+
+    def test_fill_commission_ignores_ib_unset(self) -> None:
+        from types import SimpleNamespace
+
+        from athena_exec.broker import _fill_commission
+
+        self.assertIsNone(_fill_commission(None))
+        self.assertEqual(_fill_commission(SimpleNamespace(commission=1.25)), Decimal("1.25"))
+        self.assertIsNone(_fill_commission(SimpleNamespace(commission=1e308)))

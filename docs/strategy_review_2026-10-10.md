@@ -3,7 +3,7 @@
 Date: 10 Oct 2026
 Scope: the signaled-entry loop (`run_signaled` in `packages/strategy-nfr/src/athena_strategy/agents.py`), the seven
 agent prompts (`packages/settings/src/athena_settings/prompts.py`), the tag sources (`iv.py`, `price.py`, `news.py`),
-the risk gate (`packages/risk/src/athena_risk/__init__.py`), and the audit trail in the paper book (DUR253115).
+the risk gate (`packages/risk/src/athena_risk/__init__.py`), and the audit trail in the paper book (PAPER1).
 
 Goal restated: detect signals that produce drafts of Long, CSP, and CC permutations — single or multiple.
 CC only exists when a Long (shares) exists. Example shape: an orderly market dip (the June AI-risk pullback) should

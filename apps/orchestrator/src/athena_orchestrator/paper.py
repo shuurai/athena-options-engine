@@ -142,9 +142,16 @@ def _live_session(conn, settings, account: str, session_ids: set[str]) -> None:
     for notice in noticed:
         account_id, symbol, tactic, action, draft_id, price = notice[:6]
         shares = notice[6] if len(notice) > 6 else None
-        log.info("fill notice symbol=%s price=%s", symbol, price)
+        multiplier = notice[7] if len(notice) > 7 else None
+        commission = notice[8] if len(notice) > 8 else None
+        commission_ccy = notice[9] if len(notice) > 9 else ""
+        sec_type = notice[10] if len(notice) > 10 else ""
+        log.info("fill notice symbol=%s price=%s qty=%s", symbol, price, shares)
         try:
-            notify_fill(account_id, symbol, tactic, action, draft_id, price, shares)
+            notify_fill(
+                account_id, symbol, tactic, action, draft_id, price, shares,
+                multiplier, commission, commission_ccy, sec_type,
+            )
         except RuntimeError as exc:
             log.error("%s", exc)
 

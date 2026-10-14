@@ -392,10 +392,19 @@ def _positions(conn, account: str, symbol: str) -> list[tuple]:
     ).fetchall()
     kept: dict[tuple, tuple] = {}
     for row in found:
-        key = (row[1], row[3], row[4])
+        key = (row[1], row[2], row[3], row[4])
         if key not in kept:
             kept[key] = row
     return list(kept.values())
+
+
+def option_badge(expiry: date | None, right: str | None, strike, quantity) -> dict | None:
+    """One open option leg as a pulse badge: 20'NOV P 210. Green long, red short."""
+    qty = Decimal(quantity)
+    if qty == 0 or not right or strike is None or expiry is None:
+        return None
+    label = f"{expiry.day}'{expiry.strftime('%b').upper()} {right} {_whole(strike)}"
+    return {"t": label, "cls": "green" if qty > 0 else "red"}
 
 
 def _watch_row(symbol, phase, price, change, tone, band, high_pct, low_pct, samples, rank, positions, plan, has_draft, today: date) -> dict:
@@ -418,16 +427,22 @@ def _watch_row(symbol, phase, price, change, tone, band, high_pct, low_pct, samp
         elif sec_type == "OPT" and qty < 0 and right == "C":
             short_call = True
             side.append({"t": "SHORT CALL", "cls": "teal"})
-        if strike is not None and sec_type == "OPT":
-            strikes.append(_whole(strike))
-        if expiry is not None:
-            expiries.append(expiry)
+        elif sec_type == "OPT" and qty > 0 and right == "P":
+            side.append({"t": "LONG PUT", "cls": "green"})
+        elif sec_type == "OPT" and qty > 0 and right == "C":
+            side.append({"t": "LONG CALL", "cls": "green"})
+        if sec_type == "OPT":
+            badge = option_badge(expiry, right, strike, qty)
+            if badge is not None:
+                strikes.append(badge)
+            if expiry is not None:
+                expiries.append(expiry)
     if long_shares and short_call:
         side.append({"t": "CC", "cls": "teal"})
     if not side:
         side = [{"t": "FLAT", "cls": ""}]
-    if not strikes and plan is not None:
-        strikes = [_whole(plan[1]), _whole(plan[2])]
+    # Planned screener strikes are not open legs — leave the strike column empty.
+    if not expiries and plan is not None and plan[0] is not None:
         expiries.append(plan[0])
     dte = ""
     future = [item for item in expiries if item is not None]
@@ -438,6 +453,7 @@ def _watch_row(symbol, phase, price, change, tone, band, high_pct, low_pct, samp
         status.append({"t": "DRAFT", "cls": "blue"})
     elif long_shares and short_call:
         status.append({"t": "COVERED", "cls": "green"})
+    strikes.sort(key=lambda item: item["t"])
     return {
         "symbol": symbol,
         "price": price,

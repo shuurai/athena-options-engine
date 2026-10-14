@@ -141,13 +141,15 @@ def _baseline(conn, settings: SettingsPayload, account_id: str) -> CycleBook:
         """,
         (account_id,),
     ).fetchone()
-    orders = conn.execute(
+    order_rows = conn.execute(
         """
-        SELECT count(*) FROM orders
+        SELECT upper(symbol), count(*) FROM orders
         WHERE account_id = %s AND status <> 'blocked' AND created_at::date = CURRENT_DATE
+        GROUP BY upper(symbol)
         """,
         (account_id,),
-    ).fetchone()[0]
+    ).fetchall()
+    orders = {str(symbol): int(count) for symbol, count in order_rows if symbol}
     rates = {}
     if mark is not None and mark[3]:
         rates = {str(key): Decimal(str(value)) for key, value in mark[3].items()}
@@ -156,7 +158,7 @@ def _baseline(conn, settings: SettingsPayload, account_id: str) -> CycleBook:
         nav=None if nav is None else Decimal(nav[0]),
         cash=None if mark is None else Decimal(mark[0]),
         margin=None if mark is None or mark[1] is None else Decimal(mark[1]),
-        orders=int(orders),
+        orders=orders,
         base=base,
         rates=rates,
     )

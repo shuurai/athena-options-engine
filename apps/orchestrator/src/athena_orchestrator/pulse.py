@@ -132,12 +132,78 @@ def ib_move(conn, symbol: str) -> tuple[str, str, str]:
     return price, f"{change:+.2f}%", tone
 
 
-def snapshot(conn, account: str) -> dict:
-    from athena_orchestrator.cockpit import sleeve
+def held_stock_symbols(conn, account: str) -> list[str]:
+    """Open stock names on this book. Used so positions keep a live print."""
+    if not account:
+        return []
+    rows = conn.execute(
+        """
+        SELECT DISTINCT symbol
+        FROM positions
+        WHERE account_id = %s AND COALESCE(sec_type, 'STK') = 'STK' AND quantity <> 0
+        ORDER BY symbol
+        """,
+        (account,),
+    ).fetchall()
+    return [row[0] for row in rows if row[0]]
+
+
+def working_order_symbols(conn, account: str) -> list[str]:
+    """Underlyings with a working order. Used so /orders can refresh vs last."""
+    if not account:
+        return []
+    rows = conn.execute(
+        """
+        SELECT DISTINCT symbol
+        FROM orders
+        WHERE account_id = %s
+          AND status NOT IN ('blocked', 'filled', 'cancelled')
+          AND COALESCE(ib_status, '') NOT IN ('Filled', 'Cancelled', 'ApiCancelled', 'Inactive')
+          AND expiry IS NULL AND strike IS NULL AND COALESCE(contract_right, '') = ''
+        ORDER BY symbol
+        """,
+        (account,),
+    ).fetchall()
+    return [row[0] for row in rows if row[0]]
+
+
+def watch_symbols(conn, account: str) -> list[str]:
+    """Full universe pool (enabled or not), open stocks, and working stock orders."""
     from athena_settings import load_active
 
-    settings = load_active(conn, account) if account else None
-    symbols = enabled_symbols(settings) if settings else []
+    names: list[str] = []
+    seen: set[str] = set()
+    if account:
+        try:
+            settings = load_active(conn, account)
+        except RuntimeError:
+            settings = None
+        if settings is not None:
+            for symbol in settings.watchlist:
+                key = symbol.upper()
+                if key in seen:
+                    continue
+                seen.add(key)
+                names.append(symbol)
+        for symbol in held_stock_symbols(conn, account):
+            key = symbol.upper()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(symbol)
+        for symbol in working_order_symbols(conn, account):
+            key = symbol.upper()
+            if key in seen:
+                continue
+            seen.add(key)
+            names.append(symbol)
+    return names
+
+
+def snapshot(conn, account: str) -> dict:
+    from athena_orchestrator.cockpit import sleeve
+
+    symbols = watch_symbols(conn, account)
     note_view(symbols, account)
     facts = sleeve(conn, account) if account else {}
     return {

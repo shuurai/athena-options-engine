@@ -5,7 +5,7 @@
 
 ## 0. 落地结论
 
-配置与开关在 `wheel.may_buy`、`slots.observe_allowed` / `draft_allowed`、`agents.run_observe`、`paper_payload`、迁移 `040`。活账户 `DUR253115` 仍是 `test` 档，没有切到 `paper`。
+配置与开关在 `wheel.may_buy`、`slots.observe_allowed` / `draft_allowed`、`agents.run_observe`、`paper_payload`、迁移 `040`。活账户 `PAPER1` 仍是 `test` 档，没有切到 `paper`。
 
 **已落地**
 
@@ -28,7 +28,7 @@
 
 **仍是操作步骤，不是未做的代码**
 
-- 多日影子对照没有在 `DUR253115` 上跑。夹具都在 `ZZTEST`。`paper` 档只在 `ZZTEST` 上保存过，保存后已把该账户的活动行恢复。
+- 多日影子对照没有在 `PAPER1` 上跑。夹具都在 `ZZTEST`。`paper` 档只在 `ZZTEST` 上保存过，保存后已把该账户的活动行恢复。
 - 成本对照是一次调用数：观察写 Location 与 News，完整一轮再写 Narrator。没有多日 `ai_calls` 行数对比。
 - 没有 `ATHENA_PRICE_SINGLE_SOURCE`。回滚测的是现有六个开关一起关掉后仍写一条审计。不是原稿的七个开关逐一对照改造前。
 - 旧字段名在模型、风控、提示词、界面标签里已消失。迁移 `040` 与本套计划文档仍写出旧名，用来完成改名。Volatility reading 卡仍是步 9。

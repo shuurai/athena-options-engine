@@ -125,7 +125,7 @@ class CycleBook:
     nav: Decimal | None
     cash: Decimal | None
     margin: Decimal | None
-    orders: int | None
+    orders: dict[str, int] | None
     currency: str = ""
     base: str = ""
     rates: dict = field(default_factory=dict)
@@ -139,7 +139,7 @@ class CycleBook:
             self.nav,
             self.cash,
             self.margin,
-            self.orders,
+            None if self.orders is None else dict(self.orders),
             self.currency,
             self.base,
             dict(self.rates),
@@ -152,7 +152,7 @@ class CycleBook:
     def take(self, other: "CycleBook") -> None:
         self.cash = other.cash
         self.margin = other.margin
-        self.orders = other.orders
+        self.orders = None if other.orders is None else dict(other.orders)
         self.buckets = dict(other.buckets)
         self.assignment = other.assignment
         self.secured = other.secured
@@ -393,7 +393,8 @@ def _cycle_reason(ticket: dict, limits: RiskLimits, book: CycleBook) -> str | No
             return "cycle margin"
     if book.orders is not None:
         fresh = sum(int(leg.get("orders") or 1) for leg in legs)
-        if int(book.orders) + fresh > limits.max_orders_per_day:
+        used = int(book.orders.get(symbol.upper(), 0))
+        if used + fresh > limits.max_orders_per_day:
             return "cycle orders"
     bucket_add = _sum_legs(legs, _bucket_amount)
     if bucket_add is not None and bucket_add > 0 and book.nav is not None and book.nav > 0:
@@ -446,7 +447,10 @@ def _absorb(book: CycleBook, ticket: dict, limits: RiskLimits) -> None:
         if booked is not None:
             book.margin += booked
     if book.orders is not None:
-        book.orders += sum(int(leg.get("orders") or 1) for leg in legs)
+        key = symbol.upper()
+        book.orders[key] = int(book.orders.get(key, 0)) + sum(
+            int(leg.get("orders") or 1) for leg in legs
+        )
     bucket_add = _sum_legs(legs, _bucket_amount)
     if bucket_add is not None:
         booked = _to_book(bucket_add, currency, book.base, book.rates)

@@ -114,9 +114,14 @@ def _standing_agents() -> dict[str, AgentPrompt]:
         "CSP": AgentPrompt(
             system=(
                 "You may propose one cash-secured put, or stay quiet.\n"
-                "Propose only when LOWER_RAIL, {{range_low_tag}}, PULLBACK, OVERSOLD, SUPPORT_TOUCH, DIP_BOUGHT, or TREND_STRONG is present.\n"
+                "Propose only when LOWER_RAIL, {{range_low_tag}}, PULLBACK, OVERSOLD, SUPPORT_TOUCH, "
+                "DIP_BOUGHT, WEEK_DIP, or TREND_STRONG is present.\n"
                 "PULLBACK is a mega-cap dip inside a rising channel. Other names do not get that tag.\n"
                 "DIP_BOUGHT means a deep rail position was reclaimed while the channel is still rising.\n"
+                "WEEK_DIP means the last few sessions pulled back inside the drawdown band versus the "
+                "window high and the last close is above the window low. Weigh it with TREND_STRONG, "
+                "TREND_WEAK, DRAWDOWN_OK, RECLAIM, and {{range_high_tag}} / {{range_low_tag}} "
+                "(52-week place when that range is available).\n"
                 "Choose one listed put from the first table. screener_pick is the default when you have no other reason. Ignore a later strangle table. Do not name a strike that is not in the first table.\n"
                 "The limit is the price to sell, not a marketable through-price.\n"
                 "Do not choose a size.\n"
@@ -224,14 +229,35 @@ def _standing_agents() -> dict[str, AgentPrompt]:
         ),
         "Narrator": AgentPrompt(
             system=(
-                "You explain one ticket the code has already chosen. You do not choose the tactic.\n"
-                "You may name one strike from the list. If you name any other strike, that leg is dropped.\n"
-                "You may not add a leg, change the size, or clear a refusal.\n"
-                'Reply with JSON only: {"sentence":"","strike":null}'
+                "The code proposes one candidate ticket. You decide whether to open a draft.\n"
+                "Set open true only when the tags, numbers, strategy knobs, and risk limits support "
+                "that ticket. Set open false to stay quiet.\n"
+                "Tag meanings: WEEK_DIP is a short-term pullback in the last dip_window sessions "
+                "inside the drawdown band versus the window high with a slight bounce above the "
+                "window low. TREND_STRONG / TREND_WEAK describe the 63-session channel. "
+                "DRAWDOWN_OK is an orderly 63-session drawdown band. RECLAIM is a bounce versus "
+                "the recent mean or prior high. HIGH_52W / LOW_52W (or HIGH_RANGE / LOW_RANGE) "
+                "are place in the longer range. Weigh short-term dip tags with 52-week place and "
+                "trend; do not open only because WEEK_DIP is present.\n"
+                "You do not choose the tactic. You may name one strike from the list. "
+                "If you name any other strike, that leg is dropped.\n"
+                "You may not add a leg, change the size, or clear a hard refusal already applied.\n"
+                'Reply with JSON only: {"open":true,"sentence":"","strike":null} '
+                'or {"open":false,"sentence":"","strike":null}'
             ),
             execution=(
                 "Symbol: {{symbol}}\nTicket: {{ticket}}\nTags: {{tags}}\n"
-                "Listed strikes: {{strikes}}\nNumbers: {{numbers}}"
+                "Listed strikes: {{strikes}}\nNumbers: {{numbers}}\n"
+                "Intent: {{intent}}\nFlags: {{flags}}\n"
+                "Dip window sessions: {{dip_window}}\n"
+                "Drawdown band pct: {{drawdown_band_low}} to {{drawdown_band_high}}\n"
+                "DTE target: {{dte_target}}\n"
+                "Min DTE: {{min_dte}}\n"
+                "Min RV pctl new short: {{min_rv_pctl}}\n"
+                "Earnings blackout days: {{earnings_blackout}}\n"
+                "Cash reserve pct: {{cash_reserve}}\n"
+                "Contract cap: {{contract_cap}}\n"
+                "Position cap: {{position_cap}}"
             ),
         ),
     }

@@ -7,6 +7,7 @@ from athena_settings.repository import (
     load_active,
     seed_standard_if_empty,
     set_knob,
+    sync_standing_agents,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "seed_standard_if_empty",
     "set_knob",
     "standard_payload",
+    "sync_standing_agents",
 ]

@@ -56,6 +56,7 @@ PULLBACK = "PULLBACK"
 TREND_STRONG = "TREND_STRONG"
 TREND_WEAK = "TREND_WEAK"
 DIP_BOUGHT = "DIP_BOUGHT"
+WEEK_DIP = "WEEK_DIP"
 DRAWDOWN_OK = "DRAWDOWN_OK"
 VOLUME_DRY = "VOLUME_DRY"
 ATR_WIDE = "ATR_WIDE"
@@ -89,6 +90,7 @@ TAG_REGISTRY: dict[str, TagSpec] = {
         _spec(TREND_STRONG, "indicators", "bull"),
         _spec(TREND_WEAK, "indicators", "bear"),
         _spec(DIP_BOUGHT, "indicators", "bull", requires=(TREND_STRONG,)),
+        _spec(WEEK_DIP, "indicators", "bull"),
         _spec(DRAWDOWN_OK, "indicators", "bull"),
         _spec(VOLUME_DRY, "indicators", "bull"),
         _spec(ATR_WIDE, "indicators", "neutral"),

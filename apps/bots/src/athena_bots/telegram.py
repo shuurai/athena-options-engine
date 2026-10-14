@@ -91,19 +91,97 @@ def fill_text(
     draft_id: str,
     price: object | None,
     shares: int | None = None,
+    multiplier: object | None = None,
+    commission: object | None = None,
+    commission_currency: str = "",
+    sec_type: str = "",
 ) -> str:
     """One execution notice. Filled is only for an Athena order."""
+    detail = _fill_detail(
+        action, price, shares, multiplier, commission, commission_currency, sec_type,
+    )
     if (tactic or "").upper() == "EXTERNAL":
         verb = "sell" if str(action).upper() in {"SLD", "SELL"} else "buy"
-        if shares is not None and price is not None:
-            amount = f"{shares} at {price}"
-        elif price is not None:
-            amount = f"Price {price}"
-        else:
-            amount = "Price unknown"
-        return f"External {verb} {symbol}\n{amount}\nAccount {account_id}"
-    price_line = f"Price {price}" if price is not None else "IB reports the order filled."
-    return f"Filled {action} {symbol} {tactic}\n{price_line}\nAccount {account_id}\nDraft {draft_id}"
+        body = "\n".join(detail) if detail else "Price unknown"
+        return f"External {verb} {symbol}\n{body}\nAccount {account_id}"
+    lines = [f"Filled {action} {symbol} {tactic}"]
+    lines.extend(detail or ["IB reports the order filled."])
+    lines.append(f"Account {account_id}")
+    if draft_id:
+        lines.append(f"Draft {draft_id}")
+    return "\n".join(lines)
+
+
+def _fill_detail(
+    action: str,
+    price: object | None,
+    shares: int | None,
+    multiplier: object | None,
+    commission: object | None,
+    commission_currency: str,
+    sec_type: str,
+) -> list[str]:
+    """Qty, fill price, notional, and fee when IB (or Athena) provided them."""
+    from decimal import Decimal
+
+    lines: list[str] = []
+    try:
+        qty = None if shares is None else Decimal(str(shares))
+    except Exception:
+        qty = None
+    try:
+        unit = None if price is None else Decimal(str(price).replace(",", ""))
+    except Exception:
+        unit = None
+    try:
+        mult = Decimal(str(multiplier)) if multiplier not in (None, "") else (
+            Decimal("100") if (sec_type or "").upper() == "OPT" else Decimal("1")
+        )
+    except Exception:
+        mult = Decimal("1")
+    if mult <= 0:
+        mult = Decimal("1")
+    if qty is not None and unit is not None:
+        lines.append(f"{_fill_qty(qty)} @ {_fill_money(unit)}")
+    elif unit is not None:
+        lines.append(f"Price {_fill_money(unit)}")
+    elif qty is not None:
+        lines.append(f"Qty {_fill_qty(qty)}")
+    if qty is not None and unit is not None:
+        cash = abs(qty * unit * mult)
+        side = str(action or "").upper()
+        label = "Credit" if side in {"SELL", "SLD"} else "Cost" if side in {"BUY", "BOT"} else "Notional"
+        lines.append(f"{label} ${_fill_money(cash)}")
+        if mult != 1:
+            lines.append(f"Multiplier {mult:g}")
+    if commission is not None:
+        try:
+            fee = abs(Decimal(str(commission)))
+        except Exception:
+            fee = None
+        if fee is not None:
+            ccy = (commission_currency or "").strip()
+            lines.append(f"Fee {_fill_money(fee)}" + (f" {ccy}" if ccy else ""))
+    return lines
+
+
+def _fill_money(value) -> str:
+    from decimal import Decimal
+
+    number = Decimal(value)
+    if number == number.to_integral():
+        return f"{int(number):,}"
+    return f"{number:,.2f}"
+
+
+def _fill_qty(value) -> str:
+    from decimal import Decimal
+
+    number = Decimal(value)
+    if number == number.to_integral():
+        return f"{int(number):,}"
+    text = f"{number:,.4f}".rstrip("0").rstrip(".")
+    return text
 
 
 def notify_fill(
@@ -114,9 +192,16 @@ def notify_fill(
     draft_id: str,
     price: object | None = None,
     shares: int | None = None,
+    multiplier: object | None = None,
+    commission: object | None = None,
+    commission_currency: str = "",
+    sec_type: str = "",
 ) -> None:
     """Tell the allowlist about an execution. No-op when the token is empty."""
-    _send_plain(fill_text(account_id, symbol, tactic, action, draft_id, price, shares))
+    _send_plain(fill_text(
+        account_id, symbol, tactic, action, draft_id, price, shares,
+        multiplier, commission, commission_currency, sec_type,
+    ))
     log.info("telegram fill symbol=%s draft=%s", symbol, draft_id)
 
 

@@ -26,6 +26,7 @@ from athena_strategy.tags import (
     TREND_STRONG,
     TREND_WEAK,
     VOLUME_DRY,
+    WEEK_DIP,
 )
 
 _ET = ZoneInfo("America/New_York")
@@ -52,6 +53,7 @@ class Indicators:
     earnings_in: int | None = None
     news_score: Decimal | None = None
     regime_unknown: bool = True
+    week_dip: bool = False
 
     def line(self) -> str:
         """Prompt numbers. There is no iv field."""
@@ -101,6 +103,9 @@ def compute(
     reading = Indicators(earnings_in=earnings_in, news_score=news_score)
     _rails(reading, bars, strategy)
     _reclaim(reading, bars, strategy)
+    reading.week_dip = week_dip(bars, strategy)
+    if reading.week_dip:
+        reading.tags.add(WEEK_DIP)
     if _volume_ok(bars):
         _volume(reading, bars, strategy)
         _atr(reading, bars, strategy)
@@ -108,6 +113,33 @@ def compute(
     _range(reading, bars, strategy)
     _regime(reading, regime_bars, strategy)
     return reading
+
+
+def week_dip(bars: list[Bar], strategy: StrategySettings) -> bool:
+    """True when the last dip_window_sessions show a banded pullback and a slight bounce.
+
+    Uses the window high and low. Last close must sit inside the drawdown band
+    under that high and above the window low. Emits WEEK_DIP when true; openings
+    still need the Narrator open gate on the live wheel path.
+    """
+    window_n = strategy.dip_window_sessions
+    if window_n < 2 or len(bars) < window_n:
+        return False
+    window = bars[-window_n:]
+    week_high = max(bar.high for bar in window)
+    week_low = min(bar.low for bar in window)
+    last = window[-1].close
+    if week_high <= 0 or week_low >= week_high:
+        return False
+    if last <= week_low:
+        return False
+    high_at = max(index for index, bar in enumerate(window) if bar.high == week_high)
+    if high_at >= window_n - 1:
+        return False
+    drawdown = (last - week_high) / week_high * _HUNDRED
+    deep = Decimal(str(strategy.drawdown_band_high_pct))
+    shallow = Decimal(str(strategy.drawdown_band_low_pct))
+    return -deep <= drawdown <= -shallow
 
 
 def read_indicators(conn: psycopg.Connection, settings: SettingsPayload, symbol: str) -> Indicators:

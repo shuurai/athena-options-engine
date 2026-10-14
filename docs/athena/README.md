@@ -59,7 +59,7 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 
 | Item | Decision |
 |------|----------|
-| **IB account** | **Configurable.** Athena uses whatever `ATHENA_IB_ACCOUNT_ID` (and optional multi-account list) you set. Treat IB accounts as virtual/config entries — not tied to a single hard-coded fanit id. Example seed from fanit: Relaxed `U3726383-BOT` — change freely. |
+| **IB account** | **Configurable.** Athena uses whatever `ATHENA_IB_ACCOUNT_ID` (and optional multi-account list) you set. Treat IB accounts as virtual/config entries — not tied to a single hard-coded fanit id. Example seed from fanit: Relaxed `U2-BOT` — change freely. |
 | **fanit sync** | **Later** — after stable live fills; Athena is SoR until then. |
 | **Bots** | **Stub OK** for now. Telegram: connection page must include a simple connect guide (see [05-human-control.md](05-human-control.md)). Feishu stub until app created. |
 | **Backup offsite** | **MinIO locally** first (S3 API). Real remote S3 later via same env vars ([08](08-ops-backup-remote.md), [`.env.example`](../../.env.example)). |

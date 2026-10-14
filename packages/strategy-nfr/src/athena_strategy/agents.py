@@ -319,7 +319,7 @@ def run_legacy_signaled(conn: psycopg.Connection, settings: SettingsPayload, acc
 
 
 def _run_wheel_pass(conn: psycopg.Connection, settings: SettingsPayload, account_id: str) -> list[str]:
-    """Location, News, then one code ticket. Narrator may only explain or pick a listed strike."""
+    """Location, News, code candidate, then Narrator open/quiet before any draft."""
     created: list[str] = []
     for symbol in settings.watchlist:
         try:
@@ -367,16 +367,34 @@ def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: 
         answers[name] = payload
     tags = set(_tag_set(context, answers))
     preview = decide_opening(conn, settings, account_id, symbol, tags)
+    if preview.outcome != "drafted":
+        return execute_opening(conn, settings, account_id, symbol, tags)
     menu = preview.call_lines or preview.put_lines
     context["tags"] = ", ".join(sorted(tags)) or "none"
     context["ticket"] = preview.reason or preview.quiet or "quiet"
     context["strikes"] = ", ".join(str(line.strike) for line in menu) or "none"
     prompt = prompts["Narrator"]
-    payload, _stop = _ask(
+    payload, stop = _ask(
         conn, account_id, "Narrator", symbol, model, provider, token,
         prompt.system, fill_prompt(prompt.execution, context), bool(prompt.reasoning),
     )
+    if stop:
+        write_decision(
+            conn, account_id, symbol, "wheel", "invalid", stop,
+            {"items": [_step("Narrator", "dropped", stop)], "reason": preview.reason},
+        )
+        return []
     sentence = str((payload or {}).get("sentence") or "")
+    if not bool((payload or {}).get("open")):
+        write_decision(
+            conn, account_id, symbol, "wheel", "quiet", "narrator_quiet",
+            {
+                "reason": preview.reason,
+                "thinking": sentence,
+                "items": [_step("Narrator", "quiet", sentence or "narrator_quiet")],
+            },
+        )
+        return []
     raw_strike = (payload or {}).get("strike")
     strike = None
     if raw_strike is not None:
@@ -931,6 +949,7 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
         conn, settings, account_id, symbol, reading, plan, last, date.today(), flags,
     )
     risk = settings.risk
+    strategy = settings.strategy
     return {
         "symbol": symbol.upper(),
         "last": _show(last),
@@ -946,7 +965,11 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
         "numbers": "" if reading is None else reading.line(),
         "indicator_tags": "" if reading is None else ",".join(sorted(reading.tags)),
         "indicators": {} if reading is None else reading.payload(),
-        "dip_deep_pos": str(settings.strategy.dip_deep_pos),
+        "dip_deep_pos": str(strategy.dip_deep_pos),
+        "dip_window": str(strategy.dip_window_sessions),
+        "drawdown_band_low": str(strategy.drawdown_band_low_pct),
+        "drawdown_band_high": str(strategy.drawdown_band_high_pct),
+        "dte_target": str(strategy.dte_target),
         "intent": flags.intent,
         "long": "on" if flags.long else "off",
         "shares": _show(shares),
@@ -960,6 +983,7 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
         "position_cap": _position_cap(risk.max_position_per_symbol),
         "contract_cap": str(risk.max_contracts_per_symbol),
         "min_dte": str(risk.min_dte_new),
+        "min_rv_pctl": str(risk.min_rv_pctl_new_short),
         "earnings_blackout": str(risk.earnings_blackout_days),
         "cash_reserve": str(risk.cash_reserve_pct),
         "flags": f"csp={'on' if flags.csp else 'off'} cc={'on' if flags.cc else 'off'} strangle={'on' if flags.strangle else 'off'}",

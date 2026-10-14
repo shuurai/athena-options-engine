@@ -3,7 +3,7 @@
 **Model:** deepseek-v4.1-flash (`ds_v4_flash_` prefix)
 **Date:** 10 Oct 2026
 **Reviewer stance:** adversarial. Every claim below is tied to a file, a test, or a row I read in
-the live paper book (`DUR253115`).
+the live paper book (`PAPER1`).
 **Companion:** [strategy_review_2026-10-10.md](strategy_review_2026-10-10.md) — a prior review of the
 same surface. §7 lists where I agree, and the three places I think it is wrong.
 
@@ -14,7 +14,7 @@ same surface. §7 lists where I agree, and the three places I think it is wrong.
 | Signaled LLM loop | `packages/strategy-nfr/src/athena_strategy/agents.py` |
 | Deterministic phase engine | `packages/strategy-nfr/src/athena_strategy/phases.py` |
 | Standing prompts | `packages/settings/src/athena_settings/prompts.py` |
-| Stored prompts (live) | `settings_versions.payload.agents` for `DUR253115` |
+| Stored prompts (live) | `settings_versions.payload.agents` for `PAPER1` |
 | Tag sources | `iv.py`, `price.py`, `news.py`, `classifiers.py` |
 | Draft / risk gate | `drafts.py`, `packages/risk/src/athena_risk/__init__.py` |
 | Cycle wiring | `apps/orchestrator/src/athena_orchestrator/paper.py`, `loop.py`, `sim.py` |

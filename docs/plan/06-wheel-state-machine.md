@@ -1,11 +1,11 @@
 # 步 6 — 轮动状态机 + ticket
 
 **主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：已落地（2026-10-11）
-**依赖**：步 2（不变量）、步 4（指标）、步 5（候选） ｜ **阻塞**：无。证明在 `ZZTEST`。活账户 `DUR253115` 仍是 `test` 档
+**依赖**：步 2（不变量）、步 4（指标）、步 5（候选） ｜ **阻塞**：无。证明在 `ZZTEST`。活账户 `PAPER1` 仍是 `test` 档
 
 ## 0. 落地结论
 
-内核已在 `wheel.py`。默认 `ATHENA_STATE_MACHINE=on`。`off` 回到旧的七个 agent。验收在 `apps/orchestrator/tests/test_wheel.py`，账本只用 `ZZTEST` / `ZZT`，不是纸面账户 `DUR253115`。
+内核已在 `wheel.py`。默认 `ATHENA_STATE_MACHINE=on`。`off` 回到旧的七个 agent。验收在 `apps/orchestrator/tests/test_wheel.py`，账本只用 `ZZTEST` / `ZZT`，不是纸面账户 `PAPER1`。
 
 **已落地**
 

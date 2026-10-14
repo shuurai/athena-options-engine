@@ -27,6 +27,7 @@ from athena_strategy.tags import (
     RV_HIGH,
     TREND_STRONG,
     UPPER_RAIL,
+    WEEK_DIP,
 )
 
 _OPENING_REASONS = ("dip_long", "dip_csp", "high_cc", "cover_gap", "signaled_strangle")
@@ -370,19 +371,16 @@ def buy_access(flags: TacticFlags) -> tuple[bool, str]:
 
 
 def _dip(reading: Indicators | None, tags: set[str], settings: SettingsPayload) -> bool:
+    """True when a dip candidate exists. Live drafts still need Narrator open=true."""
+    del settings
     if reading is None:
         return False
-    if EARNINGS_NEAR in tags or EARNINGS_NEAR in reading.tags:
+    bag = set(tags) | reading.tags
+    if EARNINGS_NEAR in bag:
         return False
-    if TREND_STRONG not in reading.tags and TREND_STRONG not in tags:
-        return False
-    if RECLAIM not in reading.tags and RECLAIM not in tags:
-        return False
-    if reading.drawdown_pct is None:
-        return DRAWDOWN_OK in reading.tags or DRAWDOWN_OK in tags
-    deep = Decimal(str(settings.strategy.drawdown_band_high_pct))
-    shallow = Decimal(str(settings.strategy.drawdown_band_low_pct))
-    return -deep <= reading.drawdown_pct <= -shallow
+    if WEEK_DIP in bag or reading.week_dip:
+        return True
+    return TREND_STRONG in bag and RECLAIM in bag and DRAWDOWN_OK in bag
 
 
 def _strangle_signal(reading: Indicators, tags: set[str], flags: TacticFlags) -> bool:

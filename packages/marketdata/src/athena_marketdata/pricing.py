@@ -183,6 +183,30 @@ def set_history_short(conn: psycopg.Connection, symbol: str, short: bool) -> Non
     )
 
 
+def set_history_from(conn: psycopg.Connection, symbol: str, start: date | None) -> None:
+    """Remember IB's earliest available daily bar for this name."""
+    conn.execute(
+        """
+        INSERT INTO symbol_facts (symbol, name, history_from)
+        VALUES (%s, '', %s)
+        ON CONFLICT (symbol) DO UPDATE
+        SET history_from = EXCLUDED.history_from,
+            updated_at = now()
+        """,
+        (symbol.upper(), start),
+    )
+
+
+def history_from(conn: psycopg.Connection, symbol: str) -> date | None:
+    row = conn.execute(
+        "SELECT history_from FROM symbol_facts WHERE symbol = %s",
+        (symbol.upper(),),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return row[0]
+
+
 def run_bar_write(conn, write) -> bool:
     """Commit one bar write. A deadlock rolls back and tries again."""
     from psycopg.errors import DeadlockDetected

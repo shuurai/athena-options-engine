@@ -6,13 +6,13 @@ memory 与 Excel，支持周、月分析和历史查询。
 本任务的完整规范（数据源路由、全部步骤命令、判定规则、卦象流程、troubleshooting）以
 runbook 为准：**
 
-`/Users/fdi777/WorkBuddy/Financial/docs/daily_market_report_workflow.md`
+`$HOME/WorkBuddy/Financial/docs/daily_market_report_workflow.md`
 
 执行前先读 runbook。步骤概要（细节以 runbook 为准）：
 
 0. **Pre-flight 幽灵交易 guardrail（必须最先执行）**
 
-   `/Users/fdi777/.workbuddy/binaries/python/envs/default/bin/python3 /Users/fdi777/WorkBuddy/Financial/preflight_phantom_check.py`
+   `$HOME/.workbuddy/binaries/python/envs/default/bin/python3 $HOME/WorkBuddy/Financial/preflight_phantom_check.py`
 
    退出码 1 = 检测到 phantom trades → **HALT**，创建 HIGH alert Notice（按
    docs/notice_[templates.md](http://templates.md) 的 Alert
@@ -49,7 +49,7 @@ runbook 为准：**
 
 10. **Notice 创建：kind 只用 news/alert/signal（fanit-cli v1.7.0+ 用 --kind 不用
     --type）；signal 必须 --action + --ticker。Markdown body 模板与 CLI 命令见
-    `/Users/fdi777/WorkBuddy/Financial/docs/notice_templates.md`（必须遵守 body
+    `$HOME/WorkBuddy/Financial/docs/notice_templates.md`（必须遵守 body
     硬要求：标题分节、表格、币种符号、Sources & Data Quality 结尾）。创建前对
     active Notice 去重。每条需用户关注的 Notice 创建后立即用
     `iching_market.py attach --id <id>` 挂卦并写中文卦签。**

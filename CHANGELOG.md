@@ -61,6 +61,18 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-14 | Add a GTC toggle on the universe trade panel | [C-20261014-8](logs/2026-10-14.md#c-20261014-8) |
 | 2026-10-14 | Keep a closed browser connection out of the orchestrator log | [C-20261014-9](logs/2026-10-14.md#c-20261014-9) |
 | 2026-10-14 | Recover when the browser closes a console connection | [C-20261014-10](logs/2026-10-14.md#c-20261014-10) |
+| 2026-10-14 | Open a CSP on a five session dip with a slight bounce | [C-20261014-11](logs/2026-10-14.md#c-20261014-11) |
+| 2026-10-14 | Tag WEEK_DIP and let Narrator gate the draft | [C-20261014-12](logs/2026-10-14.md#c-20261014-12) |
+| 2026-10-14 | Show open option legs as pulse badges | [C-20261014-13](logs/2026-10-14.md#c-20261014-13) |
+| 2026-10-14 | Clamp stock history to IB’s first bar | [C-20261014-14](logs/2026-10-14.md#c-20261014-14) |
+| 2026-10-14 | Label Open P&amp;L with each position’s currency | [C-20261014-15](logs/2026-10-14.md#c-20261014-15) |
+| 2026-10-14 | Live-update stock Open P&amp;L on positions | [C-20261014-16](logs/2026-10-14.md#c-20261014-16) |
+| 2026-10-14 | Live-update universe pool price and 1D% | [C-20261014-17](logs/2026-10-14.md#c-20261014-17) |
+| 2026-10-14 | Live vs last and est. cost on orders | [C-20261014-18](logs/2026-10-14.md#c-20261014-18) |
+| 2026-10-14 | History fill detail with cost and fees | [C-20261014-19](logs/2026-10-14.md#c-20261014-19) |
+| 2026-10-14 | Cap max orders per day per symbol | [C-20261014-20](logs/2026-10-14.md#c-20261014-20) |
+| 2026-10-14 | Telegram fill notices show qty cost fee | [C-20261014-21](logs/2026-10-14.md#c-20261014-21) |
+| 2026-10-14 | Prep repo for open source release | [C-20261014-22](logs/2026-10-14.md#c-20261014-22) |
 
 ## Notes
 

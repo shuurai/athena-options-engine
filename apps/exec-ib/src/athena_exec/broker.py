@@ -6,11 +6,21 @@ import logging
 import math
 import threading
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Iterator, NamedTuple
 
 log = logging.getLogger("athena.exec")
+
+
+def _history_162_kind(message: str) -> str:
+    """Classify HMDS 162 text: no_data, permission, or other."""
+    text = (message or "").lower()
+    if "permission" in text:
+        return "permission"
+    if "no data" in text or "hmds query returned no data" in text:
+        return "no_data"
+    return "other"
 
 
 class BrokerPosition(NamedTuple):
@@ -251,11 +261,28 @@ class IbBroker:
             bars = self._ib.reqHistoricalData(contract, "", "60 D", "1 day", "TRADES", True, 1)
         return list(bars or [])
 
+    def head_day(self, symbol: str) -> date | None:
+        """Earliest IB TRADES day for this stock. None when IB does not answer."""
+        if self._ib is None:
+            return None
+        from ib_insync import Stock
+
+        exchange, currency = self._listed(symbol)
+        contract = Stock(symbol, exchange, currency)
+        if not self._ib.qualifyContracts(contract):
+            return None
+        try:
+            stamp = self._ib.reqHeadTimeStamp(contract, "TRADES", True, 2)
+        except Exception as exc:
+            log.info("head day symbol=%s error=%s", symbol.upper(), exc.__class__.__name__)
+            return None
+        return _as_head_day(stamp)
+
     def history_span(self, symbol: str, duration: str, end: str = "") -> list[tuple]:
         """Daily TRADES bars for one IB duration, such as '1 Y'.
 
         end is an IB endDateTime. Empty means now, so a second year can stop
-        where the first year starts.
+        where the first year starts. Error 162 with no data returns [].
         """
         if self._ib is None:
             return []
@@ -265,8 +292,37 @@ class IbBroker:
         contract = Stock(symbol, exchange, currency)
         if not self._ib.qualifyContracts(contract):
             return []
-        with subscription():
-            bars = self._ib.reqHistoricalData(contract, end, duration, "1 day", "TRADES", True, 1)
+        notes: list[tuple[int, str]] = []
+
+        def hear(_req_id, code, message, _contract) -> None:
+            if code == 162:
+                notes.append((code, str(message or "")))
+
+        self._ib.errorEvent += hear
+        bars = []
+        try:
+            with subscription():
+                bars = self._ib.reqHistoricalData(contract, end, duration, "1 day", "TRADES", True, 1)
+        finally:
+            self._ib.errorEvent -= hear
+        if notes:
+            kind = _history_162_kind(notes[0][1])
+            if kind == "permission":
+                log.warning(
+                    "history span permission symbol=%s duration=%s end=%s",
+                    symbol.upper(),
+                    duration,
+                    end or "now",
+                )
+            else:
+                log.info(
+                    "history span empty symbol=%s duration=%s end=%s kind=%s",
+                    symbol.upper(),
+                    duration,
+                    end or "now",
+                    kind,
+                )
+            return []
         found = []
         for bar in bars or []:
             found.append(
@@ -707,6 +763,9 @@ class IbBroker:
             return []
         rows: list[tuple] = []
         for fill in self._ib.fills():
+            report = getattr(fill, "commissionReport", None)
+            commission = _fill_commission(report)
+            currency = str(getattr(report, "currency", "") or "") if report is not None else ""
             rows.append(
                 (
                     int(fill.execution.orderId),
@@ -717,6 +776,8 @@ class IbBroker:
                     str(fill.execution.execId or ""),
                     str(fill.execution.side or ""),
                     str(fill.contract.secType or "STK"),
+                    commission,
+                    currency,
                 )
             )
         return rows
@@ -756,6 +817,35 @@ def _option(
         multiplier=str(multiplier),
         tradingClass=trading_class,
     )
+
+
+def _as_head_day(stamp) -> date | None:
+    """Parse reqHeadTimeStamp result into a calendar day."""
+    if stamp is None or stamp == "":
+        return None
+    if isinstance(stamp, datetime):
+        return stamp.date()
+    if isinstance(stamp, date):
+        return stamp
+    text = str(stamp).strip()
+    if not text:
+        return None
+    if len(text) >= 8 and text[:8].isdigit():
+        try:
+            return datetime.strptime(text[:8], "%Y%m%d").date()
+        except ValueError:
+            pass
+    if text[:10].count("-") == 2:
+        try:
+            return datetime.strptime(text[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    if text.isdigit():
+        try:
+            return datetime.fromtimestamp(int(text), tz=UTC).date()
+        except (OverflowError, OSError, ValueError):
+            return None
+    return None
 
 
 def _daily_close(ib, contract) -> Decimal | None:
@@ -803,6 +893,16 @@ def _number(value) -> Decimal | None:
     if math.isnan(number) or math.isinf(number):
         return None
     return Decimal(str(number))
+
+
+def _fill_commission(report) -> Decimal | None:
+    """IB commission when the report has arrived. Missing or UNSET stays blank."""
+    if report is None:
+        return None
+    number = _number(getattr(report, "commission", None))
+    if number is None or abs(number) > Decimal("1e10"):
+        return None
+    return abs(number)
 
 
 def _positive(value) -> Decimal | None:

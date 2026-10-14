@@ -1100,6 +1100,9 @@ class WorkflowTest(unittest.TestCase):
         apply_migrations(self.conn)
 
         class _Broker:
+            def head_day(self, symbol):
+                return date(2023, 1, 1)
+
             def history_span(self, symbol, duration, end=""):
                 start = date(2024, 1, 1) if end else date(2025, 1, 1)
                 return [
@@ -1119,10 +1122,55 @@ class WorkflowTest(unittest.TestCase):
         self.conn.commit()
         self.assertEqual(count, 20)
         row = self.conn.execute(
-            "SELECT history_short FROM symbol_facts WHERE symbol = %s",
+            "SELECT history_short, history_from FROM symbol_facts WHERE symbol = %s",
             (SYMBOL,),
         ).fetchone()
         self.assertTrue(row[0])
+        self.assertEqual(row[1], date(2023, 1, 1))
+
+    def test_young_name_skips_second_year_before_head(self) -> None:
+        from datetime import timedelta
+
+        from athena_orchestrator.backfill import pull_symbol, second_span
+        from athena_store import apply_migrations
+
+        apply_migrations(self.conn)
+        head = date(2025, 6, 1)
+        self.assertIsNone(second_span(head, head))
+        self.assertEqual(second_span(date(2025, 8, 1), head), "61 D")
+        self.assertEqual(second_span(date(2025, 8, 1), None), "1 Y")
+
+        calls: list[tuple[str, str]] = []
+
+        class _Broker:
+            def head_day(self, symbol):
+                return head
+
+            def history_span(self, symbol, duration, end=""):
+                calls.append((duration, end))
+                start = head
+                return [
+                    (
+                        start + timedelta(days=offset),
+                        Decimal("1"),
+                        Decimal("2"),
+                        Decimal("0.5"),
+                        Decimal("1"),
+                        Decimal("3"),
+                    )
+                    for offset in range(5)
+                ]
+
+        count = pull_symbol(self.conn, _Broker(), SYMBOL)
+        self.conn.commit()
+        self.assertEqual(count, 5)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], "1 Y")
+        stored = self.conn.execute(
+            "SELECT history_from FROM symbol_facts WHERE symbol = %s",
+            (SYMBOL,),
+        ).fetchone()
+        self.assertEqual(stored[0], head)
 
     def _print(self, ts: datetime, source: str, low: str, high: str, close: str) -> None:
         self.conn.execute(

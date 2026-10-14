@@ -116,7 +116,7 @@ The phone page at `/c/<token>` is already live. This section is the operator con
 | ID | Task | Status | Exit proof |
 |----|------|--------|------------|
 | CW-01 | Console shell | `done` | `http://127.0.0.1:8788` has Cockpit, Drafts, NFR board, News, Universe, History, Accounts, Risk control, and Settings. System font. No Connect item. The phone port does not serve these pages. |
-| CW-02 | Cockpit | `done` | Paper account `DUR253115`, the current slot, pending drafts, and the watchlist phase. Latest NAV says no mark is stored. |
+| CW-02 | Cockpit | `done` | Paper account `PAPER1`, the current slot, pending drafts, and the watchlist phase. Latest NAV says no mark is stored. |
 | CW-03 | Draft queue | `done` | Fixture `draft_zzcon` showed Approve and Reject. Reject stored `console check`. The row was deleted. |
 | CW-04 | Phase board | `done` | The watchlist page lists phase, tactic, and tags from `symbol_phases`. |
 | CW-05 | News | `done` | Watchlist headlines show the stored sentiment. |

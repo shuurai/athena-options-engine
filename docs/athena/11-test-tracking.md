@@ -13,10 +13,10 @@ Build tasks stay in [10-implementation-tracker.md](10-implementation-tracker.md)
 
 | Step | Check | Status | Proof |
 |------|--------|--------|-------|
-| Paper mode picks one account | `ATHENA_TRADING_MODE=paper` resolves `ATHENA_IB_PAPER_ACCOUNT_ID` | `passed` | Active book is `DUR253115` on Gateway port 4002. |
+| Paper mode picks one account | `ATHENA_TRADING_MODE=paper` resolves `ATHENA_IB_PAPER_ACCOUNT_ID` | `passed` | Active book is `PAPER1` on Gateway port 4002. |
 | Live mode picks a list | Comma-separated `ATHENA_IB_ACCOUNT_IDS` parses to one book per id | `passed` | A two-id parse returned both ids. Those rows were deleted. |
 | Empty live list sends nothing | Live mode with a blank id list logs and skips orders | `passed` | Code path checked. Mode in `.env` stays `paper`. |
-| One Approve does not fan out | An approval queues only that draft's account | `passed` | Queued row carried `DUR253115`. No second account row. |
+| One Approve does not fan out | An approval queues only that draft's account | `passed` | Queued row carried `PAPER1`. No second account row. |
 | Switching mode hides the other book | Paper and live rows stay in the database | `passed` | Stamp of unlabeled rows did not delete them. |
 | A real live-account order | Approve on an id from `ATHENA_IB_ACCOUNT_IDS` | `pending` | Live id list is empty. Mode stays `paper`. |
 
@@ -36,7 +36,7 @@ Build tasks stay in [10-implementation-tracker.md](10-implementation-tracker.md)
 | Step | Check | Status | Proof |
 |------|--------|--------|-------|
 | Weekday clock | Mon–Fri windows, weekend idle | `passed` | Friday 10:00 and 13:00 are Athena. 12:30 and Saturday 13:00 are idle. |
-| HK afternoon session | Process connects inside 13:00–16:00 HKT | `passed` | 13:03 HKT logged `ib_session=connected` for `DUR253115`. |
+| HK afternoon session | Process connects inside 13:00–16:00 HKT | `passed` | 13:03 HKT logged `ib_session=connected` for `PAPER1`. |
 | Delayed HK quote | Digit symbols use SEHK and delayed data | `passed` | 700 close 419.2. 1810 close 25.36. Source `ib-delayed`. |
 | HK stock order, then cancel | Far limit is accepted and leaves no open trade | `passed` | Paper BUY 100 of 700 at HK$1, and BUY 200 of 1810 at HK$1, then both cancelled. |
 | A live HK stock fill | An order that trades and writes a fill | `pending` | Probes were far limits on purpose. |
@@ -114,7 +114,7 @@ The phone approve page is already proven. These checks are the operator console.
 | Step | Check | Status | Proof |
 |------|--------|--------|-------|
 | Console shell | Nav reaches each console page. Connect is absent | `passed` | All nine pages returned 200 on port 8788. Connect is not a nav item. Port 8787 returned 404 for `/risk`. |
-| Cockpit | Mode, account, slot, drafts, and watchlist phase are the live book | `passed` | Account `DUR253115`. Latest NAV says no mark is stored. NVDA is on the watchlist. |
+| Cockpit | Mode, account, slot, drafts, and watchlist phase are the live book | `passed` | Account `PAPER1`. Latest NAV says no mark is stored. NVDA is on the watchlist. |
 | Draft queue | Approve and Reject on a pending draft, including a reject reason | `passed` | Fixture `draft_zzcon` was rejected with `console check`. The row was deleted. |
 | Phase board | Watchlist phase, tactic, and tags match `symbol_phases` | `passed` | The NFR board listed the stored phase rows. |
 | News page | Watchlist headlines show the stored sentiment | `passed` | The news page listed stored headlines and scores. |
@@ -145,7 +145,7 @@ CW-02 stays the first data shell. These checks are the design cockpit. A missing
 | Settings sections | Sections, saved knobs, and Telegram status | `passed` | Six sections render. Polling is on. The bot token is shown as set. |
 | Live settings override | Saved secrets and the model beat the environment, and the audit hides the secret | `passed` | A proof key overrode the environment. The audit said set, not the key. A page save stored `deepseek-proof`, then the previous payload was restored. Privilege stayed all_orders. |
 | Settings badges and link | Badges match the mock, and Link appears only when no user id is in force | `passed` | The page shows PAPER, SET, EMPTY, ON, and OFF. The linked id is shown. Link appears only when the id is cleared. |
-| Add account dialog | Id, label, Cancel, and Add account. The Gateway book stays put | `passed` | The dialog title is Add IB account. Cancel closes it. Proof sleeve `ZZACCT` appeared beside Paper and was not active. Settings restore removed it. Mode stayed paper on `DUR253115`. |
+| Add account dialog | Id, label, Cancel, and Add account. The Gateway book stays put | `passed` | The dialog title is Add IB account. Cancel closes it. Proof sleeve `ZZACCT` appeared beside Paper and was not active. Settings restore removed it. Mode stayed paper on `PAPER1`. |
 | Account sync and trading | Both toggles click, persist, and the cycle follows them | `passed` | Both started on for the paper account. A click turned each off and showed a toast. Settings restore turned them on again. |
 
 ## Still specified

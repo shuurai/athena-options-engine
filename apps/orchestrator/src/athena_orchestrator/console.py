@@ -323,6 +323,7 @@ tr.pool-busy button, tr.pool-busy select, tr.pool-busy input { pointer-events: n
 .pnl-pos { color: var(--ath-up); font-family: var(--font-mono); }
 .pnl-neg { color: var(--ath-down); font-family: var(--font-mono); }
 tr[data-cmd="history-row"] { cursor: pointer; }
+.hist-detail { color: var(--site-text-3); max-width: 28rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card h2 button.more { background: none; border: 0; padding: 0; font: inherit; }
 .nav .mark { background: none; width: 26px; height: 26px; color: inherit; font-size: inherit; }
 .nav .mark svg { width: 26px; height: 26px; display: block; }
@@ -1288,10 +1289,10 @@ def _cockpit(conn) -> str:
     facts = sleeve(conn, account, now)
     slots = schedule(now, settings.ib.athena_slots, settings.ib.mobile_slots)
     health = health_report(conn)
-    from athena_orchestrator.pulse import enabled_symbols, note_view
+    from athena_orchestrator.pulse import enabled_symbols, note_view, watch_symbols
 
+    note_view(watch_symbols(conn, account), account)
     names = enabled_symbols(settings)
-    note_view(names, account)
     rows = watchlist(conn, account, names, settings.strategy.ivr_min_samples, now.date())
     halted = active_reason(conn, account)
     payload = json.dumps({"nlv": facts["nlv"], "months": facts["months"], "pnl": facts["pnl"]}).replace("<", "\\u003c")
@@ -1421,7 +1422,7 @@ def _cockpit_body(
 </div>
 <div class="card fill"><h2>watchlist pulse <a class="more" href="/phase">nfr board →</a></h2>
   <div class="scroll-y"><table class="data"><thead><tr>
-    <th>symbol</th><th>price</th><th>52w</th><th>ivr</th><th>phase</th><th>tags</th><th>side</th><th>strike</th><th>dte</th><th>status</th>
+    <th>symbol</th><th>price</th><th>52w</th><th>ivr</th><th>phase</th><th>tags</th><th>side</th><th>option</th><th>dte</th><th>status</th>
   </tr></thead><tbody>{_watch_html(rows)}</tbody></table></div></div>
 <template id="slot-editor">
   <p class="slot-note">weekdays, hong kong time. each row is one window. gaps between them stay idle.</p>
@@ -1450,7 +1451,7 @@ def _watch_html(rows: list[dict]) -> str:
             f"<td><span class=\"tag {escape(row['phase_class'])}\">{escape(row['phase'])}</span></td>"
             f"<td>{_badges(row['tags'])}</td>"
             f"<td>{_badges(row['side'])}</td>"
-            f"<td>{_strikes(row['strikes'])}</td>"
+            f"<td>{_badges(row['strikes'])}</td>"
             f"<td>{_dash_cell(row['dte'])}</td>"
             f"<td>{_badges(row['status'])}</td>"
             "</tr>"
@@ -1489,12 +1490,6 @@ def _badges(items: list[dict]) -> str:
     return '<span class="badge-row">' + "".join(
         f"<span class=\"tag {escape(item['cls'])}\">{escape(item['t'])}</span>" for item in items
     ) + "</span>"
-
-
-def _strikes(values: list[str]) -> str:
-    if not values:
-        return '<span class="cell-empty">—</span>'
-    return " ".join(f"<span class=\"mono\">{escape(value)}</span>" for value in values)
 
 
 def _dash_cell(value: str) -> str:
@@ -2586,26 +2581,35 @@ _CLIENT_JS = r"""
       return;
     }
     if (cmd === "history-row") {
+      let row = {};
+      try { row = JSON.parse(btn.getAttribute("data-json") || "{}"); } catch (err) { row = {}; }
       const wrap = document.createElement("div");
-      [["Phase", "data-phase"], ["Status", "data-status"], ["P&L", "data-pnl"], ["Approved by", "data-by"], ["Reason", "data-reason"]].forEach((pair) => {
-        const row = document.createElement("div");
-        row.className = "field";
+      [
+        ["Side", row.side], ["Qty", row.qty], ["Price", row.price], ["Notional", row.notional],
+        ["Fee", row.fee], ["Multiplier", row.multiplier], ["Type", row.sec_type],
+        ["Phase", row.phase], ["Status", row.status], ["P&L", row.pnl],
+        ["Exec id", row.exec_id], ["Approved by", row.by], ["Reason", row.reason], ["Detail", row.detail]
+      ].forEach((pair) => {
+        const text = pair[1] == null || pair[1] === "" ? "—" : String(pair[1]);
+        if (text === "—") return;
+        const block = document.createElement("div");
+        block.className = "field";
         const key = document.createElement("div");
         key.className = "k";
         key.textContent = pair[0];
         const value = document.createElement("div");
         value.className = "v";
-        value.textContent = btn.getAttribute(pair[1]) || "—";
-        row.appendChild(key);
-        row.appendChild(value);
-        wrap.appendChild(row);
+        value.textContent = text;
+        block.appendChild(key);
+        block.appendChild(value);
+        wrap.appendChild(block);
       });
       const close = document.createElement("button");
       close.className = "btn ghost";
       close.type = "button";
       close.textContent = "Close";
       close.addEventListener("click", closeAll);
-      modal(btn.getAttribute("data-title") || "History", wrap, [close]);
+      modal(row.title || "History", wrap, [close]);
       return;
     }
     if (cmd === "privilege") {
@@ -3636,7 +3640,83 @@ _CLIENT_JS = r"""
   const picked = document.querySelector("tr.phase-pick.selected");
   if (picked) picked.scrollIntoView({ block: "nearest" });
   const streamed = {};
+  function moneyText(value) {
+    return Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function signedPnlText(value) {
+    const abs = moneyText(Math.abs(value));
+    if (value > 0) return "+" + abs;
+    if (value < 0) return "-" + abs;
+    return abs;
+  }
+  function paintPositionTick(quote) {
+    const price = Number(String(quote.price || "").replace(/,/g, ""));
+    if (!Number.isFinite(price)) return;
+    const rows = document.querySelectorAll('tr[data-cmd="position-row"][data-symbol="' + quote.symbol + '"]');
+    rows.forEach((row) => {
+      if ((row.getAttribute("data-kind") || "") !== "stock") return;
+      const qty = Number(row.getAttribute("data-qty"));
+      const avg = Number(row.getAttribute("data-avg"));
+      const mult = Number(row.getAttribute("data-mult") || "1") || 1;
+      if (!Number.isFinite(qty) || !Number.isFinite(avg)) return;
+      const value = qty * price * mult;
+      const pnl = (price - avg) * qty * mult;
+      const mark = row.querySelector(".pos-mark");
+      const valueCell = row.querySelector(".pos-value");
+      const pnlCell = row.querySelector(".pos-pnl");
+      const ccy = (row.getAttribute("data-ccy") || "").trim();
+      if (mark) mark.textContent = moneyText(price);
+      if (valueCell) valueCell.textContent = moneyText(value);
+      if (pnlCell) {
+        pnlCell.textContent = signedPnlText(pnl) + (ccy ? " " + ccy : "");
+        pnlCell.className = "mono pos-pnl" + (pnl > 0 ? " chg-up" : pnl < 0 ? " chg-down" : "");
+      }
+      row.setAttribute("data-mark", moneyText(price));
+      row.setAttribute("data-value", moneyText(value));
+      row.setAttribute("data-pnl", String(pnl));
+    });
+  }
+  function paintPoolTick(quote) {
+    const row = document.querySelector('#pool-table tr[data-symbol="' + quote.symbol + '"]');
+    if (!row) return;
+    const priceCell = row.querySelector(".pool-px");
+    const changeCell = row.querySelector(".pool-chg");
+    if (priceCell) priceCell.textContent = quote.price;
+    if (changeCell) {
+      changeCell.textContent = quote.change;
+      changeCell.className = "mono pool-chg" + (quote.tone ? " " + quote.tone : "");
+    }
+    row.setAttribute("data-price", quote.price || "");
+    const trade = row.querySelector('button[data-cmd="trade-symbol"]');
+    if (trade) trade.setAttribute("data-price", quote.price || "");
+  }
+  function paintOrderTick(quote) {
+    const price = Number(String(quote.price || "").replace(/,/g, ""));
+    if (!Number.isFinite(price) || price === 0) return;
+    const rows = document.querySelectorAll('#orders-feed tr[data-order][data-symbol="' + quote.symbol + '"]');
+    rows.forEach((row) => {
+      if ((row.getAttribute("data-kind") || "stk") !== "stk") return;
+      const limitRaw = row.getAttribute("data-limit");
+      const limit = limitRaw === "" || limitRaw == null ? NaN : Number(limitRaw);
+      const qty = Number(row.getAttribute("data-qty"));
+      const mult = Number(row.getAttribute("data-mult") || "1") || 1;
+      const gapCell = row.querySelector(".order-gap");
+      if (gapCell && Number.isFinite(limit)) {
+        const pct = (limit - price) / price * 100;
+        gapCell.textContent = (pct > 0 ? "+" : "") + pct.toFixed(2) + "%";
+        gapCell.className = "mono order-gap" + (pct > 0 ? " chg-up" : pct < 0 ? " chg-down" : "");
+      }
+      const costCell = row.querySelector(".order-cost");
+      if (costCell && Number.isFinite(qty)) {
+        const unit = Number.isFinite(limit) ? limit : price;
+        if (Number.isFinite(unit)) costCell.textContent = moneyText(Math.abs(qty * unit * mult));
+      }
+    });
+  }
   function paintTick(quote) {
+    paintPositionTick(quote);
+    paintPoolTick(quote);
+    paintOrderTick(quote);
     const cell = document.querySelector('.pulse-px[data-symbol="' + quote.symbol + '"]');
     if (!cell) return;
     const price = cell.querySelector(".px");
@@ -3782,16 +3862,30 @@ _CLIENT_JS = r"""
       });
     });
   }
-  if (document.querySelector(".pulse-px")) {
-    const pollPulse = () => fetch("/api/pulse").then((res) => res.json()).then(paintPulse).catch(() => {});
+  const hasPulse = document.querySelector(".pulse-px");
+  const hasPositions = document.querySelector('tr[data-cmd="position-row"]');
+  const hasPool = document.getElementById("pool-table");
+  const hasOrders = document.getElementById("orders-feed");
+  if (hasPulse || hasPositions || hasPool || hasOrders) {
+    const pollPulse = () => fetch("/api/pulse").then((res) => res.json()).then((body) => {
+      if (hasPulse) paintPulse(body);
+      (body.quotes || []).forEach((quote) => {
+        if (streamed[quote.symbol] && streamed[quote.symbol] !== quote.price) return;
+        paintPositionTick(quote);
+        paintPoolTick(quote);
+        paintOrderTick(quote);
+      });
+    }).catch(() => {});
     pollPulse();
     setInterval(pollPulse, 3000);
-    const ticks = new EventSource("/api/pulse/ticks");
-    ticks.onmessage = (event) => {
-      const quote = JSON.parse(event.data);
-      streamed[quote.symbol] = quote.price;
-      paintTick(quote);
-    };
+    if (window.EventSource) {
+      const ticks = new EventSource("/api/pulse/ticks");
+      ticks.onmessage = (event) => {
+        const quote = JSON.parse(event.data);
+        streamed[quote.symbol] = quote.price;
+        paintTick(quote);
+      };
+    }
   }
   const logRoll = document.getElementById("log-roll");
   if (logRoll) {
