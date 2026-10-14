@@ -1,6 +1,6 @@
 # Athena Options Engine
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/shuurai/athena-options-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/shuurai/athena-options-engine/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
@@ -9,9 +9,6 @@ Windows-first, human-in-the-loop **options engine** for Interactive Brokers.
 Athena refines **one** strategy for the long haul: the **News Front-Running
 (NFR) cycle**. Develop on macOS; run on a dedicated Windows box next to IB
 Gateway or TWS.
-
-> **Replace `OWNER/REPO` in the CI badge** with your GitHub org and repository
-> name after the first push.
 
 **This is trading software.** You can lose money. Paper and live both send real
 broker orders after Approve. Review risk limits and privilege before enabling
