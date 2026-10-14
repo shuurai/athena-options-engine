@@ -10,8 +10,12 @@ from datetime import date, datetime, timedelta
 
 from athena_exec.accounts import active_accounts
 from athena_exec.broker import IbBroker
+from athena_exec.slots import HKT
 from athena_marketdata.pricing import (
+    first_ib_daily_day,
+    history_from,
     ib_daily_count,
+    last_ib_daily_day,
     set_history_from,
     set_history_short,
     store_ib_daily,
@@ -222,7 +226,7 @@ def _run(database_url: str) -> None:
                             names[:] = watchlist_after_listing(names, symbol, resolved)
                         symbol = resolved
                     try:
-                        count = _stored_or_pull(conn, broker, symbol)
+                        count, mode = _stored_or_pull(conn, broker, symbol)
                     except Exception as exc:
                         log.info(
                             "history backfill symbol=%s error=%s",
@@ -230,12 +234,23 @@ def _run(database_url: str) -> None:
                             exc.__class__.__name__,
                         )
                         count = ib_daily_count(conn, symbol)
+                        mode = "stored"
                     is_short = count < _RANGE
                     set_history_short(conn, symbol, is_short)
                     conn.commit()
                     if is_short:
                         short.append(symbol)
                         log.warning("history short symbol=%s bars=%s", symbol, count)
+                    elif mode == "ok":
+                        log.info("history ok symbol=%s bars=%s", symbol, count)
+                    elif mode == "catchup":
+                        last = last_ib_daily_day(conn, symbol)
+                        log.info(
+                            "history catchup symbol=%s bars=%s last=%s",
+                            symbol,
+                            count,
+                            last,
+                        )
                     else:
                         log.info("history stored symbol=%s bars=%s", symbol, count)
                     time.sleep(1)
@@ -268,11 +283,41 @@ def _mark(database_url: str, books: list[tuple[str, list[str], str]], symbols: l
                 align_range_prompts(conn, account)
 
 
-def _stored_or_pull(conn, broker, symbol: str) -> int:
-    count = ib_daily_count(conn, symbol)
+def _history_complete(conn, symbol: str, count: int) -> bool:
+    """True when a full two-year pull is unnecessary (52w or IPO-clamped)."""
     if count >= _RANGE:
-        return count
-    return pull_symbol(conn, broker, symbol)
+        return True
+    if count <= 0:
+        return False
+    head = history_from(conn, symbol)
+    if head is None:
+        return False
+    oldest = first_ib_daily_day(conn, symbol)
+    if oldest is None:
+        return False
+    return oldest <= head + timedelta(days=7)
+
+
+def pull_since_last(conn, broker, symbol: str) -> tuple[int, str]:
+    """Fetch only from the last stored day through today. Returns (count, mode)."""
+    last = last_ib_daily_day(conn, symbol)
+    if last is None:
+        return pull_symbol(conn, broker, symbol), "stored"
+    today = datetime.now(HKT).date()
+    if last >= today:
+        return ib_daily_count(conn, symbol), "ok"
+    days = min(max((today - last).days + 2, 1), 60)
+    bars = broker.history_span(symbol, f"{days} D", "")
+    store_ib_daily(conn, symbol, bars)
+    return ib_daily_count(conn, symbol), "catchup"
+
+
+def _stored_or_pull(conn, broker, symbol: str) -> tuple[int, str]:
+    """Return (day count, mode: stored|catchup|ok). Skip full pull when complete."""
+    count = ib_daily_count(conn, symbol)
+    if _history_complete(conn, symbol, count):
+        return pull_since_last(conn, broker, symbol)
+    return pull_symbol(conn, broker, symbol), "stored"
 
 
 def _books(database_url: str) -> list[tuple[str, list[str], str]]:

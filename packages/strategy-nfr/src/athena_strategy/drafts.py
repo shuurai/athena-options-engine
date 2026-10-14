@@ -368,7 +368,7 @@ def apply_ticket_block(
     ).fetchone()
     mark = conn.execute(
         """
-        SELECT cash, margin, base_currency, fx_rates
+        SELECT cash, margin, base_currency, fx_rates, excess_liquidity
         FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
         """,
         (account_id,),
@@ -390,6 +390,7 @@ def apply_ticket_block(
         {
             "nav": None if nav is None else nav[0],
             "cash": None if mark is None else mark[0],
+            "excess": None if mark is None or len(mark) < 5 else mark[4],
             "margin": None if mark is None else mark[1],
             "base": "" if mark is None or not mark[2] else mark[2],
             "rates": rates,
@@ -419,6 +420,8 @@ def apply_ticket_block(
             conn, account_id, draft_id, symbol, tactic, int(contracts), reason,
             limit_price=limit_price, put_strike=put_strike, call_strike=call_strike,
             multiplier=multiplier or "100", cash_need=need, note=note,
+            orders_today=int(orders),
+            max_orders_per_day=settings.risk.max_orders_per_day,
         )
     return reason
 
@@ -475,7 +478,7 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
     ).fetchone()
     mark = conn.execute(
         """
-        SELECT cash, margin, base_currency, fx_rates
+        SELECT cash, margin, base_currency, fx_rates, excess_liquidity
         FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
         """,
         (account_id,),
@@ -508,6 +511,7 @@ def _guard_inputs(conn, account_id: str, symbol: str, expiry, opening: bool) -> 
             "symbol_value": symbol_value,
             "cash": None if mark is None else mark[0],
             "margin": None if mark is None else mark[1],
+            "excess": None if mark is None or len(mark) < 5 else mark[4],
             "dte": dte,
             "earnings_in_days": nearest,
         }
@@ -841,25 +845,43 @@ def stage_draft(
     blocked = (
         _opening_block(conn, settings, account_id, symbol, tactic, contracts, multiplier, simulated) if opening else None
     )
+    guard: dict = {}
     if blocked is None:
         extra = _position_inputs(conn, account_id, symbol, multiplier) if opening else {}
         guard = _guard_inputs(conn, account_id, symbol, expiry, opening)
         blocked = extra.pop("mark_reason", None) or guard.pop("fx_reason", None)
         if blocked is None:
+            need = None
+            if tactic in {"OPEN_CSP", "BUY"}:
+                need = draft_cash_need(
+                    tactic,
+                    contracts,
+                    limit_price=limit_price,
+                    put_strike=put_strike,
+                    multiplier=multiplier or "100",
+                )
             blocked = block_reason(
                 contracts,
                 settings.risk,
                 opening=opening,
                 needs_cash=tactic in {"OPEN_CSP", "BUY"},
                 enforce_contract_cap=enforce_contract_cap,
+                cash_need=need,
                 **guard,
                 **extra,
             )
+    # Freeze the day-order numbers that fed block_reason (not a later re-fetch).
+    orders_snap = guard.get("orders_today")
+    max_orders_snap = settings.risk.max_orders_per_day
+    if blocked and is_day_orders_reason(blocked) and orders_snap is None:
+        orders_snap = _orders_today(conn, account_id, symbol)
     status = "blocked" if blocked else "pending"
     return _insert_draft(
         conn, symbol, tactic, contracts, status, blocked or reason, phase, account_id,
         instrument, limit_price, expiry, put_strike, call_strike, put_limit, call_limit,
         trading_class, option_exchange, multiplier, order_action, simulated, ticket_id, leg_index,
+        orders_today=orders_snap if blocked else None,
+        max_orders_per_day=max_orders_snap if blocked else None,
     )
 
 
@@ -867,6 +889,9 @@ def _insert_draft(
     conn, symbol, tactic, contracts, status, reason, phase, account_id,
     instrument, limit_price, expiry, put_strike, call_strike, put_limit, call_limit,
     trading_class, option_exchange, multiplier, order_action, simulated, ticket_id, leg_index,
+    *,
+    orders_today=None,
+    max_orders_per_day=None,
 ) -> dict:
     draft_id = "draft_" + secrets.token_hex(3)
     conn.execute(
@@ -892,6 +917,8 @@ def _insert_draft(
             conn, account_id, draft_id, symbol, tactic, contracts, reason,
             limit_price=limit_price, put_strike=put_strike, call_strike=call_strike,
             multiplier=multiplier,
+            orders_today=orders_today,
+            max_orders_per_day=max_orders_per_day,
         )
     return {
         "id": draft_id,
@@ -928,24 +955,40 @@ def cash_reserve_math(
     cash=None,
     nav=None,
     cash_reserve_pct=None,
+    *,
+    excess=None,
+    cash_need=None,
 ) -> dict:
-    """Percent, floor, and shortfall for a cash-reserve comparison."""
+    """Percent, floor, and shortfall for a cash-reserve comparison.
+
+    Uses ExcessLiquidity when present (margin buffer); otherwise TotalCashValue.
+    Percent is post-trade when cash_need is set.
+    """
+    from athena_risk import reserve_buffer
+
     out: dict = {
         "cash_pct": None,
         "reserve_floor": None,
         "shortfall": None,
+        "buffer": None,
     }
-    if cash is None or nav is None or Decimal(nav) <= 0:
+    buffer = reserve_buffer(
+        None if excess is None else Decimal(excess),
+        None if cash is None else Decimal(cash),
+    )
+    if buffer is None or nav is None or Decimal(nav) <= 0:
         return out
-    cash_d = Decimal(cash)
+    need = Decimal(0) if cash_need is None else Decimal(cash_need)
+    post = buffer - need
     nav_d = Decimal(nav)
-    out["cash_pct"] = cash_d / nav_d * Decimal(100)
+    out["buffer"] = buffer
+    out["cash_pct"] = (post / nav_d * Decimal(100)).quantize(Decimal("0.01"))
     if cash_reserve_pct is None:
         return out
     reserve = Decimal(cash_reserve_pct)
     floor = nav_d * reserve / Decimal(100)
     out["reserve_floor"] = floor
-    out["shortfall"] = max(Decimal(0), floor - cash_d)
+    out["shortfall"] = max(Decimal(0), floor - post)
     return out
 
 
@@ -960,6 +1003,7 @@ def risk_block_steps(
     nav=None,
     cash_reserve_pct=None,
     cash_need=None,
+    excess=None,
     limit=None,
     put_strike=None,
     call_strike=None,
@@ -980,12 +1024,14 @@ def risk_block_steps(
     earnings_blackout_days=None,
 ) -> dict:
     """Structured trail payload for a risk-blocked draft."""
-    math = cash_reserve_math(cash, nav, cash_reserve_pct)
+    math = cash_reserve_math(
+        cash, nav, cash_reserve_pct, excess=excess, cash_need=cash_need,
+    )
     cash_pct = math["cash_pct"]
     reserve_floor = math["reserve_floor"]
     shortfall = math["shortfall"]
     if not note and (reason or "") == "cash is below cash_reserve_pct":
-        note = "book already under cash reserve; any open is blocked"
+        note = "post-trade excess liquidity would breach cash reserve"
     detail = format_risk_block_detail(
         tactic=tactic,
         contracts=contracts,
@@ -996,6 +1042,8 @@ def risk_block_steps(
         reserve_floor=reserve_floor,
         shortfall=shortfall,
         cash_need=cash_need,
+        excess=excess,
+        buffer=math.get("buffer"),
         reason=reason,
         note=note,
         orders_today=orders_today,
@@ -1031,6 +1079,7 @@ def risk_block_steps(
         "put_strike": None if put_strike is None else _num(put_strike),
         "call_strike": None if call_strike is None else _num(call_strike),
         "cash": None if cash is None else _num(cash),
+        "excess": None if excess is None else _num(excess),
         "nav": None if nav is None else _num(nav),
         "cash_pct": None if cash_pct is None else _num(cash_pct),
         "cash_reserve_pct": None if cash_reserve_pct is None else _num(cash_reserve_pct),
@@ -1067,6 +1116,8 @@ def format_risk_block_detail(
     reserve_floor=None,
     shortfall=None,
     cash_need=None,
+    excess=None,
+    buffer=None,
     reason: str = "",
     note: str = "",
     orders_today=None,
@@ -1086,6 +1137,8 @@ def format_risk_block_detail(
 ) -> str:
     """Human one-liner for Audit / Recent decisions / History."""
     cash = _as_decimal(cash)
+    excess = _as_decimal(excess)
+    buffer = _as_decimal(buffer)
     nav = _as_decimal(nav)
     cash_pct = _as_decimal(cash_pct)
     cash_reserve_pct = _as_decimal(cash_reserve_pct)
@@ -1101,11 +1154,18 @@ def format_risk_block_detail(
     parts = [f"{short} {int(contracts)}"]
     key = " ".join((reason or "").replace("_", " ").split()).lower()
     compared = False
+    metric = "EL" if excess is not None else "cash"
+    shown = buffer if buffer is not None else (excess if excess is not None else cash)
+    post = None if shown is None else (shown if cash_need is None else shown - cash_need)
 
     if "orders" in key and ("max" in key or "exceed" in key or "day" in key):
         if orders_today is not None and max_orders_per_day is not None:
-            parts.append(f"orders today {int(orders_today)} ≥ max {int(max_orders_per_day)}/day")
-            compared = True
+            used = int(orders_today)
+            cap = int(max_orders_per_day)
+            # Never invent an impossible inequality (e.g. live 2 ≥ max 8).
+            if used >= cap:
+                parts.append(f"orders today {used} ≥ max {cap}/day")
+                compared = True
     elif "contracts exceed" in key or "max contracts" in key:
         if max_contracts_per_symbol is not None:
             parts.append(f"contracts {int(contracts)} > max {int(max_contracts_per_symbol)}")
@@ -1123,9 +1183,9 @@ def format_risk_block_detail(
             compared = True
     elif is_cash_reserve_reason(reason) or ("cash" in key and "reserve" in key):
         if cash_pct is not None and cash_reserve_pct is not None:
-            cash_bit = f"cash {_num(cash_pct)}%"
-            if cash is not None:
-                cash_bit = f"{cash_bit} ({_money_plain(cash)})"
+            cash_bit = f"{metric} {_num(cash_pct)}%"
+            if post is not None:
+                cash_bit = f"{cash_bit} ({_money_plain(post)})"
             parts.append(f"{cash_bit} < reserve {_num(cash_reserve_pct)}%")
             if reserve_floor is not None and nav is not None:
                 parts.append(f"floor {_money_plain(reserve_floor)} on NAV {_money_plain(nav)}")
@@ -1133,9 +1193,9 @@ def format_risk_block_detail(
                 parts.append(f"short {_money_plain(shortfall)}")
             compared = True
         elif cash_pct is not None:
-            bit = f"cash {_num(cash_pct)}% NAV"
-            if cash is not None:
-                bit = f"{bit} ({_money_plain(cash)})"
+            bit = f"{metric} {_num(cash_pct)}% NAV"
+            if post is not None:
+                bit = f"{bit} ({_money_plain(post)})"
             parts.append(bit)
             compared = True
     elif "margin exceed" in key or "cycle margin" in key:
@@ -1175,14 +1235,19 @@ def _money_plain(value) -> str:
     return f"{amount:,.2f}"
 
 
-def _account_cash_marks(conn, account_id: str) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
-    """cash, nav, cash_reserve_pct for the active book."""
+def _account_cash_marks(
+    conn, account_id: str,
+) -> tuple[Decimal | None, Decimal | None, Decimal | None, Decimal | None]:
+    """cash, nav, cash_reserve_pct, excess_liquidity for the active book."""
     nav_row = conn.execute(
         "SELECT last_nav FROM nav_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
         (account_id,),
     ).fetchone()
-    cash_row = conn.execute(
-        "SELECT cash FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
+    mark = conn.execute(
+        """
+        SELECT cash, excess_liquidity
+        FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
+        """,
         (account_id,),
     ).fetchone()
     reserve = None
@@ -1190,9 +1255,10 @@ def _account_cash_marks(conn, account_id: str) -> tuple[Decimal | None, Decimal 
         reserve = Decimal(load_active(conn, account_id).risk.cash_reserve_pct)
     except Exception:
         reserve = None
-    cash = None if cash_row is None else Decimal(cash_row[0])
+    cash = None if mark is None or mark[0] is None else Decimal(mark[0])
+    excess = None if mark is None or len(mark) < 2 or mark[1] is None else Decimal(mark[1])
     nav = None if nav_row is None else Decimal(nav_row[0])
-    return cash, nav, reserve
+    return cash, nav, reserve, excess
 
 
 def is_cash_reserve_reason(reason: str) -> bool:
@@ -1221,7 +1287,7 @@ def _risk_block_context(conn, account_id: str, symbol: str) -> dict:
     """Marks and limits for a rich risk-block Detail line."""
     settings = load_active(conn, account_id)
     risk = settings.risk
-    cash, nav, reserve = _account_cash_marks(conn, account_id)
+    cash, nav, reserve, excess = _account_cash_marks(conn, account_id)
     mark = conn.execute(
         """
         SELECT margin FROM account_marks
@@ -1234,6 +1300,7 @@ def _risk_block_context(conn, account_id: str, symbol: str) -> dict:
     return {
         "cash": cash,
         "nav": nav,
+        "excess": excess if excess is not None else guard.get("excess"),
         "cash_reserve_pct": reserve,
         "margin": None if mark is None or mark[0] is None else Decimal(mark[0]),
         "orders_today": guard.get("orders_today"),
@@ -1262,6 +1329,7 @@ def cash_comparison_view(
     nav=None,
     cash_reserve_pct=None,
     cash_need=None,
+    excess=None,
     orders_today=None,
     max_orders_per_day=None,
     max_contracts_per_symbol=None,
@@ -1290,6 +1358,7 @@ def cash_comparison_view(
 
     cash_v = cash if cash is not None else _as_decimal(payload.get("cash"))
     nav_v = nav if nav is not None else _as_decimal(payload.get("nav"))
+    excess_v = excess if excess is not None else _as_decimal(payload.get("excess"))
     reserve_v = cash_reserve_pct if cash_reserve_pct is not None else _as_decimal(payload.get("cash_reserve_pct"))
     need_v = cash_need if cash_need is not None else _as_decimal(payload.get("cash_need"))
     orders_v = orders_today if orders_today is not None else _pick(None, "orders_today")
@@ -1321,12 +1390,18 @@ def cash_comparison_view(
         earnings_blackout_days if earnings_blackout_days is not None
         else _pick(None, "earnings_blackout_days")
     )
-    math = cash_reserve_math(cash_v, nav_v, reserve_v)
+    math = cash_reserve_math(cash_v, nav_v, reserve_v, excess=excess_v, cash_need=need_v)
     qty = 0 if contracts is None else int(contracts)
     detail = ""
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
     if items and isinstance(items[0], dict):
         detail = items[0].get("detail") or ""
+    frozen_day_orders = (
+        is_day_orders_reason(reason)
+        and payload.get("orders_today") is not None
+        and payload.get("max_orders_per_day") is not None
+        and bool(detail)
+    )
     rebuilt = format_risk_block_detail(
         tactic=tactic,
         contracts=qty,
@@ -1337,6 +1412,8 @@ def cash_comparison_view(
         reserve_floor=math["reserve_floor"],
         shortfall=math["shortfall"],
         cash_need=need_v,
+        excess=excess_v,
+        buffer=math.get("buffer"),
         reason=reason,
         note=str(payload.get("note") or ""),
         orders_today=orders_v,
@@ -1354,13 +1431,22 @@ def cash_comparison_view(
         earnings_in_days=earn_v,
         earnings_blackout_days=blackout_v,
     )
-    # Prefer rebuilt comparison when it carries more than the bare reason.
-    if rebuilt and rebuilt != f"{(tactic[5:] if str(tactic).startswith('OPEN_') else (tactic or '—'))} {qty} · {reason}":
+    # Keep the frozen day-orders Detail from the trail; do not rebuild over it
+    # with live counts that no longer match the block.
+    if frozen_day_orders:
+        pass
+    elif rebuilt and rebuilt != f"{(tactic[5:] if str(tactic).startswith('OPEN_') else (tactic or '—'))} {qty} · {reason}":
         detail = rebuilt
     elif not detail:
         detail = rebuilt or reason or ""
+    # Prefer trail-frozen day-order fields when present.
+    if payload.get("orders_today") is not None and orders_today is None:
+        orders_v = payload.get("orders_today")
+    if payload.get("max_orders_per_day") is not None and max_orders_per_day is None:
+        max_orders_v = payload.get("max_orders_per_day")
     return {
         "cash": "" if cash_v is None else _num(cash_v),
+        "excess": "" if excess_v is None else _num(excess_v),
         "nav": "" if nav_v is None else _num(nav_v),
         "cash_pct": "" if math["cash_pct"] is None else _num(math["cash_pct"]),
         "cash_reserve_pct": "" if reserve_v is None else _num(reserve_v),
@@ -1397,6 +1483,8 @@ def _note_risk_block(
     multiplier: str = "100",
     cash_need: Decimal | None = None,
     note: str = "",
+    orders_today=None,
+    max_orders_per_day=None,
 ) -> None:
     from athena_strategy.agents import write_risk_block
 
@@ -1406,6 +1494,9 @@ def _note_risk_block(
         need = draft_cash_need(
             tactic, contracts, limit_price=limit_price, put_strike=put_strike, multiplier=multiplier,
         )
+    # Prefer the snapshot from block_reason / ticket guard over a re-fetched context.
+    frozen_orders = ctx.get("orders_today") if orders_today is None else int(orders_today)
+    frozen_max = ctx.get("max_orders_per_day") if max_orders_per_day is None else int(max_orders_per_day)
     steps = risk_block_steps(
         draft_id=draft_id,
         symbol=symbol,
@@ -1414,14 +1505,15 @@ def _note_risk_block(
         reason=reason,
         cash=ctx.get("cash"),
         nav=ctx.get("nav"),
+        excess=ctx.get("excess"),
         cash_reserve_pct=ctx.get("cash_reserve_pct"),
         cash_need=need,
         limit=limit_price,
         put_strike=put_strike,
         call_strike=call_strike,
         note=note,
-        orders_today=ctx.get("orders_today"),
-        max_orders_per_day=ctx.get("max_orders_per_day"),
+        orders_today=frozen_orders,
+        max_orders_per_day=frozen_max,
         max_contracts_per_symbol=ctx.get("max_contracts_per_symbol"),
         max_position_per_symbol=ctx.get("max_position_per_symbol"),
         max_symbol_pct_nav=ctx.get("max_symbol_pct_nav"),

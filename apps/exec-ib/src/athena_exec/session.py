@@ -171,22 +171,26 @@ def _store_account_mark(conn, account: str, day, broker, currency: str = "") -> 
         return
     cash = broker.cash(account)
     margin = broker.margin(account)
+    excess = None
+    if hasattr(broker, "excess_liquidity"):
+        excess = broker.excess_liquidity(account)
     base, balances, rates = ("", {}, {})
     if hasattr(broker, "cash_ledger"):
         base, balances, rates = broker.cash_ledger(account)
     if base and currency and hasattr(broker, "fill_rates"):
         rates = broker.fill_rates(base, rates, (currency,))
-    if cash is None and margin is None and not balances:
+    if cash is None and margin is None and excess is None and not balances:
         return
     conn.execute(
         """
         INSERT INTO account_marks (
-            account_id, day, cash, margin, base_currency, cash_balances, fx_rates
+            account_id, day, cash, margin, excess_liquidity, base_currency, cash_balances, fx_rates
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (account_id, day) DO UPDATE SET
             cash = EXCLUDED.cash,
             margin = EXCLUDED.margin,
+            excess_liquidity = EXCLUDED.excess_liquidity,
             base_currency = EXCLUDED.base_currency,
             cash_balances = EXCLUDED.cash_balances,
             fx_rates = EXCLUDED.fx_rates
@@ -196,6 +200,7 @@ def _store_account_mark(conn, account: str, day, broker, currency: str = "") -> 
             day,
             cash,
             margin,
+            excess,
             base,
             Jsonb({code: str(amount) for code, amount in balances.items()}),
             Jsonb({code: str(rate) for code, rate in rates.items()}),

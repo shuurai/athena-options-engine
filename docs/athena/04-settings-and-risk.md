@@ -40,7 +40,7 @@ Everything parametric: Settings.
 |-----|-----------------|------|
 | `max_symbol_pct_nav` | 20% | Cap per underlying |
 | `max_short_opt_margin_pct` | 50% | Seller margin budget |
-| `cash_reserve_pct` | 30% | CSP collateral buffer |
+| `cash_reserve_pct` | 30% | Post-trade excess liquidity floor vs NAV (IB ExcessLiquidity; TotalCashValue fallback) |
 | `max_contracts_per_symbol` | 1–3 | Size |
 | `max_position_per_symbol` | 0 | Money cap per symbol, in the ticker currency. Zero is off. One option contract is the latest price times the multiplier. A total within 10% still fits. When one contract is already above the cap, the contract limit is used. |
 | `max_orders_per_day` | 10 | Activity cap |
@@ -74,7 +74,7 @@ Risk Guard runs on every draft, independent of privilege:
 
 - A covered call needs `floor(shares / 100)` contracts still free after short calls already held or submitted. The block text names the shares required and the shares held.
 - A second short put is blocked. A strangle is blocked when an option leg is already open. A short put beside a covered call is allowed unless `strict_conflict` is on.
-- A ticket’s cash need is the share buys plus each short put’s strike times its multiplier. If that need breaks `cash_reserve_pct`, every leg on the ticket is blocked. Missing marks are skipped.
+- A ticket’s cash need is the share buys plus each short put’s strike times its multiplier. The reserve gate uses excess liquidity (or TotalCashValue when EL is missing): block when `(buffer − need) / NAV` is under `cash_reserve_pct`. Every leg on the ticket is blocked. Missing marks are skipped.
 
 ### 2. Strategy (NFR params)
 

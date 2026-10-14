@@ -137,7 +137,7 @@ These run before a draft can be pending. They use the same account and the same 
 - A second short put on the same name is blocked.
 - A strangle is blocked when that name already has an option leg.
 - A short put and a covered call may both exist. That is the wheel. `strict_conflict` on restores the old rule that any short blocks every new open. Default is off.
-- After each leg is legal, the ticket is checked as one cash need: share buys at their limits, plus each short put’s strike times the multiplier. If that need breaks `cash_reserve_pct`, every leg on the ticket is blocked. Missing cash or NAV marks skip that check. They are not invented. New short margin uses `margin_rate` (default 20%).
+- After each leg is legal, the ticket is checked as one cash need: share buys at their limits, plus each short put’s strike times the multiplier. The reserve compares excess liquidity (or TotalCashValue when EL is missing) after that need to NAV against `cash_reserve_pct`. If it breaks, every leg on the ticket is blocked. Missing marks skip that check. They are not invented. New short margin uses `margin_rate` (default 20%).
 
 ## Position management
 

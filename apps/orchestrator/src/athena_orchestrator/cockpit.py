@@ -67,6 +67,7 @@ def sleeve(conn, account: str, now: datetime | None = None) -> dict:
     pending, ttl = _pending(conn, account, now or datetime.now(HKT))
     return {
         "nav": marked(latest_shown, currency) if latest_shown is not None else DASH,
+        "nav_amount": None if latest_shown is None else float(latest_shown),
         "change": change,
         "account": account,
         "currency": currency,

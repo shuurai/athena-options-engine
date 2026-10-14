@@ -399,6 +399,7 @@ def _decision_trs(rows, conn=None, account: str = "") -> str:
                 "by": by or DASH,
                 "detail": cash_view["detail"] or reason or by or DASH,
                 "cash": cash_view["cash"] or DASH,
+                "excess": cash_view.get("excess") or DASH,
                 "nav": cash_view["nav"] or DASH,
                 "cash_pct": cash_view["cash_pct"] or DASH,
                 "cash_reserve_pct": cash_view["cash_reserve_pct"] or DASH,
@@ -437,7 +438,7 @@ def _decision_cash_view(
     )
 
     empty = {
-        "cash": "", "nav": "", "cash_pct": "", "cash_reserve_pct": "",
+        "cash": "", "excess": "", "nav": "", "cash_pct": "", "cash_reserve_pct": "",
         "reserve_floor": "", "shortfall": "", "cash_need": "",
         "orders_today": "", "max_orders_per_day": "", "detail": "",
     }
@@ -448,13 +449,14 @@ def _decision_cash_view(
             detail = items[0].get("detail") or ""
         return {**empty, "detail": detail}
 
-    cash = nav = reserve = None
+    cash = nav = reserve = excess = None
     orders_today = max_orders = None
     thin_cash = not (trail.get("cash") and trail.get("nav") and trail.get("cash_pct"))
-    thin_orders = trail.get("orders_today") is None or trail.get("max_orders_per_day") is None
+    # Only backfill when the trail never stored the frozen pair — never overwrite it.
+    thin_orders = trail.get("orders_today") is None and trail.get("max_orders_per_day") is None
     if conn and account:
         if thin_cash and is_cash_reserve_reason(reason):
-            cash, nav, reserve = _account_cash_marks(conn, account)
+            cash, nav, reserve, excess = _account_cash_marks(conn, account)
         if thin_orders and is_day_orders_reason(reason):
             try:
                 max_orders = load_active(conn, account).risk.max_orders_per_day
@@ -462,6 +464,14 @@ def _decision_cash_view(
                 max_orders = None
             if symbol:
                 orders_today = _orders_today(conn, account, symbol)
+            # Live counts that no longer explain the block must not paint 2 ≥ 8.
+            if (
+                orders_today is not None
+                and max_orders is not None
+                and int(orders_today) < int(max_orders)
+            ):
+                orders_today = None
+                max_orders = None
     return cash_comparison_view(
         tactic=tactic or "",
         contracts=contracts,
@@ -469,6 +479,7 @@ def _decision_cash_view(
         trail=trail,
         cash=cash,
         nav=nav,
+        excess=excess,
         cash_reserve_pct=reserve,
         orders_today=orders_today,
         max_orders_per_day=max_orders,
@@ -587,13 +598,20 @@ def _draft_risk(conn, account: str, symbol: str, contracts: int, expiry, tactic:
             (account,),
         ).fetchone()
         mark = conn.execute(
-            "SELECT cash FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
+            """
+            SELECT cash, excess_liquidity
+            FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
+            """,
             (account,),
         ).fetchone()
         nav_value = None if nav is None or nav[0] is None else Decimal(nav[0])
         cash = None if mark is None or mark[0] is None else Decimal(mark[0])
-        if nav_value and nav_value > 0 and cash is not None and tactic in {"OPEN_CSP", "OPEN_STRANGLE"}:
-            ok = cash / nav_value * Decimal(100) >= limits.cash_reserve_pct
+        excess = None if mark is None or len(mark) < 2 or mark[1] is None else Decimal(mark[1])
+        from athena_risk import reserve_buffer
+
+        buffer = reserve_buffer(excess, cash)
+        if nav_value and nav_value > 0 and buffer is not None and tactic in {"OPEN_CSP", "OPEN_STRANGLE", "BUY"}:
+            ok = buffer / nav_value * Decimal(100) >= limits.cash_reserve_pct
             badges.append(("CASH OK" if ok else "CASH LOW", "green" if ok else "amber"))
         stored = conn.execute(
             "SELECT indicators FROM symbol_phases WHERE account_id = %s AND symbol = %s",
@@ -896,7 +914,8 @@ def _universe(conn, account: str, query: dict, note: str = "") -> dict:
         "</div>"
         '<div class="scroll-y" data-feed="/universe" data-offset="'
         f'{nxt}" data-more="{"1" if more else "0"}"><table class="data" id="pool-table"><thead><tr>'
-        f"{_sort_th('Symbol', 'symbol')}{_sort_th('Price', 'price')}<th>1D %</th><th>52w</th>{_sort_th('Mkt cap', 'cap')}"
+        f"{_sort_th('Symbol', 'symbol')}{_sort_th('Price', 'price')}{_sort_th('1D %', 'change')}"
+        f"<th>52w</th>{_sort_th('Mkt cap', 'cap')}"
         "<th>Market</th><th>Classifiers</th><th>IVR</th><th>Phase</th>"
         "<th>Intent</th><th>Long</th><th>May buy</th><th>Enabled</th><th>CSP</th><th>CC</th><th>Strangle</th><th></th></tr></thead>"
         f"<tbody>{body_rows}</tbody></table></div></div>"
@@ -987,6 +1006,9 @@ def _book_page(conn, account: str, query: dict) -> dict:
     if not account:
         return _html("Book", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
     settings = load_active(conn, account)
+    from athena_orchestrator.pulse import note_view, watch_symbols
+
+    note_view(watch_symbols(conn, account), account)
     load_bars(conn, settings.strategy.regime_index, settings.strategy.regime_lookback)
     if not panel_enabled():
         return _html("Book", "Charts are off.", '<div class="card"><p>Charts are off.</p></div>', [("info", "panel off")])
@@ -994,7 +1016,11 @@ def _book_page(conn, account: str, query: dict) -> dict:
     buckets = _book_buckets(conn, account, settings)
     assignment = _book_assignment(conn, account, settings)
     intents = {symbol.upper(): flags.intent for symbol, flags in settings.tactic_flags.items()}
-    heatmap = _position_heatmap(_position_rows(conn, account), intents)
+    position_rows = _position_rows(conn, account)
+    heatmap = _position_heatmap(position_rows, intents)
+    currency = report_currency(conn, account)
+    base, _balances, rates = ledger(conn, account)
+    live = live_book_script(position_rows, currency, base, rates)
     body = (
         '<div class="book-stack">'
         '<div class="grid cols-3">'
@@ -1003,6 +1029,7 @@ def _book_page(conn, account: str, query: dict) -> dict:
         f'<div class="card"><h2>Assignment now</h2>{_assignment_chart(assignment, settings.risk)}</div>'
         "</div>"
         f'<div class="card"><h2>Positions</h2>{heatmap}</div>'
+        f"{live}"
         "</div>"
     )
     return _html(
@@ -1297,11 +1324,14 @@ def _heat_tile(row: dict) -> dict:
     if pnl is not None and cost > 0:
         pct = float(Decimal(pnl) / cost * Decimal(100))
     name = str(row["symbol"])
+    kind = _position_kind(row)
     if row.get("sec_type") == "OPT":
         bits = [name, str(row.get("right") or ""), str(row.get("strike") or "")]
         name = " ".join(bit for bit in bits if bit)
     return {
         "name": name,
+        "symbol": str(row["symbol"]),
+        "kind": kind,
         "mark": str(row.get("mark") or ""),
         "area": float(area),
         "cost": float(cost),
@@ -1363,6 +1393,8 @@ def _heat_pack(groups: list[dict]) -> str:
             fill, ink = _heat_color(tile["pct"])
             tiles.append({
                 "name": tile["name"],
+                "symbol": tile.get("symbol") or "",
+                "kind": tile.get("kind") or "",
                 "mark": tile["mark"],
                 "area": tile["area"],
                 "pct": tile["pct"],
@@ -1425,9 +1457,13 @@ def _position_heatmap(rows: list[dict], intents: dict[str, str]) -> str:
             bg, fg = _heat_color(tile["pct"])
             gap_x, gap_y = tile_x + 2, tile_y + 2
             gap_w, gap_h = max(0.0, tile_w - 4), max(0.0, tile_h - 4)
+            stock_attrs = ""
+            if tile.get("kind") == "stock" and tile.get("symbol"):
+                stock_attrs = f' data-symbol="{escape(tile["symbol"], quote=True)}"'
             parts.append(
                 f'<rect x="{gap_x:.1f}" y="{gap_y:.1f}" width="{gap_w:.1f}" height="{gap_h:.1f}" fill="{bg}" '
-                f'data-name="{escape(tile["name"], quote=True)}"><title>{escape(_heat_tip(tile))}</title></rect>'
+                f'data-name="{escape(tile["name"], quote=True)}"{stock_attrs}>'
+                f'<title>{escape(_heat_tip(tile))}</title></rect>'
             )
             if gap_w <= 32 or gap_h <= 22:
                 continue
@@ -1440,16 +1476,22 @@ def _position_heatmap(rows: list[dict], intents: dict[str, str]) -> str:
                 continue
             cursor = gap_y + size + 4 + size + 2
             if tile["mark"]:
+                mark_attrs = ""
+                if tile.get("kind") == "stock" and tile.get("symbol"):
+                    mark_attrs = f' data-heat-mark="{escape(tile["symbol"], quote=True)}"'
                 parts.append(
                     f'<text x="{gap_x + 6:.1f}" y="{cursor:.1f}" fill="{fg}" font-size="{size}" '
-                    f'font-family="{font}">{escape(tile["mark"])}</text>'
+                    f'font-family="{font}"{mark_attrs}>{escape(tile["mark"])}</text>'
                 )
                 cursor += size + 2
             if tile["pct"] is not None:
                 sign = "+" if tile["pct"] > 0 else ""
+                pct_attrs = ""
+                if tile.get("kind") == "stock" and tile.get("symbol"):
+                    pct_attrs = f' data-heat-pct="{escape(tile["symbol"], quote=True)}"'
                 parts.append(
                     f'<text x="{gap_x + 6:.1f}" y="{cursor:.1f}" fill="{fg}" font-size="{size}" '
-                    f'font-family="{font}">Δ {sign}{tile["pct"]:.1f}%</text>'
+                    f'font-family="{font}"{pct_attrs}>Δ {sign}{tile["pct"]:.1f}%</text>'
                 )
     return (
         f'<script type="application/json" id="book-heat-data">{_heat_pack(groups)}</script>'
@@ -1491,6 +1533,7 @@ def _positions_page(conn, account: str, query: dict) -> dict:
         f"{_position_stat('Option', str(sum(1 for row in rows if row['sec_type'] == 'OPT')), 'contracts')}"
         f"{_position_pnl_stat(rows, currency, base, rates)}"
         "</div>"
+        f"{live_book_script(rows, currency, base, rates)}"
         '<div class="card fill"><h2>Open positions '
         '<button class="more" data-cmd="sync-positions" type="button">Sync from IB</button></h2>'
         f'<div class="filters">{filters}</div>'
@@ -1533,9 +1576,11 @@ def _position_rows(conn, account: str) -> list[dict]:
         (account, _replaying(conn, account)),
     ).fetchall()
     today = datetime.now(HKT).date()
+    from athena_orchestrator.pulse import ib_move
     from athena_strategy.drafts import last_tradeable_price
 
     closes: dict[str, Decimal | None] = {}
+    moves: dict[str, tuple[str, str, str]] = {}
     rows = []
     for symbol, quantity, avg_price, sec_type, expiry, right, strike, mark, currency, multiplier, value, unrealized, realized, snapshot_at, simulated in found:
         qty = Decimal(quantity)
@@ -1545,19 +1590,34 @@ def _position_rows(conn, account: str) -> list[dict]:
         sec = sec_type or "STK"
         price = None if mark is None else Decimal(mark)
         stored_close = False
-        if price is None and sec == "STK":
-            if symbol not in closes:
-                closes[symbol] = last_tradeable_price(conn, symbol)
-            stored = closes[symbol]
-            if stored is not None and stored > 0:
-                price = stored
-                stored_close = True
+        day_change, day_tone = DASH, ""
+        if sec == "STK":
+            if symbol not in moves:
+                moves[symbol] = ib_move(conn, symbol)
+            px_text, day_change, day_tone = moves[symbol]
+            if px_text and px_text != DASH:
+                try:
+                    price = Decimal(px_text.replace(",", ""))
+                    stored_close = False
+                except (InvalidOperation, ValueError):
+                    pass
+            elif price is None:
+                if symbol not in closes:
+                    closes[symbol] = last_tradeable_price(conn, symbol)
+                stored = closes[symbol]
+                if stored is not None and stored > 0:
+                    price = stored
+                    stored_close = True
         average = Decimal(avg_price)
         market_value = None if value is None else Decimal(value)
-        if market_value is None and price is not None:
+        if sec == "STK" and price is not None:
+            market_value = qty * price * mult
+        elif market_value is None and price is not None:
             market_value = qty * price * mult
         pnl = None if unrealized is None else Decimal(unrealized)
-        if pnl is None and price is not None:
+        if sec == "STK" and price is not None:
+            pnl = (price - average) * qty * mult
+        elif pnl is None and price is not None:
             pnl = (price - average) * qty * mult
         dte = "" if expiry is None else str((expiry - today).days)
         rows.append({
@@ -1570,6 +1630,8 @@ def _position_rows(conn, account: str) -> list[dict]:
             "dte": dte,
             "strike": "" if strike is None else _plain_number(strike),
             "mark": "" if price is None else f"{price:,.2f}",
+            "day_change": day_change,
+            "day_tone": day_tone,
             "stored_close": stored_close,
             "market": market_value,
             "value": "" if market_value is None else f"{market_value:,.2f}",
@@ -1613,8 +1675,8 @@ def _position_nlv_stat(rows: list[dict], currency: str = "USD", base: str = "", 
         return _position_stat("NLV", DASH, f"no {currency} rate{gap}")
     return (
         '<div class="card stat"><div class="label">NLV</div>'
-        f'<div class="value">{escape(marked(total, currency))}</div>'
-        f'<div class="meta">{escape(currency + gap)}</div></div>'
+        f'<div class="value" data-live="nlv">{escape(marked(total, currency))}</div>'
+        f'<div class="meta" data-live="nlv-meta">{escape(currency + gap)}</div></div>'
     )
 
 
@@ -1628,9 +1690,66 @@ def _position_pnl_stat(rows: list[dict], currency: str = "USD", base: str = "", 
     tone = "up" if total > 0 else "down" if total < 0 else ""
     return (
         '<div class="card stat"><div class="label">Open P&amp;L</div>'
-        f'<div class="value {tone}">{escape(_signed(total))}</div>'
-        f'<div class="meta {tone}">{escape(currency)}</div></div>'
+        f'<div class="value {tone}" data-live="pnl">{escape(_signed(total))}</div>'
+        f'<div class="meta {tone}" data-live="pnl-meta">{escape(currency)}</div></div>'
     )
+
+
+def _position_live_pack(
+    rows: list[dict],
+    currency: str,
+    base: str,
+    rates: dict | None,
+    sleeve_nav: float | None = None,
+) -> dict:
+    """Full open book for browser-side NLV / Open P&L / sleeve ticks."""
+    legs = []
+    for row in rows:
+        mark = None
+        raw_mark = str(row.get("mark") or "").replace(",", "").strip()
+        if raw_mark and raw_mark != DASH:
+            try:
+                mark = float(Decimal(raw_mark))
+            except (InvalidOperation, ValueError):
+                mark = None
+        value = None if row.get("market") is None else float(Decimal(row["market"]))
+        pnl = None if row.get("pnl") is None else float(Decimal(row["pnl"]))
+        legs.append({
+            "symbol": row["symbol"],
+            "kind": _position_kind(row),
+            "qty": float(Decimal(row["qty"])),
+            "avg": float(Decimal(row["avg"])),
+            "mult": float(Decimal(str(row.get("mult") or "1"))),
+            "ccy": (row.get("currency") or "USD").strip() or "USD",
+            "mark": mark,
+            "value": value,
+            "pnl": pnl,
+        })
+    table = {
+        str(code): float(Decimal(rate))
+        for code, rate in (rates or {}).items()
+    }
+    return {
+        "currency": currency,
+        "base": base or currency,
+        "rates": table,
+        "sleeve_nav": sleeve_nav,
+        "legs": legs,
+    }
+
+
+def live_book_script(
+    rows: list[dict],
+    currency: str,
+    base: str,
+    rates: dict | None,
+    sleeve_nav: float | None = None,
+) -> str:
+    """Hidden JSON the console uses to recompute totals on each pulse tick."""
+    payload = _position_live_pack(rows, currency, base, rates, sleeve_nav=sleeve_nav)
+    text = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
+    return f'<script type="application/json" id="live-book">{text}</script>'
+
 
 
 def _sum_in(rows: list[dict], field: str, currency: str, base: str, rates: dict | None) -> tuple[Decimal, bool]:
@@ -1883,7 +2002,7 @@ def _orders_table(rows: str) -> str:
     return (
         '<table class="data" id="orders-table"><thead><tr>'
         "<th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Filled</th><th>Type</th>"
-        "<th>Limit</th><th>vs last</th><th>Est. cost</th><th>Stop</th>"
+        "<th>Limit</th><th>Distance</th><th>Est. cost</th><th>Stop</th>"
         "<th>Status</th><th>IB id</th><th>Tactic</th>"
         f"</tr></thead><tbody>{rows}</tbody></table>"
     )
@@ -1936,6 +2055,7 @@ def _position_tr(row: dict) -> str:
     if row["sec_type"] == "OPT" and row["qty"] < 0:
         qty = f"-{qty}"
     average = f'{row["avg"]:,.2f}'
+    mark_cell = _position_mark_cell(row)
     return (
         f'<tr data-cmd="position-row" {attrs} style="cursor:pointer">'
         f'<td><b>{escape(row["symbol"])}</b>'
@@ -1946,9 +2066,7 @@ def _position_tr(row: dict) -> str:
         f'<td><span class="tag {side_tag}">{side}</span></td>'
         f'<td class="mono">{escape(qty)}</td>'
         f'<td class="mono">{escape(average)}</td>'
-        f'<td class="mono pos-mark">{escape(row["mark"] or DASH)}'
-        + ('<div class="sym-name">close</div>' if row.get("stored_close") else "")
-        + "</td>"
+        f"{mark_cell}"
         f'<td class="mono pos-value">{escape(row["value"] or DASH)}</td>'
         f'<td class="mono pos-pnl {pnl_class}">{escape(pnl_text)}</td>'
         f'<td class="mono">{escape(row["expiry"] or DASH)}'
@@ -1956,6 +2074,26 @@ def _position_tr(row: dict) -> str:
         + "</td>"
         f'<td class="mono">{escape(row["strike"] or DASH)}</td>'
         "</tr>"
+    )
+
+
+def _position_mark_cell(row: dict) -> str:
+    """Stock marks match cockpit pulse: last + day %. Options stay a plain mark."""
+    mark = row.get("mark") or DASH
+    if row.get("sec_type") == "STK" or _position_kind(row) == "stock":
+        tone = escape(row.get("day_tone") or "")
+        change = escape(row.get("day_change") or DASH)
+        return (
+            f'<td class="mono pos-mark pulse-px" data-symbol="{escape(row["symbol"], quote=True)}">'
+            f'<span class="px">{escape(mark)}</span> '
+            f'<span class="px-chg {tone}">{change}</span>'
+            + ('<div class="sym-name">close</div>' if row.get("stored_close") else "")
+            + "</td>"
+        )
+    return (
+        f'<td class="mono pos-mark">{escape(mark)}'
+        + ('<div class="sym-name">close</div>' if row.get("stored_close") else "")
+        + "</td>"
     )
 
 
@@ -2380,7 +2518,8 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
     display = current.global_currency or "—"
     limits_help = (
         f"Book base from IB is {book_base or 'unknown'}. "
-        f"Cash, NAV, margin, and max position use this. "
+        f"Cash, NAV, margin, excess liquidity, and max position use this. "
+        f"Cash reserve compares excess liquidity (or TotalCashValue when EL is missing) to NAV after the trade. "
         f"Settings Currency ({display}) is display only."
     )
     cards = []
@@ -2432,7 +2571,7 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         f'data-help="{escape(limits_help, quote=True)}">?</button></span></h2>'
         '<div class="form-grid">'
         f"{_limit('Max symbol % NAV', 'max_symbol', risk.max_symbol_pct_nav, 'Share of net liquidation one underlying may use. A new open above this is blocked.')}"
-        f"{_limit('Cash reserve %', 'cash', risk.cash_reserve_pct, 'Cash that must stay free, as a percent of net liquidation. A cash-secured open below this is blocked.')}"
+        f"{_limit('Cash reserve %', 'cash', risk.cash_reserve_pct, 'Excess liquidity that must remain after a buy or cash-secured open, as a percent of net liquidation. Uses IB ExcessLiquidity on margin; falls back to TotalCashValue when EL is missing.')}"
         f"{_limit('Daily loss halt %', 'halt', risk.daily_loss_halt_pct, 'Trading pauses when today drops this percent from the first mark. Zero turns this off.')}"
         f"{_limit('Max contracts / symbol', 'contracts', risk.max_contracts_per_symbol, 'Most contracts one symbol may use. A draft above this is blocked.')}"
         f"{_limit('Max position / symbol', 'position', risk.max_position_per_symbol, _position_cap_help(book_base))}"
@@ -2628,11 +2767,13 @@ def _pool_row(conn, account: str, settings, symbol: str) -> str:
     phase_html = f'<span class="tag">{escape(phase)}</span>' if phase else DASH
     price_sort = "" if last == DASH else last
     cap_sort = "" if cap is None else format(Decimal(cap), "f")
+    change_sort = _change_sort_value(change)
     return (
         f"<tr{faded}"
         f' data-symbol="{escape(symbol, quote=True)}"'
         f' data-name="{escape(name, quote=True)}"'
         f' data-price="{escape(price_sort, quote=True)}"'
+        f' data-change="{escape(change_sort, quote=True)}"'
         f' data-cap="{escape(cap_sort, quote=True)}"'
         f' data-classifiers="{escape(classifiers, quote=True)}">'
         f'<td><span class="sym-line"><span class="pool-spin sim-spin" aria-hidden="true"></span>'
@@ -4007,6 +4148,20 @@ def _replaying(conn, account: str) -> bool:
     return found is not None
 
 
+def _change_sort_value(change: str) -> str:
+    """Numeric 1D% for client sort. Empty when the cell is a dash."""
+    text = (change or "").strip()
+    if not text or text == DASH:
+        return ""
+    if text.endswith("%"):
+        text = text[:-1]
+    text = text.lstrip("+")
+    try:
+        return format(Decimal(text), "f")
+    except Exception:
+        return ""
+
+
 def _closes(conn, symbol: str) -> tuple[str, str, str]:
     from athena_strategy.simbars import in_replay, load_daily
 
@@ -4298,7 +4453,10 @@ def _history_rows(conn, account: str) -> list[dict]:
         """
         SELECT f.created_at, f.symbol, f.tactic, COALESCE(d.phase, ''), f.draft_id,
                f.price, f.contracts, COALESCE(NULLIF(f.side, ''), o.action, ''),
-               COALESCE(o.multiplier, '100'),
+               COALESCE(
+                   NULLIF(o.multiplier, ''),
+                   CASE WHEN COALESCE(NULLIF(f.sec_type, ''), 'STK') = 'OPT' THEN '100' ELSE '1' END
+               ),
                COALESCE(a.actor, ''), COALESCE(a.reason, ''), COALESCE(d.reason, ''),
                f.commission, COALESCE(f.commission_currency, ''), COALESCE(f.exec_id, ''),
                COALESCE(NULLIF(f.sec_type, ''), 'STK')
@@ -4335,13 +4493,13 @@ def _history_rows(conn, account: str) -> list[dict]:
                 tactic,
                 phase,
                 "filled",
-                _fill_cash(price, contracts, action, multiplier),
+                _fill_cash(price, contracts, action, multiplier, sec_type or "STK"),
                 actor,
                 approval_reason or draft_reason,
                 side=action or "",
                 qty=contracts,
                 price=price,
-                multiplier=multiplier,
+                multiplier=_fill_multiplier(multiplier, sec_type or "STK"),
                 commission=commission,
                 commission_currency=commission_ccy or "",
                 exec_id=exec_id or "",
@@ -4421,6 +4579,7 @@ def _history_rows(conn, account: str) -> list[dict]:
                 put_strike=put_strike or trail.get("put_strike") or "",
                 call_strike=call_strike or trail.get("call_strike") or "",
                 cash=cash_view["cash"],
+                excess=cash_view.get("excess") or "",
                 nav=cash_view["nav"],
                 cash_pct=cash_view["cash_pct"],
                 cash_reserve_pct=cash_view["cash_reserve_pct"],
@@ -4459,6 +4618,7 @@ def _history_item(
     put_strike: str = "",
     call_strike: str = "",
     cash: str = "",
+    excess: str = "",
     nav: str = "",
     cash_pct: str = "",
     cash_reserve_pct: str = "",
@@ -4470,6 +4630,14 @@ def _history_item(
     detail_override: str = "",
 ) -> dict:
     local = created.astimezone(HKT)
+    kind = sec_type or ""
+    mult = _fill_multiplier(multiplier, kind) if status == "filled" else (multiplier or "")
+    shown_pnl = pnl
+    if status == "filled" and side and qty is not None and price is not None:
+        # Correct stock fills that were sized with option ×100.
+        recomputed = _fill_cash(price, qty, side, multiplier, kind)
+        if recomputed is not None:
+            shown_pnl = recomputed
     item = {
         "when": local.strftime("%Y-%m-%d"),
         "clock": local.strftime("%m-%d %H:%M"),
@@ -4477,22 +4645,23 @@ def _history_item(
         "tactic": tactic,
         "phase": phase or "",
         "status": status,
-        "pnl": pnl,
+        "pnl": shown_pnl,
         "actor": actor or "",
         "reason": reason or "",
         "side": (side or "").upper(),
         "qty": qty,
         "price": price,
-        "multiplier": multiplier or "",
+        "multiplier": mult,
         "commission": commission,
         "commission_currency": commission_currency or "",
         "exec_id": exec_id or "",
-        "sec_type": sec_type or "",
+        "sec_type": kind,
         "draft_id": draft_id or "",
         "limit": limit or "",
         "put_strike": put_strike or "",
         "call_strike": call_strike or "",
         "cash": cash or "",
+        "excess": excess or "",
         "nav": nav or "",
         "cash_pct": cash_pct or "",
         "cash_reserve_pct": cash_reserve_pct or "",
@@ -4519,6 +4688,7 @@ def _history_detail(item: dict) -> str:
                 tactic=item.get("tactic") or "",
                 contracts=int(item["qty"] or 0),
                 cash=item.get("cash") or None,
+                excess=item.get("excess") or None,
                 nav=item.get("nav") or None,
                 cash_pct=item.get("cash_pct") or None,
                 cash_reserve_pct=item.get("cash_reserve_pct") or None,
@@ -4618,6 +4788,7 @@ def _history_tr(item: dict) -> str:
             "put_strike": item.get("put_strike") or DASH,
             "call_strike": item.get("call_strike") or DASH,
             "cash": item.get("cash") or DASH,
+            "excess": item.get("excess") or DASH,
             "nav": item.get("nav") or DASH,
             "cash_pct": item.get("cash_pct") or DASH,
             "cash_reserve_pct": item.get("cash_reserve_pct") or DASH,
@@ -4685,10 +4856,20 @@ def _phase_tag(phase: str) -> str:
     return f'<span class="tag">{escape(phase)}</span>'
 
 
-def _fill_cash(price, contracts, action, multiplier) -> Decimal | None:
+def _fill_multiplier(multiplier, sec_type: str = "STK") -> str:
+    """Contract multiplier for cash. Stocks are always 1; options default to 100."""
+    kind = (sec_type or "STK").upper()
+    if kind != "OPT":
+        return "1"
+    raw = str(multiplier or "").strip()
+    return raw if raw else "100"
+
+
+def _fill_cash(price, contracts, action, multiplier, sec_type: str = "STK") -> Decimal | None:
     if action not in {"SELL", "BUY"}:
         return None
-    signed = Decimal(price) * Decimal(contracts) * Decimal(multiplier or "100")
+    mult = Decimal(_fill_multiplier(multiplier, sec_type))
+    signed = Decimal(price) * Decimal(contracts) * mult
     if action == "BUY":
         return -signed
     return signed
@@ -5168,16 +5349,19 @@ def _skill(conn, account: str, query: dict, note: str = "") -> dict:
         '<div class="card skill-doc">'
         "<h2>Developer API</h2>"
         "<p>This page is the contract for another program, such as fanit-cli, running on this machine. "
-        "The console is local. Send the Developer key. A call returns a task id. Poll that id until it is done or failed. "
-        "These calls read IB. They do not place orders.</p>"
+        "The console is local. Send the Developer key. Bars and company calls return a task id — poll until done or failed. "
+        "Price changes also stream on one SSE connection. These calls read IB. They do not place orders.</p>"
         f"{_row('Key', secret, 'The Developer key for this account. Generate it on Settings.')}"
         f"{_row('Base', _tag('http://127.0.0.1:8788'), 'The local console address.')}"
-        f"{_row('Auth', _tag('Authorization: Bearer <key>'), 'Send this header on every call.')}"
+        f"{_row('Auth', _tag('Authorization: Bearer <key>'), 'Send this header on every call, including the price stream.')}"
         + "</div>"
         '<div class="card skill-doc"><h2>Rules</h2><ul>'
         "<li>bar is 1 min, 5 mins, 15 mins, 30 mins, 1 hour, or 1 day. duration is an IB span such as 30 D or 1 Y.</li>"
         "<li>Up to 20 symbols. Gateway down makes the whole task failed.</li>"
         "<li>A symbol IB cannot find is status failed inside a done task, with error set.</li>"
+        "<li>Price events use the same watch set as the cockpit (universe, open stocks, working stock orders). "
+        "A name only emits while its cash session is open and within the IB quote cap. "
+        "Browser EventSource cannot set Bearer — use curl, fanit-cli, or fetch with the header.</li>"
         "</ul></div>"
         + _skill_try()
     )
@@ -5290,6 +5474,8 @@ def _skill_try() -> str:
         "  -H 'Content-Type: application/json' \\\n"
         "  -d '{\"symbols\":[\"NVDA\"],\"day\":\"2026-10-09\"}'\n\n"
         "curl -s http://127.0.0.1:8788/api/v1/tasks/<task_id> \\\n"
+        "  -H 'Authorization: Bearer <key>'\n\n"
+        "curl -N -s http://127.0.0.1:8788/api/v1/events/prices \\\n"
         "  -H 'Authorization: Bearer <key>'"
     )
     blob = json.dumps(samples).replace("<", "\\u003c")
@@ -5386,6 +5572,18 @@ def _skill_rest() -> str:
         + f"<pre class=\"json\">{_paint_json('''{\n  \"ok\": true,\n  \"task_id\": \"ab12cd34ef56\",\n  \"status\": \"done\",\n  \"result\": {\n    \"symbols\": [{\n      \"symbol\": \"NVDA\",\n      \"sec_type\": \"STK\",\n      \"status\": \"done\",\n      \"latest\": 181.0,\n      \"bars\": [{\"date\": \"2026-10-09\", \"time\": \"2026-10-09\", \"open\": 180.1, \"high\": 182.4, \"low\": 179.2, \"close\": 181.0, \"volume\": 1000}],\n      \"error\": \"\"\n    }]\n  },\n  \"error\": \"\"\n}''')}</pre>"
         + "<p>Company uses the same GET. The symbol object looks like this instead.</p>"
         + f"<pre class=\"json\">{_paint_json('''{\n  \"symbol\": \"NVDA\",\n  \"sec_type\": \"STK\",\n  \"status\": \"done\",\n  \"name\": \"NVIDIA Corp\",\n  \"market_cap\": 5530000000000,\n  \"exchange\": \"SMART\",\n  \"primary_exchange\": \"NASDAQ\",\n  \"currency\": \"USD\",\n  \"error\": \"\"\n}''')}</pre>"
+        + "</div>"
+    )
+    parts.append(
+        '<div class="card skill-doc"><h2>Price events</h2>'
+        + _skill_call("GET", "/api/v1/events/prices")
+        + "<p>Server-Sent Events. Keep one connection open. Each price change is one "
+        "<span class=\"mono\">data:</span> line — no per-symbol subscribe and no task poll. "
+        "The connection keeps the pulse lease alive. A bad key returns JSON 401 before the stream starts.</p>"
+        + f"<pre class=\"json\">{_paint_json('''{\n  \"type\": \"price\",\n  \"symbol\": \"NVDA\",\n  \"market\": \"us\",\n  \"price\": \"181.25\",\n  \"last\": 181.25,\n  \"change\": \"+1.25%\",\n  \"change_pct\": 1.25,\n  \"currency\": \"USD\",\n  \"ts\": \"2026-10-14T14:32:01Z\",\n  \"tone\": \"chg-up\"\n}''')}</pre>"
+        + "<p><span class=\"mono\">last</span> and <span class=\"mono\">change_pct</span> are numbers. "
+        "<span class=\"mono\">price</span> / <span class=\"mono\">change</span> / <span class=\"mono\">tone</span> "
+        "match the console display. Keepalives are SSE comments every 15s.</p>"
         + "</div>"
     )
     return "".join(parts)

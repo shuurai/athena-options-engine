@@ -12,7 +12,7 @@ import uuid
 from datetime import date, datetime
 
 from athena_exec.accounts import active_accounts
-from athena_exec.broker import IbBroker, stock_venue
+from athena_exec.broker import IbBroker, stock_contract, stock_venue
 from athena_exec.clients import client_id
 from athena_orchestrator.tasks import _IB_LOCK
 from athena_settings import load_active
@@ -90,8 +90,22 @@ def _index() -> dict:
             {"method": "POST", "path": "/api/v1/option", "result": "task_id"},
             {"method": "POST", "path": "/api/v1/company", "result": "task_id"},
             {"method": "GET", "path": "/api/v1/tasks/{task_id}", "result": "running, done, or failed"},
+            {
+                "method": "GET",
+                "path": "/api/v1/events/prices",
+                "result": "text/event-stream of price events",
+            },
         ],
     }
+
+
+def lease_price_stream(conn, account: str) -> list[str]:
+    """Keep the pulse watch set alive for Skill SSE clients (no cockpit required)."""
+    from athena_orchestrator.pulse import note_view, watch_symbols
+
+    symbols = watch_symbols(conn, account) if account else []
+    note_view(symbols, account)
+    return symbols
 
 
 def _begin_bars(payload: dict, mode: str) -> tuple[int, str]:
@@ -331,7 +345,7 @@ def _finish_work(task_id: str, work) -> None:
 
 
 def _contract(spec: dict):
-    from ib_insync import Option, Stock
+    from ib_insync import Option
 
     if spec["sec_type"] == "OPT":
         exchange, currency = stock_venue(spec["symbol"])
@@ -345,8 +359,7 @@ def _contract(spec: dict):
             exchange,
             currency=currency,
         )
-    exchange, currency = stock_venue(spec["symbol"])
-    return Stock(spec["symbol"], exchange, currency)
+    return stock_contract(spec["symbol"])
 
 
 def _blank(spec: dict) -> dict:

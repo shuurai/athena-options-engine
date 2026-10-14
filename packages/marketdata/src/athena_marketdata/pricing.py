@@ -170,6 +170,34 @@ def ib_daily_count(conn: psycopg.Connection, symbol: str) -> int:
     return int(row[0] if row else 0)
 
 
+def first_ib_daily_day(conn: psycopg.Connection, symbol: str) -> date | None:
+    """Oldest ib-daily session day for this symbol."""
+    row = conn.execute(
+        """
+        SELECT min(ts::date) FROM market_bars
+        WHERE symbol = %s AND source = 'ib-daily'
+        """,
+        (symbol.upper(),),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return row[0]
+
+
+def last_ib_daily_day(conn: psycopg.Connection, symbol: str) -> date | None:
+    """Newest ib-daily session day for this symbol."""
+    row = conn.execute(
+        """
+        SELECT max(ts::date) FROM market_bars
+        WHERE symbol = %s AND source = 'ib-daily'
+        """,
+        (symbol.upper(),),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return row[0]
+
+
 def set_history_short(conn: psycopg.Connection, symbol: str, short: bool) -> None:
     conn.execute(
         """

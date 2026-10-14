@@ -93,10 +93,16 @@ class IbBroker:
         self._fx_closed = False
         self._markets: dict[str, str] = {}
         self._quiet_history: set[str] = set()
+        self._unknown_stock: set[str] = set()
 
     def set_markets(self, mapping: dict[str, str]) -> None:
         """Remember each name's market for this connection."""
+        prior = dict(self._markets)
         self._markets = {key.upper(): value for key, value in mapping.items()}
+        # Re-try a name when the operator changes us↔ca/hk after an Error 200.
+        for key, kind in self._markets.items():
+            if prior.get(key) != kind:
+                self._unknown_stock.discard(key)
 
     def history_quiet(self, symbol: str) -> bool:
         """True after IB reported no option history for this name."""
@@ -109,6 +115,24 @@ class IbBroker:
         self._quiet_history.add(symbol.upper())
         log.info("option history quiet symbol=%s code=162", symbol.upper())
 
+    def unknown_stock(self, symbol: str) -> bool:
+        """True after IB Error 200 / failed qualify for this stock venue."""
+        return symbol.upper() in self._unknown_stock
+
+    def note_unknown_stock(self, symbol: str) -> None:
+        """Stop retrying a name IB cannot resolve on the configured venue."""
+        key = symbol.upper()
+        if key in self._unknown_stock:
+            return
+        self._unknown_stock.add(key)
+        exchange, currency = self._listed(symbol)
+        kind = self._kind(symbol)
+        log.warning(
+            "unknown stock symbol=%s market=%s venue=%s/%s — "
+            "set Universe Market to us/hk/ca (CAD names need ca), or remove foreign listings Athena cannot route",
+            key, kind, exchange, currency,
+        )
+
     def _kind(self, symbol: str) -> str:
         from athena_exec.slots import symbol_market
 
@@ -116,6 +140,19 @@ class IbBroker:
 
     def _listed(self, symbol: str) -> tuple[str, str]:
         return stock_venue(symbol, self._kind(symbol))
+
+    def _stock(self, symbol: str):
+        return stock_contract(symbol, self._kind(symbol))
+
+    def _qualify_stock(self, symbol: str):
+        """Qualified stock contract, or None when IB has no definition on this venue."""
+        if self._ib is None or self.unknown_stock(symbol):
+            return None
+        contract = self._stock(symbol)
+        if not self._ib.qualifyContracts(contract):
+            self.note_unknown_stock(symbol)
+            return None
+        return contract
 
     def connected(self) -> bool:
         return self._ib is not None and self._ib.isConnected()
@@ -191,13 +228,11 @@ class IbBroker:
     def _place_stock(self, account: str, symbol: str, order, tif: str = "DAY") -> int:
         if self.readonly or self._ib is None:
             raise RuntimeError("placeOrder refused on a read-only session")
-        from ib_insync import Stock
 
-        exchange, currency = self._listed(symbol)
-        contract = Stock(symbol, exchange, currency)
-        qualified = self._ib.qualifyContracts(contract)
-        if not qualified:
-            raise RuntimeError(f"IB did not find {symbol} on {exchange}")
+        contract = self._qualify_stock(symbol)
+        if contract is None:
+            exchange, currency = self._listed(symbol)
+            raise RuntimeError(f"IB did not find {symbol} on {exchange}/{currency}")
         order.account = account
         order.tif = "GTC" if str(tif).upper() == "GTC" else "DAY"
         trade = self._ib.placeOrder(contract, order)
@@ -214,13 +249,8 @@ class IbBroker:
 
     def last_price(self, symbol: str) -> Decimal | None:
         """Delayed last or close. Live HK quotes are not subscribed on this account."""
-        if self._ib is None:
-            return None
-        from ib_insync import Stock
-
-        exchange, currency = self._listed(symbol)
-        contract = Stock(symbol, exchange, currency)
-        if not self._ib.qualifyContracts(contract):
+        contract = self._qualify_stock(symbol)
+        if contract is None:
             return None
         return self._read_quote(contract)
 
@@ -249,13 +279,8 @@ class IbBroker:
 
     def daily_history(self, symbol: str) -> list:
         """Up to 60 daily bars. Empty when IB has no history for this name."""
-        if self._ib is None:
-            return []
-        from ib_insync import Stock
-
-        exchange, currency = self._listed(symbol)
-        contract = Stock(symbol, exchange, currency)
-        if not self._ib.qualifyContracts(contract):
+        contract = self._qualify_stock(symbol)
+        if contract is None:
             return []
         with subscription():
             bars = self._ib.reqHistoricalData(contract, "", "60 D", "1 day", "TRADES", True, 1)
@@ -263,13 +288,8 @@ class IbBroker:
 
     def head_day(self, symbol: str) -> date | None:
         """Earliest IB TRADES day for this stock. None when IB does not answer."""
-        if self._ib is None:
-            return None
-        from ib_insync import Stock
-
-        exchange, currency = self._listed(symbol)
-        contract = Stock(symbol, exchange, currency)
-        if not self._ib.qualifyContracts(contract):
+        contract = self._qualify_stock(symbol)
+        if contract is None:
             return None
         try:
             stamp = self._ib.reqHeadTimeStamp(contract, "TRADES", True, 2)
@@ -284,13 +304,8 @@ class IbBroker:
         end is an IB endDateTime. Empty means now, so a second year can stop
         where the first year starts. Error 162 with no data returns [].
         """
-        if self._ib is None:
-            return []
-        from ib_insync import Stock
-
-        exchange, currency = self._listed(symbol)
-        contract = Stock(symbol, exchange, currency)
-        if not self._ib.qualifyContracts(contract):
+        contract = self._qualify_stock(symbol)
+        if contract is None:
             return []
         notes: list[tuple[int, str]] = []
 
@@ -424,13 +439,8 @@ class IbBroker:
 
     def option_chain(self, symbol: str):
         """Listed expiries, strikes, trading class, and exchange. Empty when none exist."""
-        if self._ib is None:
-            return None
-        from ib_insync import Stock
-
-        exchange, currency = self._listed(symbol)
-        stock = Stock(symbol, exchange, currency)
-        if not self._ib.qualifyContracts(stock):
+        stock = self._qualify_stock(symbol)
+        if stock is None:
             return None
         chains = self._ib.reqSecDefOptParams(stock.symbol, "", stock.secType, stock.conId)
         if not chains:
@@ -502,12 +512,7 @@ class IbBroker:
 
     def qualifies_stock(self, symbol: str) -> bool:
         """True when IB accepts this stock symbol on its venue."""
-        if self._ib is None:
-            return False
-        from ib_insync import Stock
-
-        exchange, currency = self._listed(symbol)
-        return bool(self._ib.qualifyContracts(Stock(symbol, exchange, currency)))
+        return self._qualify_stock(symbol) is not None
 
     def option_mid(
         self,
@@ -617,6 +622,10 @@ class IbBroker:
 
     def cash(self, account_id: str) -> Decimal | None:
         return self._account_number(account_id, "TotalCashValue")
+
+    def excess_liquidity(self, account_id: str) -> Decimal | None:
+        """IB soft buffer before liquidation. Prefer this over TotalCashValue on margin."""
+        return self._account_number(account_id, "ExcessLiquidity")
 
     def cash_ledger(self, account_id: str) -> tuple[str, dict[str, Decimal], dict[str, Decimal]]:
         """Base currency, cash by currency, and how many base units buy one unit.
@@ -971,7 +980,12 @@ def _candle(bar) -> dict:
 
 
 def stock_venue(symbol: str, market: str = "") -> tuple[str, str]:
-    """Venue and currency for one listed name. A blank market infers Hong Kong from a numeric code."""
+    """Venue and currency for one listed name. A blank market infers Hong Kong from a numeric code.
+
+    Athena markets are us / hk / ca only. Letter tickers default to us (SMART/USD).
+    Canadian listings must set Universe Market = ca (SMART/CAD, primary TSE).
+    European listings (e.g. IFX on Xetra) are not routed — use a US ADR or remove them.
+    """
     from athena_exec.slots import symbol_market
 
     kind = symbol_market(symbol, market)
@@ -980,6 +994,21 @@ def stock_venue(symbol: str, market: str = "") -> tuple[str, str]:
     if kind == "ca":
         return "SMART", "CAD"
     return "SMART", "USD"
+
+
+def stock_contract(symbol: str, market: str = ""):
+    """ib_insync Stock for Athena's us / hk / ca venues."""
+    from ib_insync import Stock
+    from athena_exec.slots import symbol_market
+
+    kind = symbol_market(symbol, market)
+    code = str(symbol).strip().upper()
+    if kind == "hk":
+        return Stock(code, "SEHK", "HKD")
+    if kind == "ca":
+        # TSE primary disambiguates SMART CAD names for IB.
+        return Stock(code, "SMART", "CAD", primaryExchange="TSE")
+    return Stock(code, "SMART", "USD")
 
 
 def quote_fields(kind: str, symbol: str) -> dict | str:

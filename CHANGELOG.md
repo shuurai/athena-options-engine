@@ -80,6 +80,15 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-14 | Show cash reserve floor and shortfall in detail | [C-20261014-27](logs/2026-10-14.md#c-20261014-27) |
 | 2026-10-14 | Enrich risk-block Detail with comparison numbers | [C-20261014-28](logs/2026-10-14.md#c-20261014-28) |
 | 2026-10-14 | Document short-horizon forecast R&D proposal | [C-20261014-29](logs/2026-10-14.md#c-20261014-29) |
+| 2026-10-14 | Live NLV and Open P&L from pulse ticks | [C-20261014-30](logs/2026-10-14.md#c-20261014-30) |
+| 2026-10-14 | Positions Mark shows day % and pulses on tick | [C-20261014-31](logs/2026-10-14.md#c-20261014-31) |
+| 2026-10-14 | Emit live price events on the Developer API | [C-20261014-32](logs/2026-10-14.md#c-20261014-32) |
+| 2026-10-14 | Freeze day-order counts in risk-block Detail | [C-20261014-33](logs/2026-10-14.md#c-20261014-33) |
+| 2026-10-14 | Catch up daily history instead of full re-pull | [C-20261014-34](logs/2026-10-14.md#c-20261014-34) |
+| 2026-10-14 | Stock history fills use multiplier 1 not 100 | [C-20261014-35](logs/2026-10-14.md#c-20261014-35) |
+| 2026-10-14 | Cash reserve uses excess liquidity post-trade | [C-20261014-36](logs/2026-10-14.md#c-20261014-36) |
+| 2026-10-14 | Universe rows pulse and sort by key columns | [C-20261014-37](logs/2026-10-14.md#c-20261014-37) |
+| 2026-10-14 | Mark the console version 1.0.1 | [C-20261014-38](logs/2026-10-14.md#c-20261014-38) |
 
 ## Notes
 

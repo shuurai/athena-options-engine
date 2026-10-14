@@ -816,8 +816,10 @@ class WheelDbTest(unittest.TestCase):
         ).fetchall()
         self.assertEqual(len(rows), 2)
         self.assertTrue(all(row[0] == "blocked" for row in rows))
-        self.assertIn(rows[0][2], rows[0][1])
-        self.assertIn("cash_reserve_pct", rows[0][1])
+        # Per-leg post-trade reserve may fire before ticket I2; both must cite cash_reserve.
+        self.assertTrue(
+            all("cash_reserve" in (row[1] or "").replace(" ", "_").lower() for row in rows),
+        )
         self.assertEqual(rows[0][1], rows[1][1])
 
     def test_one_full_pass_calls_three_agents(self) -> None:

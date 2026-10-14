@@ -92,7 +92,7 @@ hard limits. Risk Guard runs on every draft, independent of privilege.
 |---------|----------------|
 | `max_symbol_pct_nav` | Exposure in one underlying |
 | `max_short_opt_margin_pct` | Short-option margin vs NAV |
-| `cash_reserve_pct` | Cash floor for CSP collateral |
+| `cash_reserve_pct` | Post-trade excess liquidity floor vs NAV |
 | `max_contracts_per_symbol` | Contract count per name |
 | `max_position_per_symbol` | Notional cap in book currency (FX-converted; 0 = off) |
 | `max_orders_per_day` | **Per-symbol** daily order count |

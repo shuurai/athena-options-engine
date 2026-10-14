@@ -1172,6 +1172,123 @@ class WorkflowTest(unittest.TestCase):
         ).fetchone()
         self.assertEqual(stored[0], head)
 
+    def test_complete_history_skips_full_pull_and_catchup(self) -> None:
+        from datetime import timedelta
+        from unittest.mock import patch
+
+        from athena_orchestrator.backfill import _stored_or_pull
+        from athena_store import apply_migrations
+
+        apply_migrations(self.conn)
+        today = date(2026, 10, 14)
+        start = today - timedelta(days=400)
+        for offset in range(260):
+            day = start + timedelta(days=offset)
+            self._print(
+                datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+                "ib-daily", "1", "2", "1.5",
+            )
+        calls: list[tuple[str, str]] = []
+
+        class _Broker:
+            def head_day(self, symbol):
+                raise AssertionError("full pull must not ask head")
+
+            def history_span(self, symbol, duration, end=""):
+                calls.append((duration, end))
+                return [
+                    (today, Decimal("1"), Decimal("2"), Decimal("0.5"), Decimal("1.5"), Decimal("3")),
+                ]
+
+        frozen = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+        with patch("athena_orchestrator.backfill.datetime") as clock:
+            clock.now.return_value = frozen
+            count, mode = _stored_or_pull(self.conn, _Broker(), SYMBOL)
+        self.assertEqual(mode, "catchup")
+        self.assertGreaterEqual(count, 260)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][0].endswith(" D"))
+        self.assertNotEqual(calls[0][0], "1 Y")
+
+        # Catch-up already wrote today's bar — next pass must be a no-op.
+        calls.clear()
+        with patch("athena_orchestrator.backfill.datetime") as clock:
+            clock.now.return_value = frozen
+            count, mode = _stored_or_pull(self.conn, _Broker(), SYMBOL)
+        self.assertEqual(mode, "ok")
+        self.assertEqual(calls, [])
+        self.assertGreaterEqual(count, 260)
+
+    def test_ipo_complete_short_book_skips_full_pull(self) -> None:
+        from datetime import timedelta
+        from unittest.mock import patch
+
+        from athena_marketdata.pricing import set_history_from
+        from athena_orchestrator.backfill import _stored_or_pull
+        from athena_store import apply_migrations
+
+        apply_migrations(self.conn)
+        head = date(2026, 7, 10)
+        set_history_from(self.conn, SYMBOL, head)
+        for offset in range(68):
+            day = head + timedelta(days=offset)
+            self._print(
+                datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+                "ib-daily", "1", "2", "1.5",
+            )
+        self.conn.commit()
+        calls: list[str] = []
+
+        class _Broker:
+            def head_day(self, symbol):
+                raise AssertionError("IPO-complete must not full pull")
+
+            def history_span(self, symbol, duration, end=""):
+                calls.append(duration)
+                return []
+
+        with patch("athena_orchestrator.backfill.datetime") as clock:
+            clock.now.return_value = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+            count, mode = _stored_or_pull(self.conn, _Broker(), SYMBOL)
+        self.assertEqual(count, 68)
+        self.assertIn(mode, {"ok", "catchup"})
+        self.assertNotIn("1 Y", calls)
+
+    def test_incomplete_history_still_full_pulls(self) -> None:
+        from datetime import timedelta
+
+        from athena_orchestrator.backfill import _stored_or_pull
+        from athena_store import apply_migrations
+
+        apply_migrations(self.conn)
+        for offset in range(10):
+            day = date(2026, 9, 1) + timedelta(days=offset)
+            self._print(
+                datetime(day.year, day.month, day.day, tzinfo=timezone.utc),
+                "ib-daily", "1", "2", "1.5",
+            )
+        calls: list[str] = []
+
+        class _Broker:
+            def head_day(self, symbol):
+                return date(2020, 1, 1)
+
+            def history_span(self, symbol, duration, end=""):
+                calls.append(duration)
+                start = date(2025, 1, 1) if end else date(2026, 1, 1)
+                return [
+                    (
+                        start + timedelta(days=i),
+                        Decimal("1"), Decimal("2"), Decimal("0.5"), Decimal("1"), Decimal("3"),
+                    )
+                    for i in range(5)
+                ]
+
+        count, mode = _stored_or_pull(self.conn, _Broker(), SYMBOL)
+        self.assertEqual(mode, "stored")
+        self.assertIn("1 Y", calls)
+        self.assertGreaterEqual(count, 10)
+
     def _print(self, ts: datetime, source: str, low: str, high: str, close: str) -> None:
         self.conn.execute(
             """

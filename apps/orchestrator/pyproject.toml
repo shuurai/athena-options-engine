@@ -1,6 +1,6 @@
 [project]
 name = "athena-orchestrator"
-version = "1.0.0"
+version = "1.0.1"
 description = "Athena 5-minute orchestrator"
 requires-python = ">=3.12"
 dependencies = [

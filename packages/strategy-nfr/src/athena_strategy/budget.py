@@ -68,6 +68,7 @@ def apply_cycle_budget(conn, settings: SettingsPayload, account_id: str, draft_i
                         reason=reason,
                         cash=book.cash,
                         nav=book.nav,
+                        excess=book.excess,
                         cash_reserve_pct=settings.risk.cash_reserve_pct,
                         cash_need=leg.get("cash_need"),
                         note=leg.get("note") or "",
@@ -109,18 +110,22 @@ def _budget_kept_steps(ticket: dict) -> dict:
 
 def _budget_block_steps(ticket: dict, reason: str, book, risk) -> tuple[dict, list[dict]]:
     cash_reserve_pct = risk.cash_reserve_pct
-    math = cash_reserve_math(book.cash, book.nav, cash_reserve_pct)
-    cash_pct = math["cash_pct"]
     used = 0
     if book.orders is not None:
         used = int(book.orders.get(str(ticket["symbol"]).upper(), 0))
     items = []
     risk_legs = []
+    first_math = cash_reserve_math(
+        book.cash, book.nav, cash_reserve_pct, excess=book.excess,
+    )
     for draft_id, leg in zip(ticket.get("draft_ids") or [], ticket.get("legs") or []):
         need = draft_cash_need(
             leg["tactic"], int(leg["contracts"]),
             limit_price=leg.get("limit"), put_strike=leg.get("put_strike"),
             multiplier=str(leg.get("multiplier") or "100"),
+        )
+        math = cash_reserve_math(
+            book.cash, book.nav, cash_reserve_pct, excess=book.excess, cash_need=need,
         )
         note = ""
         if "cash" in (reason or "").lower() and "reserve" in (reason or "").lower():
@@ -130,11 +135,13 @@ def _budget_block_steps(ticket: dict, reason: str, book, risk) -> tuple[dict, li
             contracts=int(leg["contracts"]),
             cash=book.cash,
             nav=book.nav,
-            cash_pct=cash_pct,
+            cash_pct=math["cash_pct"],
             cash_reserve_pct=cash_reserve_pct,
             reserve_floor=math["reserve_floor"],
             shortfall=math["shortfall"],
             cash_need=need,
+            excess=book.excess,
+            buffer=math.get("buffer"),
             reason=reason,
             note=note,
             orders_today=used,
@@ -160,14 +167,16 @@ def _budget_block_steps(ticket: dict, reason: str, book, risk) -> tuple[dict, li
             "cash_need": need,
             "note": note,
         })
+    cash_pct = first_math["cash_pct"]
     return {
         "reason": reason,
         "cash": None if book.cash is None else str(book.cash),
+        "excess": None if book.excess is None else str(book.excess),
         "nav": None if book.nav is None else str(book.nav),
         "cash_pct": None if cash_pct is None else str(cash_pct),
         "cash_reserve_pct": str(cash_reserve_pct),
-        "reserve_floor": None if math["reserve_floor"] is None else str(math["reserve_floor"]),
-        "shortfall": None if math["shortfall"] is None else str(math["shortfall"]),
+        "reserve_floor": None if first_math["reserve_floor"] is None else str(first_math["reserve_floor"]),
+        "shortfall": None if first_math["shortfall"] is None else str(first_math["shortfall"]),
         "orders_today": used,
         "max_orders_per_day": risk.max_orders_per_day,
         "items": items,
@@ -250,7 +259,7 @@ def _baseline(conn, settings: SettingsPayload, account_id: str) -> CycleBook:
     ).fetchone()
     mark = conn.execute(
         """
-        SELECT cash, margin, base_currency, fx_rates
+        SELECT cash, margin, base_currency, fx_rates, excess_liquidity
         FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
         """,
         (account_id,),
@@ -275,6 +284,7 @@ def _baseline(conn, settings: SettingsPayload, account_id: str) -> CycleBook:
         orders=orders,
         base=base,
         rates=rates,
+        excess=None if mark is None or len(mark) < 5 or mark[4] is None else Decimal(mark[4]),
     )
     replaying = conn.execute(
         """

@@ -433,7 +433,9 @@ table.data tbody tr.phase-pick.selected:hover {
 .log-lvl.WARN { color: #fbbf24; }
 .log-lvl.ERROR, .log-lvl.CRITICAL { color: #ea3943; }
 tr.pulse-hit td { animation: pulse-row .5s ease; }
-tr.pulse-hit b, tr.pulse-hit .px { animation: pulse-ink .5s ease; }
+tr.pulse-hit b, tr.pulse-hit .px, tr.pulse-hit .pool-px { animation: pulse-ink .5s ease; }
+.card.stat.pulse-hit { animation: pulse-row .5s ease; }
+.card.stat.pulse-hit .value { animation: pulse-ink .5s ease; }
 @keyframes pulse-row {
   0% { background: #1c3a66; }
   100% { background: transparent; }
@@ -447,7 +449,8 @@ tr.pulse-hit b, tr.pulse-hit .px { animation: pulse-ink .5s ease; }
   .cockpit-board .log-trail { grid-column: auto; grid-row: auto; min-height: 160px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  tr.pulse-hit td, tr.pulse-hit b, tr.pulse-hit .px { animation: none; }
+  tr.pulse-hit td, tr.pulse-hit b, tr.pulse-hit .px, tr.pulse-hit .pool-px,
+  .card.stat.pulse-hit, .card.stat.pulse-hit .value { animation: none; }
 }
 .input { width: 100%; padding: 9px 11px; border: 1px solid var(--site-border-strong); font: 12.5px var(--font-mono); background: #0a0c10; color: var(--site-text); }
 .sim-date { position: relative; margin-top: 4px; }
@@ -675,6 +678,9 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
             bind_view(self.headers.get("Cookie"))
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
+            if parsed.path == "/api/v1/events/prices":
+                self._send_price_events(database_url)
+                return
             if parsed.path.startswith("/api/v1"):
                 with connect(database_url) as conn:
                     from athena_orchestrator.developer import handle
@@ -766,6 +772,60 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
+
+        def _open_api_stream(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Api-Key")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.end_headers()
+
+        def _send_price_events(self, database_url: str) -> None:
+            """Authenticated Skill SSE: every Athena price change for the watch set."""
+            import time
+            from queue import Empty
+
+            from athena_exec.accounts import active_accounts
+            from athena_orchestrator.developer import authorized, lease_price_stream
+            from athena_orchestrator.pulse import subscribe_ticks, unsubscribe_ticks
+
+            account = active_accounts()[0] if active_accounts() else ""
+            with connect(database_url) as conn:
+                if not authorized(conn, account, self.headers):
+                    self._send_api(
+                        401,
+                        json.dumps({"ok": False, "status": "failed", "error": "API key is not valid."}),
+                    )
+                    return
+                lease_price_stream(conn, account)
+            self._open_api_stream()
+            listener = subscribe_ticks()
+            last_lease = time.time()
+            try:
+                while True:
+                    now = time.time()
+                    if now - last_lease >= 30:
+                        with connect(database_url) as conn:
+                            lease_price_stream(conn, account)
+                        last_lease = now
+                    try:
+                        payload = listener.get(timeout=15)
+                    except Empty:
+                        self.wfile.write(b":\n\n")
+                        self.wfile.flush()
+                        continue
+                    self.wfile.write(("data: " + json.dumps(payload) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                from athena_orchestrator.httpd import client_closed
+
+                client_closed(self)
+                return
+            finally:
+                unsubscribe_ticks(listener)
 
         def _send_pulse(self) -> None:
             from queue import Empty
@@ -1301,6 +1361,18 @@ def _cockpit(conn) -> str:
         facts, slots, health, rows, settings, halted, _sim_actions(conn, account), _replay_text(conn, account)
     )
     body += f'<script type="application/json" id="cockpit-data">{payload}</script>'
+    from athena_orchestrator.money import ledger, report_currency
+    from athena_orchestrator.pages import _position_rows, live_book_script
+
+    currency = report_currency(conn, account)
+    base, _balances, rates = ledger(conn, account)
+    body += live_book_script(
+        _position_rows(conn, account),
+        currency,
+        base,
+        rates,
+        sleeve_nav=facts.get("nav_amount"),
+    )
     return _layout(
         "/", "cockpit", body, chips,
         "sleeve marks, today's slots, and the watchlist for this account.",
@@ -2591,7 +2663,8 @@ _CLIENT_JS = r"""
         ["Phase", row.phase], ["Tactic", row.tactic], ["Status", row.status], ["P&L", row.pnl],
         ["Draft id", row.draft_id], ["Limit", row.limit],
         ["Put strike", row.put_strike], ["Call strike", row.call_strike],
-        ["Cash", row.cash], ["NAV", row.nav], ["Cash %", row.cash_pct],
+        ["Cash", row.cash], ["Excess liquidity", row.excess], ["NAV", row.nav],
+        ["EL % of NAV", row.cash_pct],
         ["Reserve %", row.cash_reserve_pct], ["Reserve floor", row.reserve_floor],
         ["Shortfall", row.shortfall], ["Cash need", row.cash_need],
         ["Orders today", row.orders_today], ["Max orders/day", row.max_orders_per_day],
@@ -3647,6 +3720,18 @@ _CLIENT_JS = r"""
   const picked = document.querySelector("tr.phase-pick.selected");
   if (picked) picked.scrollIntoView({ block: "nearest" });
   const streamed = {};
+  let liveBook = null;
+  const liveBookNode = document.getElementById("live-book");
+  if (liveBookNode) {
+    try {
+      liveBook = JSON.parse(liveBookNode.textContent || "{}");
+      (liveBook.legs || []).forEach((leg) => {
+        leg.base_value = leg.value;
+      });
+    } catch (err) {
+      liveBook = null;
+    }
+  }
   function moneyText(value) {
     return Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -3656,9 +3741,145 @@ _CLIENT_JS = r"""
     if (value < 0) return "-" + abs;
     return abs;
   }
+  function markedMoney(value, currency) {
+    const abs = moneyText(Math.abs(value));
+    const sign = value < 0 ? "−" : "";
+    const symbol = (currency === "CNY" || currency === "JPY") ? "¥" : "$";
+    return sign + symbol + abs;
+  }
+  function fxRate(code) {
+    if (!liveBook) return null;
+    const base = liveBook.base || liveBook.currency || "";
+    let key = code || "";
+    if (key === base) return 1;
+    if (key === "CNY" && liveBook.rates && liveBook.rates.CNH != null) key = "CNH";
+    const rate = liveBook.rates ? liveBook.rates[key] : null;
+    if (rate == null || Number(rate) === 0) return null;
+    return Number(rate);
+  }
+  function convertMoney(amount, fromCcy) {
+    if (!liveBook || amount == null || !Number.isFinite(Number(amount))) return null;
+    const target = liveBook.currency || "";
+    const source = fromCcy || "USD";
+    if (source === target) return Number(amount);
+    const src = fxRate(source);
+    const dst = fxRate(target);
+    if (src == null || dst == null) return null;
+    return Number(amount) * src / dst;
+  }
+  function flashStat(node) {
+    if (!node) return;
+    const card = node.closest(".card.stat") || node;
+    card.classList.remove("pulse-hit");
+    void card.offsetWidth;
+    card.classList.add("pulse-hit");
+  }
+  function setLiveText(node, text) {
+    if (!node) return false;
+    const next = String(text);
+    if (node.textContent === next) return false;
+    node.textContent = next;
+    flashStat(node);
+    return true;
+  }
+  function paintLiveTotals() {
+    if (!liveBook || !Array.isArray(liveBook.legs)) return;
+    let nlv = 0;
+    let nlvOk = true;
+    let nlvKnown = 0;
+    let pnl = 0;
+    let pnlOk = true;
+    let pnlKnown = 0;
+    let stockDelta = 0;
+    liveBook.legs.forEach((leg) => {
+      if (leg.value != null && Number.isFinite(Number(leg.value))) {
+        const moved = convertMoney(leg.value, leg.ccy);
+        if (moved == null) nlvOk = false;
+        else {
+          nlv += moved;
+          nlvKnown += 1;
+        }
+      }
+      if (leg.pnl != null && Number.isFinite(Number(leg.pnl))) {
+        const moved = convertMoney(leg.pnl, leg.ccy);
+        if (moved == null) pnlOk = false;
+        else {
+          pnl += moved;
+          pnlKnown += 1;
+        }
+      }
+      if (leg.kind === "stock") {
+        const live = leg.value == null ? null : convertMoney(leg.value, leg.ccy);
+        const base = leg.base_value == null ? null : convertMoney(leg.base_value, leg.ccy);
+        if (live != null && base != null) stockDelta += (live - base);
+      }
+    });
+    const nlvNode = document.querySelector('[data-live="nlv"]');
+    if (nlvNode) {
+      let text = "—";
+      if (nlvOk && nlvKnown > 0) text = markedMoney(nlv, liveBook.currency || "");
+      setLiveText(nlvNode, text);
+    }
+    const pnlNode = document.querySelector('[data-live="pnl"]');
+    const pnlMeta = document.querySelector('[data-live="pnl-meta"]');
+    if (pnlNode) {
+      let text = "—";
+      let tone = "";
+      if (pnlOk && pnlKnown > 0) {
+        text = signedPnlText(pnl);
+        tone = pnl > 0 ? "up" : pnl < 0 ? "down" : "";
+      }
+      setLiveText(pnlNode, text);
+      pnlNode.className = "value" + (tone ? " " + tone : "");
+      if (pnlMeta) pnlMeta.className = "meta" + (tone ? " " + tone : "");
+    }
+    if (liveBook.sleeve_nav != null && Number.isFinite(Number(liveBook.sleeve_nav))) {
+      const sleeveNode = document.querySelector('[data-sleeve="nav"]');
+      if (sleeveNode) {
+        setLiveText(sleeveNode, markedMoney(Number(liveBook.sleeve_nav) + stockDelta, liveBook.currency || ""));
+      }
+    }
+  }
+  function updateLiveBookLeg(symbol, price) {
+    if (!liveBook || !Array.isArray(liveBook.legs) || !Number.isFinite(price)) return;
+    const key = String(symbol || "").toUpperCase();
+    liveBook.legs.forEach((leg) => {
+      if (leg.kind !== "stock") return;
+      if (String(leg.symbol || "").toUpperCase() !== key) return;
+      const qty = Number(leg.qty);
+      const avg = Number(leg.avg);
+      const mult = Number(leg.mult || 1) || 1;
+      if (!Number.isFinite(qty) || !Number.isFinite(avg)) return;
+      leg.mark = price;
+      leg.value = qty * price * mult;
+      leg.pnl = (price - avg) * qty * mult;
+    });
+  }
+  function paintHeatTick(quote) {
+    const price = Number(String(quote.price || "").replace(/,/g, ""));
+    if (!Number.isFinite(price)) return;
+    const key = quote.symbol;
+    document.querySelectorAll('text[data-heat-mark="' + key + '"]').forEach((node) => {
+      node.textContent = moneyText(price);
+    });
+    if (!liveBook || !Array.isArray(liveBook.legs)) return;
+    liveBook.legs.forEach((leg) => {
+      if (leg.kind !== "stock") return;
+      if (String(leg.symbol || "").toUpperCase() !== String(key || "").toUpperCase()) return;
+      const cost = Math.abs(Number(leg.qty)) * Number(leg.avg) * (Number(leg.mult || 1) || 1);
+      if (!cost) return;
+      const pct = (Number(leg.pnl) || 0) / cost * 100;
+      const sign = pct > 0 ? "+" : "";
+      document.querySelectorAll('text[data-heat-pct="' + key + '"]').forEach((node) => {
+        node.textContent = "Δ " + sign + pct.toFixed(1) + "%";
+      });
+    });
+  }
   function paintPositionTick(quote) {
     const price = Number(String(quote.price || "").replace(/,/g, ""));
     if (!Number.isFinite(price)) return;
+    updateLiveBookLeg(quote.symbol, price);
+    const shown = quote.price || moneyText(price);
     const rows = document.querySelectorAll('tr[data-cmd="position-row"][data-symbol="' + quote.symbol + '"]');
     rows.forEach((row) => {
       if ((row.getAttribute("data-kind") || "") !== "stock") return;
@@ -3672,30 +3893,64 @@ _CLIENT_JS = r"""
       const valueCell = row.querySelector(".pos-value");
       const pnlCell = row.querySelector(".pos-pnl");
       const ccy = (row.getAttribute("data-ccy") || "").trim();
-      if (mark) mark.textContent = moneyText(price);
+      let moved = false;
+      if (mark) {
+        const px = mark.querySelector(".px");
+        const chg = mark.querySelector(".px-chg");
+        if (px) {
+          if (px.textContent !== shown) moved = true;
+          px.textContent = shown;
+        } else if (mark.childNodes.length) {
+          if (mark.textContent !== shown) moved = true;
+          mark.textContent = shown;
+        }
+        if (chg) {
+          chg.textContent = quote.change || "—";
+          chg.className = "px-chg" + (quote.tone ? " " + quote.tone : "");
+        }
+      }
       if (valueCell) valueCell.textContent = moneyText(value);
       if (pnlCell) {
         pnlCell.textContent = signedPnlText(pnl) + (ccy ? " " + ccy : "");
         pnlCell.className = "mono pos-pnl" + (pnl > 0 ? " chg-up" : pnl < 0 ? " chg-down" : "");
       }
-      row.setAttribute("data-mark", moneyText(price));
+      row.setAttribute("data-mark", shown);
       row.setAttribute("data-value", moneyText(value));
       row.setAttribute("data-pnl", String(pnl));
+      if (moved) {
+        row.classList.remove("pulse-hit");
+        void row.offsetWidth;
+        row.classList.add("pulse-hit");
+      }
     });
+    paintHeatTick(quote);
+    paintLiveTotals();
   }
   function paintPoolTick(quote) {
     const row = document.querySelector('#pool-table tr[data-symbol="' + quote.symbol + '"]');
     if (!row) return;
     const priceCell = row.querySelector(".pool-px");
     const changeCell = row.querySelector(".pool-chg");
-    if (priceCell) priceCell.textContent = quote.price;
+    let moved = false;
+    if (priceCell) {
+      if (priceCell.textContent !== (quote.price || "")) moved = true;
+      priceCell.textContent = quote.price;
+    }
     if (changeCell) {
       changeCell.textContent = quote.change;
       changeCell.className = "mono pool-chg" + (quote.tone ? " " + quote.tone : "");
     }
     row.setAttribute("data-price", quote.price || "");
+    const pct = Number(String(quote.change || "").replace("%", "").replace("+", ""));
+    if (Number.isFinite(pct)) row.setAttribute("data-change", String(pct));
+    else row.setAttribute("data-change", "");
     const trade = row.querySelector('button[data-cmd="trade-symbol"]');
     if (trade) trade.setAttribute("data-price", quote.price || "");
+    if (moved) {
+      row.classList.remove("pulse-hit");
+      void row.offsetWidth;
+      row.classList.add("pulse-hit");
+    }
   }
   function paintOrderTick(quote) {
     const price = Number(String(quote.price || "").replace(/,/g, ""));
@@ -3724,7 +3979,8 @@ _CLIENT_JS = r"""
     paintPositionTick(quote);
     paintPoolTick(quote);
     paintOrderTick(quote);
-    const cell = document.querySelector('.pulse-px[data-symbol="' + quote.symbol + '"]');
+    // Cockpit watchlist only — position marks reuse pulse-px but must not jump to top.
+    const cell = document.querySelector('.pulse-px[data-symbol="' + quote.symbol + '"]:not(.pos-mark)');
     if (!cell) return;
     const price = cell.querySelector(".px");
     const change = cell.querySelector(".px-chg");
@@ -3769,7 +4025,7 @@ _CLIENT_JS = r"""
   function paintPulse(body) {
     (body.quotes || []).forEach((quote) => {
       if (streamed[quote.symbol] && streamed[quote.symbol] !== quote.price) return;
-      const cell = document.querySelector('.pulse-px[data-symbol="' + quote.symbol + '"]');
+      const cell = document.querySelector('.pulse-px[data-symbol="' + quote.symbol + '"]:not(.pos-mark)');
       if (!cell) return;
       const price = cell.querySelector(".px");
       const change = cell.querySelector(".px-chg");
@@ -3778,10 +4034,13 @@ _CLIENT_JS = r"""
       change.className = "px-chg" + (quote.tone ? " " + quote.tone : "");
     });
     const sleeve = body.sleeve || {};
+    const skipNav = liveBook && liveBook.sleeve_nav != null;
     ["nav", "change", "premium", "premium_meta", "cash", "cash_pct", "cash_meta", "pending"].forEach((key) => {
+      if (key === "nav" && skipNav) return;
       const node = document.querySelector('[data-sleeve="' + key + '"]');
       if (node && sleeve[key] != null) node.textContent = String(sleeve[key]);
     });
+    if (skipNav) paintLiveTotals();
   }
   document.addEventListener("change", (event) => {
     const node = event.target.closest("select.intent");
@@ -3822,7 +4081,10 @@ _CLIENT_JS = r"""
     const poolRows = () => [...pool.querySelectorAll("tbody tr[data-symbol]")];
     const poolValue = (row) => {
       if (sortKey === "symbol") return (row.getAttribute("data-symbol") || "").toUpperCase();
-      const raw = row.getAttribute(sortKey === "price" ? "data-price" : "data-cap");
+      const attr = sortKey === "price" ? "data-price"
+        : sortKey === "change" ? "data-change"
+        : "data-cap";
+      const raw = row.getAttribute(attr);
       if (!raw) return null;
       const num = Number(raw);
       return Number.isFinite(num) ? num : null;
@@ -3873,7 +4135,8 @@ _CLIENT_JS = r"""
   const hasPositions = document.querySelector('tr[data-cmd="position-row"]');
   const hasPool = document.getElementById("pool-table");
   const hasOrders = document.getElementById("orders-feed");
-  if (hasPulse || hasPositions || hasPool || hasOrders) {
+  const hasLiveBook = document.getElementById("live-book");
+  if (hasPulse || hasPositions || hasPool || hasOrders || hasLiveBook) {
     const pollPulse = () => fetch("/api/pulse").then((res) => res.json()).then((body) => {
       if (hasPulse) paintPulse(body);
       (body.quotes || []).forEach((quote) => {

@@ -41,14 +41,45 @@ def note_print(seen: dict[str, Decimal], symbol: str, price: Decimal) -> bool:
     return True
 
 
-def format_tick(symbol: str, price: Decimal, previous: Decimal | None) -> dict:
-    """Price text and the percent move versus the prior close."""
+def _tick_currency(market: str) -> str:
+    """Native quote currency for an Athena market code."""
+    return {"hk": "HKD", "ca": "CAD"}.get((market or "").lower(), "USD") if market else ""
+
+
+def format_tick(
+    symbol: str,
+    price: Decimal,
+    previous: Decimal | None,
+    *,
+    market: str = "",
+    currency: str = "",
+) -> dict:
+    """Price text and the percent move versus the prior close.
+
+    Additive fields (`type`, `market`, `last`, `change_pct`, `currency`, `ts`) are for
+    Skill clients on `/api/v1/events/prices`. Console UI keeps using `price` / `change` / `tone`.
+    """
     text = f"{price:,.2f}"
+    ccy = currency or _tick_currency(market)
+    base = {
+        "type": "price",
+        "symbol": symbol,
+        "market": market or "",
+        "price": text,
+        "last": float(price),
+        "currency": ccy,
+        "ts": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    }
     if previous is None or previous == 0:
-        return {"symbol": symbol, "price": text, "change": DASH, "tone": ""}
+        return {**base, "change": DASH, "change_pct": None, "tone": ""}
     change = (price - previous) / previous * Decimal(100)
     tone = "chg-up" if change > 0 else "chg-down" if change < 0 else ""
-    return {"symbol": symbol, "price": text, "change": f"{change:+.2f}%", "tone": tone}
+    return {
+        **base,
+        "change": f"{change:+.2f}%",
+        "change_pct": float(change),
+        "tone": tone,
+    }
 
 
 def publish_tick(payload: dict) -> None:
@@ -277,14 +308,13 @@ def _stream(symbols: list[str]) -> None:
     seen: dict[str, Decimal] = {}
     prior: dict[str, Decimal | None] = {}
     names: dict[str, str] = {}
+    venues: dict[str, str] = {}
     hooked = False
 
     def on_tickers(tickers) -> None:
-        _take_tickers(tickers, seen, prior, names)
+        _take_tickers(tickers, seen, prior, names, venues)
 
     try:
-        markets = _book_markets()
-        broker.set_markets(markets)
         ib.reqMarketDataType(3)
         ib.pendingTickersEvent += on_tickers
         hooked = True
@@ -295,12 +325,30 @@ def _stream(symbols: list[str]) -> None:
             current = _watching()
             if not current or not broker.connected():
                 return
+            # Re-read markets every pass so Universe Market us/hk/ca changes apply
+            # without waiting for a pulse reconnect (otherwise CA names stay SMART/USD).
+            markets = _book_markets()
+            broker.set_markets(markets)
             live = _live_names(current, markets)
-            key = ",".join(symbol.upper() for symbol in live)
+            key = ",".join(
+                f"{symbol.upper()}:{markets.get(symbol.upper(), '')}" for symbol in live
+            )
             now = time.time()
             if key != synced or now - tried > 30:
+                if key != synced:
+                    # Drop lines whose venue changed so they re-qualify on the new market.
+                    for code in list(held):
+                        try:
+                            ib.cancelMktData(held[code])
+                        except Exception:
+                            pass
+                        held.pop(code, None)
                 names.clear()
                 names.update({symbol.upper(): symbol for symbol in live})
+                venues.clear()
+                venues.update(
+                    {symbol.upper(): markets.get(symbol.upper(), "") for symbol in live}
+                )
                 _seed(live, seen, prior)
                 _sync_lines(ib, broker, names, held)
                 ib.reqMarketDataType(3)
@@ -362,8 +410,6 @@ def _seed(symbols: list[str], seen: dict[str, Decimal], prior: dict[str, Decimal
 
 
 def _sync_lines(ib, broker, names: dict[str, str], held: dict) -> None:
-    from ib_insync import Stock
-
     for key in list(held):
         if key in names:
             continue
@@ -375,10 +421,11 @@ def _sync_lines(ib, broker, names: dict[str, str], held: dict) -> None:
     for key, symbol in names.items():
         if key in held:
             continue
+        if broker.unknown_stock(symbol):
+            continue
         try:
-            exchange, currency = broker._listed(symbol)
-            contract = Stock(symbol, exchange, currency)
-            if not ib.qualifyContracts(contract):
+            contract = broker._qualify_stock(symbol)
+            if contract is None:
                 continue
             ib.reqMktData(contract, "", False, False)
         except Exception as exc:
@@ -387,9 +434,16 @@ def _sync_lines(ib, broker, names: dict[str, str], held: dict) -> None:
         held[key] = contract
 
 
-def _take_tickers(tickers, seen: dict[str, Decimal], prior: dict, names: dict[str, str]) -> None:
+def _take_tickers(
+    tickers,
+    seen: dict[str, Decimal],
+    prior: dict,
+    names: dict[str, str],
+    venues: dict[str, str] | None = None,
+) -> None:
     from athena_exec.broker import _ticker_price
 
+    books = venues or {}
     changed = []
     for ticker in tickers:
         contract = getattr(ticker, "contract", None)
@@ -400,7 +454,10 @@ def _take_tickers(tickers, seen: dict[str, Decimal], prior: dict, names: dict[st
         if price is None or not note_print(seen, key, price):
             continue
         shown = names[key]
-        changed.append((shown, price, format_tick(shown, price, prior.get(key))))
+        market = books.get(key, "")
+        changed.append(
+            (shown, price, format_tick(shown, price, prior.get(key), market=market))
+        )
     if not changed:
         return
     try:

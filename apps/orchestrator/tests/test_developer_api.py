@@ -57,6 +57,7 @@ class DeveloperApiTest(unittest.TestCase):
                 ("POST", "/api/v1/option"),
                 ("POST", "/api/v1/company"),
                 ("GET", "/api/v1/tasks/{task_id}"),
+                ("GET", "/api/v1/events/prices"),
             ],
         )
 
@@ -219,8 +220,34 @@ class DeveloperApiTest(unittest.TestCase):
             '<span class="tag green">GET</span><span class="mono">http://127.0.0.1:8788/api/v1/tasks/{task_id}</span>',
             html,
         )
+        self.assertIn(
+            '<span class="tag green">GET</span><span class="mono">http://127.0.0.1:8788/api/v1/events/prices</span>',
+            html,
+        )
+        self.assertIn("Price events", html)
+        self.assertIn("&quot;type&quot;", html)
+        self.assertIn("&quot;change_pct&quot;", html)
         self.assertIn('class="jk"', html)
         self.assertNotIn("POST /api/v1/bars", html)
+
+    def test_lease_price_stream_notes_the_watch_set(self) -> None:
+        from athena_orchestrator.developer import lease_price_stream
+
+        with (
+            patch("athena_orchestrator.pulse.watch_symbols", return_value=["NVDA", "700"]) as watch,
+            patch("athena_orchestrator.pulse.note_view") as note,
+        ):
+            names = lease_price_stream(object(), "DU123")
+        self.assertEqual(names, ["NVDA", "700"])
+        watch.assert_called_once()
+        note.assert_called_once_with(["NVDA", "700"], "DU123")
+
+    def test_skill_try_curl_includes_price_events(self) -> None:
+        from athena_orchestrator.pages import _skill_try
+
+        html = _skill_try()
+        self.assertIn("/api/v1/events/prices", html)
+        self.assertIn("curl -N", html)
 
     def test_skill_try_has_curl_and_playground(self) -> None:
         from athena_orchestrator.pages import _skill_try

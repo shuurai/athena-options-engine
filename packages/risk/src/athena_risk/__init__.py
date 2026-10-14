@@ -41,6 +41,25 @@ def allowed_open(
     return min(cap, int(room // one))
 
 
+def reserve_buffer(excess: Decimal | None, cash: Decimal | None) -> Decimal | None:
+    """Prefer ExcessLiquidity; fall back to TotalCashValue when EL is missing."""
+    if excess is not None:
+        return excess
+    return cash
+
+
+def breaches_cash_reserve(
+    buffer: Decimal | None,
+    cash_need: Decimal | None,
+    nav: Decimal | None,
+    reserve_pct,
+) -> bool:
+    """True when post-trade buffer / NAV is under the reserve percent."""
+    if buffer is None or cash_need is None or nav is None or nav <= 0:
+        return False
+    return (buffer - cash_need) / nav * Decimal(100) < Decimal(str(reserve_pct))
+
+
 def block_reason(
     contracts: int,
     limits: RiskLimits,
@@ -48,6 +67,8 @@ def block_reason(
     nav: Decimal | None = None,
     symbol_value: Decimal | None = None,
     cash: Decimal | None = None,
+    excess: Decimal | None = None,
+    cash_need: Decimal | None = None,
     margin: Decimal | None = None,
     rv_pctl: int | None = None,
     dte: int | None = None,
@@ -82,9 +103,11 @@ def block_reason(
     if nav is not None and nav > 0 and symbol_value is not None:
         if symbol_value / nav * Decimal(100) > limits.max_symbol_pct_nav:
             return "symbol exceeds max_symbol_pct_nav"
-    if needs_cash and nav is not None and nav > 0 and cash is not None:
-        if cash / nav * Decimal(100) < limits.cash_reserve_pct:
-            return "cash is below cash_reserve_pct"
+    # Post-trade ExcessLiquidity (or cash fallback) vs NAV — not preemptive TotalCashValue.
+    if needs_cash and breaches_cash_reserve(
+        reserve_buffer(excess, cash), cash_need, nav, limits.cash_reserve_pct,
+    ):
+        return "cash is below cash_reserve_pct"
     if nav is not None and nav > 0 and margin is not None:
         if margin / nav * Decimal(100) > limits.max_short_opt_margin_pct:
             return "margin exceeds max_short_opt_margin_pct"
@@ -120,7 +143,7 @@ def cycle_rank(reason: str) -> int:
 
 @dataclass
 class CycleBook:
-    """One pass. Cash and margin are the running remainder, in the book currency."""
+    """One pass. Cash, excess liquidity, and margin are the running remainder."""
 
     nav: Decimal | None
     cash: Decimal | None
@@ -133,6 +156,7 @@ class CycleBook:
     assignment: Decimal = Decimal(0)
     secured: Decimal = Decimal(0)
     symbols: dict = field(default_factory=dict)
+    excess: Decimal | None = None
 
     def clone(self) -> "CycleBook":
         return CycleBook(
@@ -147,10 +171,12 @@ class CycleBook:
             self.assignment,
             self.secured,
             dict(self.symbols),
+            self.excess,
         )
 
     def take(self, other: "CycleBook") -> None:
         self.cash = other.cash
+        self.excess = other.excess
         self.margin = other.margin
         self.orders = None if other.orders is None else dict(other.orders)
         self.buckets = dict(other.buckets)
@@ -209,6 +235,7 @@ def block_ticket_reason(
         )
     nav = _decimal(marks.get("nav"))
     cash = _decimal(marks.get("cash"))
+    excess = _decimal(marks.get("excess"))
     margin = _decimal(marks.get("margin"))
     price = _decimal(marks.get("price"))
     currency = str(marks.get("currency") or "")
@@ -225,10 +252,11 @@ def block_ticket_reason(
             break
         need += part
     missing = None
-    if cash_known and need > 0 and cash is not None and nav is not None and nav > 0:
+    buffer = reserve_buffer(excess, cash)
+    if cash_known and need > 0 and buffer is not None and nav is not None and nav > 0:
         booked, gap = _require_book(need, currency, base, rates)
         missing = gap or missing
-        if booked is not None and (cash - booked) / nav * Decimal(100) < limits.cash_reserve_pct:
+        if booked is not None and breaches_cash_reserve(buffer, booked, nav, limits.cash_reserve_pct):
             return "I2: ticket breaches cash_reserve_pct"
 
     added = Decimal(0)
@@ -371,10 +399,11 @@ def _cycle_reason(ticket: dict, limits: RiskLimits, book: CycleBook) -> str | No
     names = bucket_names(ticket.get("classifiers"))
     missing = None
     cash_need = _sum_legs(legs, _cycle_cash)
-    if cash_need is not None and cash_need > 0 and book.cash is not None and book.nav is not None and book.nav > 0:
+    buffer = reserve_buffer(book.excess, book.cash)
+    if cash_need is not None and cash_need > 0 and buffer is not None and book.nav is not None and book.nav > 0:
         booked, gap = _require_book(cash_need, currency, book.base, book.rates)
         missing = gap or missing
-        if booked is not None and (book.cash - booked) / book.nav * Decimal(100) < limits.cash_reserve_pct:
+        if booked is not None and breaches_cash_reserve(buffer, booked, book.nav, limits.cash_reserve_pct):
             return "cycle cash reserve"
     added = _sum_legs(legs, lambda leg: _cycle_symbol(leg))
     held = book.symbols.get(symbol, Decimal(0))
@@ -432,10 +461,13 @@ def _absorb(book: CycleBook, ticket: dict, limits: RiskLimits) -> None:
     symbol = str(ticket.get("symbol") or "")
     names = bucket_names(ticket.get("classifiers"))
     cash_need = _sum_legs(legs, _cycle_cash)
-    if cash_need is not None and book.cash is not None:
+    if cash_need is not None:
         booked = _to_book(cash_need, currency, book.base, book.rates)
         if booked is not None:
-            book.cash -= booked
+            if book.cash is not None:
+                book.cash -= booked
+            if book.excess is not None:
+                book.excess -= booked
     added = _sum_legs(legs, _cycle_symbol)
     if added is not None:
         booked = _to_book(added, currency, book.base, book.rates)
