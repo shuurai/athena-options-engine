@@ -94,7 +94,7 @@ hard limits. Risk Guard runs on every draft, independent of privilege.
 | `max_short_opt_margin_pct` | Short-option margin vs NAV |
 | `cash_reserve_pct` | Cash floor for CSP collateral |
 | `max_contracts_per_symbol` | Contract count per name |
-| `max_position_per_symbol` | Notional cap (ticker currency; 0 = off) |
+| `max_position_per_symbol` | Notional cap in book currency (FX-converted; 0 = off) |
 | `max_orders_per_day` | **Per-symbol** daily order count |
 | `min_rv_pctl_new_short` / `min_dte_new` | Volatility and DTE floors for new shorts |
 | `earnings_blackout_days` | No new opens near earnings |

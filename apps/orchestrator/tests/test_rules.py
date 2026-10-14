@@ -180,6 +180,36 @@ class RiskTest(unittest.TestCase):
         limits = _limits(max_position_per_symbol=1000, max_contracts_per_symbol=12)
         self.assertEqual(allowed_open(limits, Decimal("2"), Decimal("100")), 5)
 
+    def test_position_cap_uses_book_currency_fx(self) -> None:
+        from athena_strategy.drafts import book_position_units
+
+        # USD name on an HKD book: $100 × 1 share → HK$780 at 7.8
+        unit, existing, err = book_position_units(
+            Decimal("100"), Decimal("0"), "USD", "HKD", {"USD": Decimal("7.8")},
+        )
+        self.assertIsNone(err)
+        self.assertEqual(unit, Decimal("780"))
+        self.assertEqual(existing, Decimal("0"))
+        limits = _limits(max_position_per_symbol=7800, max_contracts_per_symbol=100)
+        # 7800 × 1.1 slack / 780 ≈ 11 shares in book HKD
+        self.assertEqual(allowed_open(limits, unit, Decimal(1), existing), 11)
+
+        # Same local $100 without FX would wrongly allow far more against an HKD-sized cap
+        self.assertGreater(allowed_open(limits, Decimal("100"), Decimal(1), Decimal(0)), 11)
+
+        missing, _ex, gap = book_position_units(
+            Decimal("100"), Decimal("0"), "USD", "HKD", {},
+        )
+        self.assertIsNone(missing)
+        self.assertEqual(gap, "missing fx rate USD")
+
+        same, same_ex, same_err = book_position_units(
+            Decimal("50"), Decimal("100"), "HKD", "HKD", {},
+        )
+        self.assertIsNone(same_err)
+        self.assertEqual(same, Decimal("50"))
+        self.assertEqual(same_ex, Decimal("100"))
+
     def test_block_reason_names_each_cap(self) -> None:
         limits = _limits(max_position_per_symbol=1000)
         self.assertEqual(block_reason(0, limits), "contracts must be at least 1")
@@ -2131,6 +2161,24 @@ class ViewAndCycleTest(unittest.TestCase):
         self.assertIn((5, "running", "phases B"), seen)
 
 
+class _FakeMarksConn:
+    """Minimal conn for cash-reserve backfill in decision rows."""
+
+    def execute(self, sql, params=None):
+        self.sql = " ".join(sql.split())
+        self.params = params
+        return self
+
+    def fetchone(self):
+        if "nav_marks" in getattr(self, "sql", ""):
+            return (Decimal("1000"),)
+        if "account_marks" in getattr(self, "sql", ""):
+            return (Decimal("100"),)
+        if "settings" in getattr(self, "sql", "") or "settings_versions" in getattr(self, "sql", ""):
+            return None
+        return None
+
+
 class BlockedDraftsTest(unittest.TestCase):
     def test_blocked_rows_stay_off_approve(self) -> None:
         from datetime import UTC, datetime
@@ -2214,7 +2262,7 @@ class BlockedDraftsTest(unittest.TestCase):
         conn = Conn()
         rows, more, nxt = _decision_slice(conn, "U1", 0)
         self.assertIn("status = 'blocked'", " ".join(conn.sql.split()))
-        self.assertEqual(conn.params[9], _PAGE + 1)
+        self.assertEqual(conn.params[10], _PAGE + 1)
         self.assertEqual(len(rows), _PAGE)
         self.assertTrue(more)
         self.assertEqual(nxt, _PAGE)
@@ -2222,6 +2270,7 @@ class BlockedDraftsTest(unittest.TestCase):
         payload = json.loads(page["body"])
         self.assertIn("SKHY", payload["html"])
         self.assertIn(">BLOCKED<", payload["html"])
+        self.assertIn('data-cmd="decision-row"', payload["html"])
         self.assertTrue(payload["more"])
         self.assertNotIn("Approve", payload["html"])
         self.assertNotIn("Blocked ·", payload["html"])
@@ -2257,16 +2306,20 @@ class BlockedDraftsTest(unittest.TestCase):
 
         filled = {"status": "filled", "symbol": "SKHY", "tactic": "OPEN_CSP", "reason": "dip", "actor": "ada"}
         rejected = {"status": "rejected", "symbol": "NVDA", "tactic": "ROLL", "reason": "no", "actor": "ada"}
+        blocked = {"status": "blocked", "symbol": "INTC", "tactic": "BUY", "reason": "cash is below cash_reserve_pct", "actor": ""}
         self.assertTrue(_history_visible(filled, "filled", ""))
         self.assertFalse(_history_visible(rejected, "filled", ""))
+        self.assertTrue(_history_visible(blocked, "blocked", ""))
+        self.assertFalse(_history_visible(filled, "blocked", ""))
         self.assertTrue(_history_visible(filled, "all", "skhy"))
         self.assertFalse(_history_visible(filled, "all", "nvda"))
         page = _history(None, "", {})
-        self.assertIn("Open a row for size, cost, fees", page["lead"])
+        self.assertIn("Open a row for size, cash, fees", page["lead"])
         self.assertIn('data-status="filled"', page["body"])
         self.assertIn('data-status="approved"', page["body"])
         self.assertIn('data-status="rejected"', page["body"])
-        self.assertIn("No fills or approvals yet.", page["body"])
+        self.assertIn('data-status="blocked"', page["body"])
+        self.assertIn("No fills, approvals, or blocks yet.", page["body"])
         self.assertIn('id="history-keyword"', page["body"])
         self.assertIn(">Detail<", page["body"])
 
@@ -2287,7 +2340,159 @@ class BlockedDraftsTest(unittest.TestCase):
         self.assertIn("data-json=", html)
         self.assertIn("fee 1.25 USD", html)
         self.assertIn('cmd === "history-row"', _CLIENT_JS)
+        self.assertIn('cmd === "decision-row"', _CLIENT_JS)
         self.assertIn("Notional", _CLIENT_JS)
+        self.assertIn("Cash need", _CLIENT_JS)
+
+    def test_history_includes_blocked_drafts(self) -> None:
+        from datetime import UTC, datetime
+
+        from athena_orchestrator.pages import _history_detail, _history_item, _history_tr
+
+        when = datetime(2026, 10, 14, 5, 0, tzinfo=UTC)
+        item = _history_item(
+            when, "INTC", "BUY", "P2", "blocked", None, "", "cash is below cash_reserve_pct",
+            qty=12, draft_id="draft_ab12",
+            cash="910", nav="5000", cash_pct="18.2", cash_reserve_pct="30",
+            cash_need="1200", reserve_floor="1500", shortfall="590",
+        )
+        self.assertIn("cash 18.2% (910)", item["detail"])
+        self.assertIn("< reserve 30%", item["detail"])
+        self.assertIn("floor 1,500", item["detail"])
+        self.assertIn("short 590", item["detail"])
+        self.assertIn("BUY 12", _history_detail(item))
+        html = _history_tr(item)
+        self.assertIn(">BLOCKED<", html)
+        self.assertIn("draft_ab12", html)
+        self.assertIn("tag amber", html)
+        self.assertIn("reserve_floor", html)
+
+    def test_decision_row_json_has_contracts(self) -> None:
+        from datetime import UTC, datetime
+
+        from athena_orchestrator.pages import _decision_trs
+
+        html = _decision_trs([
+            (
+                datetime(2026, 10, 14, 8, 0, tzinfo=UTC),
+                "draft_x1", "INTC", "BUY", "blocked", "cash is below cash_reserve_pct",
+                12, "P2", "cash is below cash_reserve_pct",
+                {"cash": "1000", "nav": "5000", "cash_pct": "20", "cash_reserve_pct": "30", "cash_need": "1200",
+                 "items": [{"detail": "BUY 12 · cash 20% NAV (below 30%) · need ~$1,200"}]},
+            ),
+        ])
+        self.assertIn('data-cmd="decision-row"', html)
+        self.assertIn("· 12", html)
+        self.assertIn("cash_need", html)
+        self.assertIn("1200", html)
+
+    def test_risk_block_trail_and_cash_reserve_badge(self) -> None:
+        from athena_orchestrator.console import _CLIENT_JS
+        from athena_orchestrator.pages import _audit_badges, _audit_status_label, _budget_label, _decision_trs
+        from athena_strategy.drafts import cash_comparison_view, cash_reserve_math, format_risk_block_detail, risk_block_steps
+
+        steps = risk_block_steps(
+            draft_id="draft_r1",
+            symbol="INTC",
+            tactic="BUY",
+            contracts=12,
+            reason="cash is below cash_reserve_pct",
+            cash=Decimal("910"),
+            nav=Decimal("5000"),
+            cash_reserve_pct=Decimal("30"),
+            cash_need=Decimal("1200"),
+        )
+        self.assertEqual(steps["reason"], "cash is below cash_reserve_pct")
+        self.assertEqual(steps["contracts"], 12)
+        self.assertIn("items", steps)
+        self.assertIn("cash", steps)
+        self.assertEqual(steps["reserve_floor"], "1500")
+        self.assertEqual(steps["shortfall"], "590")
+        self.assertIn("floor 1,500", steps["items"][0]["detail"])
+        self.assertIn("short 590", steps["items"][0]["detail"])
+        math = cash_reserve_math(Decimal("910"), Decimal("5000"), Decimal("30"))
+        self.assertEqual(math["reserve_floor"], Decimal("1500"))
+        self.assertEqual(math["shortfall"], Decimal("590"))
+        detail = format_risk_block_detail(
+            tactic="BUY", contracts=12, cash=Decimal("910"), nav=Decimal("5000"),
+            cash_pct=Decimal("18.2"), cash_reserve_pct=Decimal("30"),
+            reserve_floor=Decimal("1500"), shortfall=Decimal("590"),
+            cash_need=Decimal("1200"), reason="cash is below cash_reserve_pct",
+        )
+        self.assertIn("BUY 12", detail)
+        self.assertIn("cash 18.2% (910)", detail)
+        self.assertIn("< reserve 30%", detail)
+        self.assertIn("floor 1,500 on NAV 5,000", detail)
+        self.assertIn("short 590", detail)
+        self.assertIn("1,200", detail)
+        thin = cash_comparison_view(
+            tactic="BUY", contracts=1, reason="cash is below cash_reserve_pct",
+            trail={}, cash=Decimal("100"), nav=Decimal("1000"), cash_reserve_pct=Decimal("30"),
+        )
+        self.assertEqual(thin["reserve_floor"], "300")
+        self.assertEqual(thin["shortfall"], "200")
+        self.assertIn("cash 10% (100)", thin["detail"])
+        from datetime import UTC, datetime
+        from unittest.mock import patch
+
+        with patch(
+            "athena_strategy.drafts._account_cash_marks",
+            return_value=(Decimal("100"), Decimal("1000"), Decimal("30")),
+        ):
+            html = _decision_trs([
+                (
+                    datetime(2026, 10, 14, 8, 0, tzinfo=UTC),
+                    "draft_thin", "NVDA", "BUY", "blocked", "cash is below cash_reserve_pct",
+                    1, "P1", "cash is below cash_reserve_pct", {},
+                ),
+            ], _FakeMarksConn(), "U1")
+        self.assertIn("reserve_floor", html)
+        self.assertIn("300", html)
+        self.assertIn("shortfall", html)
+        self.assertIn("Reserve floor", _CLIENT_JS)
+        self.assertIn("Shortfall", _CLIENT_JS)
+        self.assertIn("Orders today", _CLIENT_JS)
+        self.assertIn("Max orders/day", _CLIENT_JS)
+        self.assertEqual(_budget_label("cash is below cash_reserve_pct"), "CASH RESERVE")
+        self.assertEqual(_audit_status_label("blocked"), "BLOCKED")
+        badges = _audit_badges("cash is below cash_reserve_pct", "blocked")
+        self.assertEqual(badges[0]["text"], "CASH RESERVE")
+        self.assertEqual(badges[0]["kind"], "red")
+
+    def test_day_orders_block_detail_shows_counts(self) -> None:
+        from athena_orchestrator.pages import _budget_label
+        from athena_strategy.drafts import cash_comparison_view, format_risk_block_detail, risk_block_steps
+
+        detail = format_risk_block_detail(
+            tactic="CLOSE", contracts=1, reason="orders exceed max_orders_per_day",
+            orders_today=10, max_orders_per_day=10,
+        )
+        self.assertEqual(detail, "CLOSE 1 · orders today 10 ≥ max 10/day")
+        steps = risk_block_steps(
+            draft_id="draft_ord",
+            symbol="SKHY",
+            tactic="CLOSE",
+            contracts=1,
+            reason="orders exceed max_orders_per_day",
+            orders_today=10,
+            max_orders_per_day=6,
+        )
+        self.assertEqual(steps["orders_today"], 10)
+        self.assertEqual(steps["max_orders_per_day"], 6)
+        self.assertIn("orders today 10 ≥ max 6/day", steps["items"][0]["detail"])
+        view = cash_comparison_view(
+            tactic="CLOSE", contracts=1, reason="orders exceed max_orders_per_day",
+            trail={}, orders_today=3, max_orders_per_day=2,
+        )
+        self.assertEqual(view["orders_today"], "3")
+        self.assertEqual(view["max_orders_per_day"], "2")
+        self.assertIn("orders today 3 ≥ max 2/day", view["detail"])
+        self.assertEqual(_budget_label("orders exceed max_orders_per_day"), "DAY ORDERS")
+        contracts = format_risk_block_detail(
+            tactic="BUY", contracts=13, reason="contracts exceed max_contracts_per_symbol",
+            max_contracts_per_symbol=12,
+        )
+        self.assertIn("contracts 13 > max 12", contracts)
 
     def test_fill_commission_ignores_ib_unset(self) -> None:
         from types import SimpleNamespace

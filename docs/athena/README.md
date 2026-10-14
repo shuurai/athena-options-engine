@@ -52,6 +52,7 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 | [09-roadmap.md](09-roadmap.md) | Phased build plan |
 | [10-implementation-tracker.md](10-implementation-tracker.md) | Task checklist with status and exit proof |
 | [11-test-tracking.md](11-test-tracking.md) | What was proven, and which checks are still pending |
+| [12-short-horizon-forecast-rnd.md](12-short-horizon-forecast-rnd.md) | R&D: ML short-horizon bid/ask / stop / TP (advisory) |
 
 ---
 

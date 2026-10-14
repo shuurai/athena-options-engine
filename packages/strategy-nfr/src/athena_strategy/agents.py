@@ -704,6 +704,17 @@ def write_decision(conn, account_id: str, symbol: str, source: str, outcome: str
     conn.commit()
 
 
+def write_risk_block(
+    conn,
+    account_id: str,
+    symbol: str,
+    reason: str,
+    steps: dict,
+) -> None:
+    """Audit a blocked draft with source Risk and outcome blocked."""
+    write_decision(conn, account_id, symbol, "risk", "blocked", reason, steps)
+
+
 def _step(tactic: str, outcome: str, detail: str, draft_id: str = "") -> dict:
     return {"tactic": tactic, "outcome": outcome, "detail": detail, "draft_id": draft_id or ""}
 

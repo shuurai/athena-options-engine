@@ -322,7 +322,8 @@ tr.pool-busy button, tr.pool-busy select, tr.pool-busy input { pointer-events: n
 .filters input { width: 160px; margin: 0; }
 .pnl-pos { color: var(--ath-up); font-family: var(--font-mono); }
 .pnl-neg { color: var(--ath-down); font-family: var(--font-mono); }
-tr[data-cmd="history-row"] { cursor: pointer; }
+tr[data-cmd="history-row"],
+tr[data-cmd="decision-row"] { cursor: pointer; }
 .hist-detail { color: var(--site-text-3); max-width: 28rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card h2 button.more { background: none; border: 0; padding: 0; font: inherit; }
 .nav .mark { background: none; width: 26px; height: 26px; color: inherit; font-size: inherit; }
@@ -2580,14 +2581,20 @@ _CLIENT_JS = r"""
       modal(btn.getAttribute("data-symbol") || "Position", wrap, [close]);
       return;
     }
-    if (cmd === "history-row") {
+    if (cmd === "history-row" || cmd === "decision-row") {
       let row = {};
       try { row = JSON.parse(btn.getAttribute("data-json") || "{}"); } catch (err) { row = {}; }
       const wrap = document.createElement("div");
       [
         ["Side", row.side], ["Qty", row.qty], ["Price", row.price], ["Notional", row.notional],
         ["Fee", row.fee], ["Multiplier", row.multiplier], ["Type", row.sec_type],
-        ["Phase", row.phase], ["Status", row.status], ["P&L", row.pnl],
+        ["Phase", row.phase], ["Tactic", row.tactic], ["Status", row.status], ["P&L", row.pnl],
+        ["Draft id", row.draft_id], ["Limit", row.limit],
+        ["Put strike", row.put_strike], ["Call strike", row.call_strike],
+        ["Cash", row.cash], ["NAV", row.nav], ["Cash %", row.cash_pct],
+        ["Reserve %", row.cash_reserve_pct], ["Reserve floor", row.reserve_floor],
+        ["Shortfall", row.shortfall], ["Cash need", row.cash_need],
+        ["Orders today", row.orders_today], ["Max orders/day", row.max_orders_per_day],
         ["Exec id", row.exec_id], ["Approved by", row.by], ["Reason", row.reason], ["Detail", row.detail]
       ].forEach((pair) => {
         const text = pair[1] == null || pair[1] === "" ? "—" : String(pair[1]);
@@ -2609,7 +2616,7 @@ _CLIENT_JS = r"""
       close.type = "button";
       close.textContent = "Close";
       close.addEventListener("click", closeAll);
-      modal(row.title || "History", wrap, [close]);
+      modal(row.title || (cmd === "decision-row" ? "Decision" : "History"), wrap, [close]);
       return;
     }
     if (cmd === "privilege") {

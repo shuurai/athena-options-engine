@@ -409,6 +409,17 @@ def apply_ticket_block(
         (reason, [row[0] for row in rows]),
     )
     conn.commit()
+    note = "ticket cash need would breach reserve" if "cash_reserve" in reason else ""
+    for row in rows:
+        draft_id, tactic, contracts, limit_price, put_strike, call_strike, multiplier = row
+        need = draft_cash_need(
+            tactic, int(contracts), limit_price=limit_price, put_strike=put_strike, multiplier=multiplier or "100",
+        )
+        _note_risk_block(
+            conn, account_id, draft_id, symbol, tactic, int(contracts), reason,
+            limit_price=limit_price, put_strike=put_strike, call_strike=call_strike,
+            multiplier=multiplier or "100", cash_need=need, note=note,
+        )
     return reason
 
 
@@ -570,6 +581,7 @@ def open_quantity(
     """Contracts for a new open. One when the money cap is off.
 
     A missing price is not one contract. The position cap cannot be checked.
+    Position money is always in the account book currency (FX applied).
     """
     limits = settings.risk
     if limits.max_position_per_symbol <= 0:
@@ -577,10 +589,77 @@ def open_quantity(
     price = last_tradeable_price(conn, symbol)
     if price is None or price <= 0:
         return 0
+    unit, existing, err = position_in_book(conn, account_id, symbol, price, multiplier)
+    if err or unit is None or existing is None:
+        return 0
+    return allowed_open(limits, unit, Decimal(1), existing)
+
+
+def position_in_book(
+    conn: psycopg.Connection,
+    account_id: str,
+    symbol: str,
+    price: Decimal,
+    multiplier: str,
+) -> tuple[Decimal | None, Decimal | None, str | None]:
+    """One-unit cost and existing exposure in book currency.
+
+    Returns (unit, existing, error). error is set when an FX rate is missing.
+    With no book base yet, local ticker amounts are used as-is.
+    """
+    from athena_exec.broker import stock_venue
+
     mult = Decimal(multiplier or "100")
     if mult <= 0:
         mult = Decimal(100)
-    return allowed_open(limits, price, mult, _exposure(conn, account_id, symbol, price))
+    local_one = price * mult
+    local_existing = _exposure(conn, account_id, symbol, price)
+    return book_position_units(
+        local_one,
+        local_existing,
+        stock_venue(symbol)[1],
+        *_account_fx(conn, account_id),
+    )
+
+
+def book_position_units(
+    local_one: Decimal,
+    local_existing: Decimal,
+    currency: str,
+    base: str,
+    rates: dict,
+) -> tuple[Decimal | None, Decimal | None, str | None]:
+    """Convert local one-unit and existing notionals into the book currency."""
+    if not base:
+        return local_one, local_existing, None
+    one, gap = book_amount(local_one, currency, base, rates)
+    if gap:
+        return None, None, gap
+    if one is None:
+        return None, None, f"missing fx rate {currency}"
+    existing, gap2 = book_amount(local_existing, currency, base, rates)
+    if gap2:
+        return None, None, gap2
+    if existing is None:
+        return None, None, f"missing fx rate {currency}"
+    return one, existing, None
+
+
+def _account_fx(conn, account_id: str) -> tuple[str, dict]:
+    mark = conn.execute(
+        """
+        SELECT base_currency, fx_rates
+        FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1
+        """,
+        (account_id,),
+    ).fetchone()
+    if mark is None:
+        return "", {}
+    base = "" if not mark[0] else str(mark[0])
+    rates = {}
+    if mark[1]:
+        rates = {str(key): Decimal(str(value)) for key, value in mark[1].items()}
+    return base, rates
 
 
 def _symbol_in_replay(conn: psycopg.Connection, account_id: str, symbol: str) -> bool:
@@ -640,10 +719,17 @@ def _position_inputs(conn, account_id: str, symbol: str, multiplier: str) -> dic
         if load_active(conn, account_id).risk.max_position_per_symbol > 0:
             return {"mark_reason": "missing mark"}
         return {}
-    mult = Decimal(multiplier or "100")
-    if mult <= 0:
-        mult = Decimal(100)
-    return {"price": price, "multiplier": mult, "existing": _exposure(conn, account_id, symbol, price)}
+    if load_active(conn, account_id).risk.max_position_per_symbol <= 0:
+        mult = Decimal(multiplier or "100")
+        if mult <= 0:
+            mult = Decimal(100)
+        return {"price": price, "multiplier": mult, "existing": _exposure(conn, account_id, symbol, price)}
+    unit, existing, err = position_in_book(conn, account_id, symbol, price, multiplier)
+    if err:
+        return {"mark_reason": err}
+    if unit is None or existing is None:
+        return {"mark_reason": "missing fx rate"}
+    return {"price": unit, "multiplier": Decimal(1), "existing": existing}
 
 
 def _risk_line(
@@ -801,6 +887,12 @@ def _insert_draft(
         ),
     )
     conn.commit()
+    if status == "blocked":
+        _note_risk_block(
+            conn, account_id, draft_id, symbol, tactic, contracts, reason,
+            limit_price=limit_price, put_strike=put_strike, call_strike=call_strike,
+            multiplier=multiplier,
+        )
     return {
         "id": draft_id,
         "status": status,
@@ -808,6 +900,542 @@ def _insert_draft(
         "contracts": contracts,
         "tactic": tactic,
     }
+
+
+def draft_cash_need(
+    tactic: str,
+    contracts: int,
+    *,
+    limit_price=None,
+    put_strike=None,
+    multiplier: str = "100",
+) -> Decimal | None:
+    """BUY/CSP/strangle cash notional when the marks are present."""
+    qty = Decimal(contracts)
+    mult = _chain_multiplier(multiplier)
+    if tactic == "BUY":
+        if limit_price is None:
+            return None
+        return Decimal(limit_price) * qty
+    if tactic in {"OPEN_CSP", "OPEN_STRANGLE"}:
+        if put_strike is None:
+            return None
+        return Decimal(put_strike) * mult * qty
+    return Decimal(0)
+
+
+def cash_reserve_math(
+    cash=None,
+    nav=None,
+    cash_reserve_pct=None,
+) -> dict:
+    """Percent, floor, and shortfall for a cash-reserve comparison."""
+    out: dict = {
+        "cash_pct": None,
+        "reserve_floor": None,
+        "shortfall": None,
+    }
+    if cash is None or nav is None or Decimal(nav) <= 0:
+        return out
+    cash_d = Decimal(cash)
+    nav_d = Decimal(nav)
+    out["cash_pct"] = cash_d / nav_d * Decimal(100)
+    if cash_reserve_pct is None:
+        return out
+    reserve = Decimal(cash_reserve_pct)
+    floor = nav_d * reserve / Decimal(100)
+    out["reserve_floor"] = floor
+    out["shortfall"] = max(Decimal(0), floor - cash_d)
+    return out
+
+
+def risk_block_steps(
+    *,
+    draft_id: str,
+    symbol: str,
+    tactic: str,
+    contracts: int,
+    reason: str,
+    cash=None,
+    nav=None,
+    cash_reserve_pct=None,
+    cash_need=None,
+    limit=None,
+    put_strike=None,
+    call_strike=None,
+    note: str = "",
+    orders_today=None,
+    max_orders_per_day=None,
+    max_contracts_per_symbol=None,
+    max_position_per_symbol=None,
+    max_symbol_pct_nav=None,
+    symbol_value=None,
+    margin=None,
+    max_short_opt_margin_pct=None,
+    rv_pctl=None,
+    min_rv_pctl_new_short=None,
+    dte=None,
+    min_dte_new=None,
+    earnings_in_days=None,
+    earnings_blackout_days=None,
+) -> dict:
+    """Structured trail payload for a risk-blocked draft."""
+    math = cash_reserve_math(cash, nav, cash_reserve_pct)
+    cash_pct = math["cash_pct"]
+    reserve_floor = math["reserve_floor"]
+    shortfall = math["shortfall"]
+    if not note and (reason or "") == "cash is below cash_reserve_pct":
+        note = "book already under cash reserve; any open is blocked"
+    detail = format_risk_block_detail(
+        tactic=tactic,
+        contracts=contracts,
+        cash=cash,
+        nav=nav,
+        cash_pct=cash_pct,
+        cash_reserve_pct=cash_reserve_pct,
+        reserve_floor=reserve_floor,
+        shortfall=shortfall,
+        cash_need=cash_need,
+        reason=reason,
+        note=note,
+        orders_today=orders_today,
+        max_orders_per_day=max_orders_per_day,
+        max_contracts_per_symbol=max_contracts_per_symbol,
+        max_position_per_symbol=max_position_per_symbol,
+        max_symbol_pct_nav=max_symbol_pct_nav,
+        symbol_value=symbol_value,
+        margin=margin,
+        max_short_opt_margin_pct=max_short_opt_margin_pct,
+        rv_pctl=rv_pctl,
+        min_rv_pctl_new_short=min_rv_pctl_new_short,
+        dte=dte,
+        min_dte_new=min_dte_new,
+        earnings_in_days=earnings_in_days,
+        earnings_blackout_days=earnings_blackout_days,
+    )
+    short = tactic[5:] if str(tactic).startswith("OPEN_") else tactic
+    item = {
+        "tactic": short,
+        "outcome": "blocked",
+        "detail": detail,
+        "draft_id": draft_id or "",
+        "contracts": int(contracts),
+    }
+    return {
+        "reason": reason,
+        "draft_id": draft_id or "",
+        "symbol": symbol,
+        "tactic": tactic,
+        "contracts": int(contracts),
+        "limit": None if limit is None else _num(limit),
+        "put_strike": None if put_strike is None else _num(put_strike),
+        "call_strike": None if call_strike is None else _num(call_strike),
+        "cash": None if cash is None else _num(cash),
+        "nav": None if nav is None else _num(nav),
+        "cash_pct": None if cash_pct is None else _num(cash_pct),
+        "cash_reserve_pct": None if cash_reserve_pct is None else _num(cash_reserve_pct),
+        "reserve_floor": None if reserve_floor is None else _num(reserve_floor),
+        "shortfall": None if shortfall is None else _num(shortfall),
+        "cash_need": None if cash_need is None else _num(cash_need),
+        "orders_today": None if orders_today is None else int(orders_today),
+        "max_orders_per_day": None if max_orders_per_day is None else int(max_orders_per_day),
+        "max_contracts_per_symbol": None if max_contracts_per_symbol is None else int(max_contracts_per_symbol),
+        "max_position_per_symbol": None if max_position_per_symbol is None else _num(max_position_per_symbol),
+        "max_symbol_pct_nav": None if max_symbol_pct_nav is None else _num(max_symbol_pct_nav),
+        "symbol_value": None if symbol_value is None else _num(symbol_value),
+        "margin": None if margin is None else _num(margin),
+        "max_short_opt_margin_pct": None if max_short_opt_margin_pct is None else _num(max_short_opt_margin_pct),
+        "rv_pctl": None if rv_pctl is None else int(rv_pctl),
+        "min_rv_pctl_new_short": None if min_rv_pctl_new_short is None else int(min_rv_pctl_new_short),
+        "dte": None if dte is None else int(dte),
+        "min_dte_new": None if min_dte_new is None else int(min_dte_new),
+        "earnings_in_days": None if earnings_in_days is None else int(earnings_in_days),
+        "earnings_blackout_days": None if earnings_blackout_days is None else int(earnings_blackout_days),
+        "note": note,
+        "items": [item],
+    }
+
+
+def format_risk_block_detail(
+    *,
+    tactic: str,
+    contracts: int,
+    cash=None,
+    nav=None,
+    cash_pct=None,
+    cash_reserve_pct=None,
+    reserve_floor=None,
+    shortfall=None,
+    cash_need=None,
+    reason: str = "",
+    note: str = "",
+    orders_today=None,
+    max_orders_per_day=None,
+    max_contracts_per_symbol=None,
+    max_position_per_symbol=None,
+    max_symbol_pct_nav=None,
+    symbol_value=None,
+    margin=None,
+    max_short_opt_margin_pct=None,
+    rv_pctl=None,
+    min_rv_pctl_new_short=None,
+    dte=None,
+    min_dte_new=None,
+    earnings_in_days=None,
+    earnings_blackout_days=None,
+) -> str:
+    """Human one-liner for Audit / Recent decisions / History."""
+    cash = _as_decimal(cash)
+    nav = _as_decimal(nav)
+    cash_pct = _as_decimal(cash_pct)
+    cash_reserve_pct = _as_decimal(cash_reserve_pct)
+    reserve_floor = _as_decimal(reserve_floor)
+    shortfall = _as_decimal(shortfall)
+    cash_need = _as_decimal(cash_need)
+    symbol_value = _as_decimal(symbol_value)
+    margin = _as_decimal(margin)
+    max_symbol_pct_nav = _as_decimal(max_symbol_pct_nav)
+    max_short_opt_margin_pct = _as_decimal(max_short_opt_margin_pct)
+    max_position_per_symbol = _as_decimal(max_position_per_symbol)
+    short = tactic[5:] if str(tactic).startswith("OPEN_") else (tactic or "—")
+    parts = [f"{short} {int(contracts)}"]
+    key = " ".join((reason or "").replace("_", " ").split()).lower()
+    compared = False
+
+    if "orders" in key and ("max" in key or "exceed" in key or "day" in key):
+        if orders_today is not None and max_orders_per_day is not None:
+            parts.append(f"orders today {int(orders_today)} ≥ max {int(max_orders_per_day)}/day")
+            compared = True
+    elif "contracts exceed" in key or "max contracts" in key:
+        if max_contracts_per_symbol is not None:
+            parts.append(f"contracts {int(contracts)} > max {int(max_contracts_per_symbol)}")
+            compared = True
+    elif "position exceed" in key:
+        bits = [f"size {int(contracts)}"]
+        if max_position_per_symbol is not None:
+            bits.append(f"cap {_money_plain(max_position_per_symbol)}")
+        parts.append(" · ".join(bits) if len(bits) > 1 else bits[0])
+        compared = True
+    elif "symbol exceed" in key:
+        if symbol_value is not None and nav is not None and nav > 0 and max_symbol_pct_nav is not None:
+            pct = symbol_value / nav * Decimal(100)
+            parts.append(f"symbol {_num(pct)}% NAV > max {_num(max_symbol_pct_nav)}%")
+            compared = True
+    elif is_cash_reserve_reason(reason) or ("cash" in key and "reserve" in key):
+        if cash_pct is not None and cash_reserve_pct is not None:
+            cash_bit = f"cash {_num(cash_pct)}%"
+            if cash is not None:
+                cash_bit = f"{cash_bit} ({_money_plain(cash)})"
+            parts.append(f"{cash_bit} < reserve {_num(cash_reserve_pct)}%")
+            if reserve_floor is not None and nav is not None:
+                parts.append(f"floor {_money_plain(reserve_floor)} on NAV {_money_plain(nav)}")
+            if shortfall is not None:
+                parts.append(f"short {_money_plain(shortfall)}")
+            compared = True
+        elif cash_pct is not None:
+            bit = f"cash {_num(cash_pct)}% NAV"
+            if cash is not None:
+                bit = f"{bit} ({_money_plain(cash)})"
+            parts.append(bit)
+            compared = True
+    elif "margin exceed" in key or "cycle margin" in key:
+        if margin is not None and nav is not None and nav > 0 and max_short_opt_margin_pct is not None:
+            pct = margin / nav * Decimal(100)
+            parts.append(f"margin {_num(pct)}% NAV > max {_num(max_short_opt_margin_pct)}%")
+            compared = True
+    elif "rv" in key and ("percentile" in key or "pctl" in key or "below" in key):
+        if rv_pctl is not None and min_rv_pctl_new_short is not None:
+            parts.append(f"rv pctl {int(rv_pctl)} < min {int(min_rv_pctl_new_short)}")
+            compared = True
+    elif "dte" in key and "below" in key:
+        if dte is not None and min_dte_new is not None:
+            parts.append(f"dte {int(dte)} < min {int(min_dte_new)}")
+            compared = True
+    elif "earnings" in key:
+        if earnings_in_days is not None and earnings_blackout_days is not None:
+            parts.append(
+                f"earnings in {int(earnings_in_days)}d ≤ blackout {int(earnings_blackout_days)}d"
+            )
+            compared = True
+
+    if cash_need is not None and cash_need > 0:
+        parts.append(f"need ~${_money_plain(cash_need)}")
+        compared = True
+    if not compared and note:
+        parts.append(note)
+    elif not compared and reason:
+        parts.append(reason)
+    return " · ".join(parts)
+
+
+def _money_plain(value) -> str:
+    amount = Decimal(value)
+    if amount == amount.to_integral_value():
+        return f"{int(amount):,}"
+    return f"{amount:,.2f}"
+
+
+def _account_cash_marks(conn, account_id: str) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+    """cash, nav, cash_reserve_pct for the active book."""
+    nav_row = conn.execute(
+        "SELECT last_nav FROM nav_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
+        (account_id,),
+    ).fetchone()
+    cash_row = conn.execute(
+        "SELECT cash FROM account_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
+        (account_id,),
+    ).fetchone()
+    reserve = None
+    try:
+        reserve = Decimal(load_active(conn, account_id).risk.cash_reserve_pct)
+    except Exception:
+        reserve = None
+    cash = None if cash_row is None else Decimal(cash_row[0])
+    nav = None if nav_row is None else Decimal(nav_row[0])
+    return cash, nav, reserve
+
+
+def is_cash_reserve_reason(reason: str) -> bool:
+    key = " ".join((reason or "").replace("_", " ").split()).lower()
+    return "cash reserve" in key or "cash is below cash reserve pct" in key or "cash_reserve" in (reason or "").lower()
+
+
+def is_day_orders_reason(reason: str) -> bool:
+    key = " ".join((reason or "").replace("_", " ").split()).lower()
+    return ("orders" in key and ("max" in key or "exceed" in key or "day" in key)) or key == "cycle orders"
+
+
+def _orders_today(conn, account_id: str, symbol: str) -> int:
+    row = conn.execute(
+        """
+        SELECT count(*) FROM orders
+        WHERE account_id = %s AND upper(symbol) = %s
+          AND status <> 'blocked' AND created_at::date = CURRENT_DATE
+        """,
+        (account_id, symbol.upper()),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _risk_block_context(conn, account_id: str, symbol: str) -> dict:
+    """Marks and limits for a rich risk-block Detail line."""
+    settings = load_active(conn, account_id)
+    risk = settings.risk
+    cash, nav, reserve = _account_cash_marks(conn, account_id)
+    mark = conn.execute(
+        """
+        SELECT margin FROM account_marks
+        WHERE account_id = %s ORDER BY day DESC LIMIT 1
+        """,
+        (account_id,),
+    ).fetchone()
+    opening = True
+    guard = _guard_inputs(conn, account_id, symbol, None, opening)
+    return {
+        "cash": cash,
+        "nav": nav,
+        "cash_reserve_pct": reserve,
+        "margin": None if mark is None or mark[0] is None else Decimal(mark[0]),
+        "orders_today": guard.get("orders_today"),
+        "max_orders_per_day": risk.max_orders_per_day,
+        "max_contracts_per_symbol": risk.max_contracts_per_symbol,
+        "max_position_per_symbol": risk.max_position_per_symbol,
+        "max_symbol_pct_nav": risk.max_symbol_pct_nav,
+        "max_short_opt_margin_pct": risk.max_short_opt_margin_pct,
+        "min_rv_pctl_new_short": risk.min_rv_pctl_new_short,
+        "min_dte_new": risk.min_dte_new,
+        "earnings_blackout_days": risk.earnings_blackout_days,
+        "symbol_value": guard.get("symbol_value"),
+        "dte": guard.get("dte"),
+        "earnings_in_days": guard.get("earnings_in_days"),
+        "rv_pctl": None,
+    }
+
+
+def cash_comparison_view(
+    *,
+    tactic: str,
+    contracts,
+    reason: str,
+    trail: dict | None = None,
+    cash=None,
+    nav=None,
+    cash_reserve_pct=None,
+    cash_need=None,
+    orders_today=None,
+    max_orders_per_day=None,
+    max_contracts_per_symbol=None,
+    max_position_per_symbol=None,
+    max_symbol_pct_nav=None,
+    symbol_value=None,
+    margin=None,
+    max_short_opt_margin_pct=None,
+    rv_pctl=None,
+    min_rv_pctl_new_short=None,
+    dte=None,
+    min_dte_new=None,
+    earnings_in_days=None,
+    earnings_blackout_days=None,
+) -> dict:
+    """Modal/detail fields for a risk block. Fills math when marks exist.
+
+    Empty money fields are "" so the UI can map them to a dash.
+    """
+    payload = dict(trail or {})
+
+    def _pick(override, key):
+        if override is not None:
+            return override
+        return payload.get(key)
+
+    cash_v = cash if cash is not None else _as_decimal(payload.get("cash"))
+    nav_v = nav if nav is not None else _as_decimal(payload.get("nav"))
+    reserve_v = cash_reserve_pct if cash_reserve_pct is not None else _as_decimal(payload.get("cash_reserve_pct"))
+    need_v = cash_need if cash_need is not None else _as_decimal(payload.get("cash_need"))
+    orders_v = orders_today if orders_today is not None else _pick(None, "orders_today")
+    max_orders_v = max_orders_per_day if max_orders_per_day is not None else _pick(None, "max_orders_per_day")
+    max_contracts_v = (
+        max_contracts_per_symbol if max_contracts_per_symbol is not None
+        else _pick(None, "max_contracts_per_symbol")
+    )
+    max_position_v = (
+        max_position_per_symbol if max_position_per_symbol is not None
+        else _as_decimal(payload.get("max_position_per_symbol"))
+    )
+    max_symbol_v = (
+        max_symbol_pct_nav if max_symbol_pct_nav is not None
+        else _as_decimal(payload.get("max_symbol_pct_nav"))
+    )
+    symbol_value_v = symbol_value if symbol_value is not None else _as_decimal(payload.get("symbol_value"))
+    margin_v = margin if margin is not None else _as_decimal(payload.get("margin"))
+    max_margin_v = (
+        max_short_opt_margin_pct if max_short_opt_margin_pct is not None
+        else _as_decimal(payload.get("max_short_opt_margin_pct"))
+    )
+    rv_v = rv_pctl if rv_pctl is not None else _pick(None, "rv_pctl")
+    min_rv_v = min_rv_pctl_new_short if min_rv_pctl_new_short is not None else _pick(None, "min_rv_pctl_new_short")
+    dte_v = dte if dte is not None else _pick(None, "dte")
+    min_dte_v = min_dte_new if min_dte_new is not None else _pick(None, "min_dte_new")
+    earn_v = earnings_in_days if earnings_in_days is not None else _pick(None, "earnings_in_days")
+    blackout_v = (
+        earnings_blackout_days if earnings_blackout_days is not None
+        else _pick(None, "earnings_blackout_days")
+    )
+    math = cash_reserve_math(cash_v, nav_v, reserve_v)
+    qty = 0 if contracts is None else int(contracts)
+    detail = ""
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    if items and isinstance(items[0], dict):
+        detail = items[0].get("detail") or ""
+    rebuilt = format_risk_block_detail(
+        tactic=tactic,
+        contracts=qty,
+        cash=cash_v,
+        nav=nav_v,
+        cash_pct=math["cash_pct"],
+        cash_reserve_pct=reserve_v,
+        reserve_floor=math["reserve_floor"],
+        shortfall=math["shortfall"],
+        cash_need=need_v,
+        reason=reason,
+        note=str(payload.get("note") or ""),
+        orders_today=orders_v,
+        max_orders_per_day=max_orders_v,
+        max_contracts_per_symbol=max_contracts_v,
+        max_position_per_symbol=max_position_v,
+        max_symbol_pct_nav=max_symbol_v,
+        symbol_value=symbol_value_v,
+        margin=margin_v,
+        max_short_opt_margin_pct=max_margin_v,
+        rv_pctl=rv_v,
+        min_rv_pctl_new_short=min_rv_v,
+        dte=dte_v,
+        min_dte_new=min_dte_v,
+        earnings_in_days=earn_v,
+        earnings_blackout_days=blackout_v,
+    )
+    # Prefer rebuilt comparison when it carries more than the bare reason.
+    if rebuilt and rebuilt != f"{(tactic[5:] if str(tactic).startswith('OPEN_') else (tactic or '—'))} {qty} · {reason}":
+        detail = rebuilt
+    elif not detail:
+        detail = rebuilt or reason or ""
+    return {
+        "cash": "" if cash_v is None else _num(cash_v),
+        "nav": "" if nav_v is None else _num(nav_v),
+        "cash_pct": "" if math["cash_pct"] is None else _num(math["cash_pct"]),
+        "cash_reserve_pct": "" if reserve_v is None else _num(reserve_v),
+        "reserve_floor": "" if math["reserve_floor"] is None else _num(math["reserve_floor"]),
+        "shortfall": "" if math["shortfall"] is None else _num(math["shortfall"]),
+        "cash_need": "" if need_v is None else _num(need_v),
+        "orders_today": "" if orders_v is None else str(int(orders_v)),
+        "max_orders_per_day": "" if max_orders_v is None else str(int(max_orders_v)),
+        "detail": detail,
+    }
+
+
+def _as_decimal(value) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _note_risk_block(
+    conn,
+    account_id: str,
+    draft_id: str,
+    symbol: str,
+    tactic: str,
+    contracts: int,
+    reason: str,
+    *,
+    limit_price=None,
+    put_strike=None,
+    call_strike=None,
+    multiplier: str = "100",
+    cash_need: Decimal | None = None,
+    note: str = "",
+) -> None:
+    from athena_strategy.agents import write_risk_block
+
+    ctx = _risk_block_context(conn, account_id, symbol)
+    need = cash_need
+    if need is None:
+        need = draft_cash_need(
+            tactic, contracts, limit_price=limit_price, put_strike=put_strike, multiplier=multiplier,
+        )
+    steps = risk_block_steps(
+        draft_id=draft_id,
+        symbol=symbol,
+        tactic=tactic,
+        contracts=contracts,
+        reason=reason,
+        cash=ctx.get("cash"),
+        nav=ctx.get("nav"),
+        cash_reserve_pct=ctx.get("cash_reserve_pct"),
+        cash_need=need,
+        limit=limit_price,
+        put_strike=put_strike,
+        call_strike=call_strike,
+        note=note,
+        orders_today=ctx.get("orders_today"),
+        max_orders_per_day=ctx.get("max_orders_per_day"),
+        max_contracts_per_symbol=ctx.get("max_contracts_per_symbol"),
+        max_position_per_symbol=ctx.get("max_position_per_symbol"),
+        max_symbol_pct_nav=ctx.get("max_symbol_pct_nav"),
+        symbol_value=ctx.get("symbol_value"),
+        margin=ctx.get("margin"),
+        max_short_opt_margin_pct=ctx.get("max_short_opt_margin_pct"),
+        rv_pctl=ctx.get("rv_pctl"),
+        min_rv_pctl_new_short=ctx.get("min_rv_pctl_new_short"),
+        dte=ctx.get("dte"),
+        min_dte_new=ctx.get("min_dte_new"),
+        earnings_in_days=ctx.get("earnings_in_days"),
+        earnings_blackout_days=ctx.get("earnings_blackout_days"),
+    )
+    write_risk_block(conn, account_id, symbol, reason, steps)
 
 
 def issue_link(conn: psycopg.Connection, draft_id: str, ttl_minutes: int) -> str:
@@ -909,10 +1537,10 @@ def _amend_cap(conn, settings: SettingsPayload, account_id: str, symbol: str, ta
     price = last_tradeable_price(conn, symbol)
     if price is None:
         return cap
-    mult = Decimal(multiplier or "100")
-    if mult <= 0:
-        mult = Decimal(100)
-    return allowed_open(settings.risk, price, mult, _exposure(conn, account_id, symbol, price))
+    unit, existing, err = position_in_book(conn, account_id, symbol, price, multiplier)
+    if err or unit is None or existing is None:
+        return 0
+    return allowed_open(settings.risk, unit, Decimal(1), existing)
 
 
 def _listed(conn, settings: SettingsPayload, account_id: str, symbol: str, tactic: str, expiry, right: str, strike) -> bool:

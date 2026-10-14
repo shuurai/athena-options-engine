@@ -10,7 +10,13 @@ from athena_exec.options import bs_delta
 from athena_marketdata.pricing import last_tradeable_price
 from athena_risk import CycleBook, _to_book, bucket_names, budget_enabled, walk_cycle
 from athena_settings.model import SettingsPayload
-from athena_strategy.drafts import _chain_multiplier
+from athena_strategy.drafts import (
+    _chain_multiplier,
+    cash_reserve_math,
+    draft_cash_need,
+    format_risk_block_detail,
+    risk_block_steps,
+)
 from athena_strategy.indicators import compute, load_bars
 from athena_strategy.screener import sigma_for
 
@@ -26,7 +32,7 @@ def apply_cycle_budget(conn, settings: SettingsPayload, account_id: str, draft_i
         return []
     book = _baseline(conn, settings, account_id)
     walked = walk_cycle(pending, book, settings.risk)
-    from athena_strategy.agents import write_decision
+    from athena_strategy.agents import write_decision, write_risk_block
 
     for ticket, reason, order in walked:
         summary = f"cycle_order={order} prob_source=delta_proxy"
@@ -43,14 +49,41 @@ def apply_cycle_budget(conn, settings: SettingsPayload, account_id: str, draft_i
                     "UPDATE tickets SET status = 'blocked' WHERE id = %s",
                     (ticket["id"],),
                 )
+            steps, risk_legs = _budget_block_steps(ticket, reason, book, settings.risk)
             write_decision(
                 conn, account_id, ticket["symbol"], "budget", "dropped",
-                f"{summary} {reason}", {"items": []},
+                f"{summary} {reason}", steps,
             )
+            used = 0
+            if book.orders is not None:
+                used = int(book.orders.get(str(ticket["symbol"]).upper(), 0))
+            for leg in risk_legs:
+                write_risk_block(
+                    conn, account_id, ticket["symbol"], reason,
+                    risk_block_steps(
+                        draft_id=leg["draft_id"],
+                        symbol=ticket["symbol"],
+                        tactic=leg["tactic"],
+                        contracts=leg["contracts"],
+                        reason=reason,
+                        cash=book.cash,
+                        nav=book.nav,
+                        cash_reserve_pct=settings.risk.cash_reserve_pct,
+                        cash_need=leg.get("cash_need"),
+                        note=leg.get("note") or "",
+                        orders_today=used,
+                        max_orders_per_day=settings.risk.max_orders_per_day,
+                        max_contracts_per_symbol=settings.risk.max_contracts_per_symbol,
+                        max_position_per_symbol=settings.risk.max_position_per_symbol,
+                        max_symbol_pct_nav=settings.risk.max_symbol_pct_nav,
+                        margin=book.margin,
+                        max_short_opt_margin_pct=settings.risk.max_short_opt_margin_pct,
+                    ),
+                )
         else:
             write_decision(
                 conn, account_id, ticket["symbol"], "budget", "drafted",
-                f"{summary} kept", {"items": []},
+                f"{summary} kept", _budget_kept_steps(ticket),
             )
     conn.commit()
     still = {row[0] for row in conn.execute(
@@ -58,6 +91,87 @@ def apply_cycle_budget(conn, settings: SettingsPayload, account_id: str, draft_i
         (draft_ids,),
     ).fetchall()}
     return [item for item in draft_ids if item in still]
+
+
+def _budget_kept_steps(ticket: dict) -> dict:
+    items = []
+    for draft_id, leg in zip(ticket.get("draft_ids") or [], ticket.get("legs") or []):
+        short = leg["tactic"][5:] if str(leg["tactic"]).startswith("OPEN_") else leg["tactic"]
+        items.append({
+            "tactic": short,
+            "outcome": "kept",
+            "detail": f"{short} {int(leg['contracts'])} kept",
+            "draft_id": draft_id,
+            "contracts": int(leg["contracts"]),
+        })
+    return {"items": items}
+
+
+def _budget_block_steps(ticket: dict, reason: str, book, risk) -> tuple[dict, list[dict]]:
+    cash_reserve_pct = risk.cash_reserve_pct
+    math = cash_reserve_math(book.cash, book.nav, cash_reserve_pct)
+    cash_pct = math["cash_pct"]
+    used = 0
+    if book.orders is not None:
+        used = int(book.orders.get(str(ticket["symbol"]).upper(), 0))
+    items = []
+    risk_legs = []
+    for draft_id, leg in zip(ticket.get("draft_ids") or [], ticket.get("legs") or []):
+        need = draft_cash_need(
+            leg["tactic"], int(leg["contracts"]),
+            limit_price=leg.get("limit"), put_strike=leg.get("put_strike"),
+            multiplier=str(leg.get("multiplier") or "100"),
+        )
+        note = ""
+        if "cash" in (reason or "").lower() and "reserve" in (reason or "").lower():
+            note = "cycle cash reserve"
+        detail = format_risk_block_detail(
+            tactic=leg["tactic"],
+            contracts=int(leg["contracts"]),
+            cash=book.cash,
+            nav=book.nav,
+            cash_pct=cash_pct,
+            cash_reserve_pct=cash_reserve_pct,
+            reserve_floor=math["reserve_floor"],
+            shortfall=math["shortfall"],
+            cash_need=need,
+            reason=reason,
+            note=note,
+            orders_today=used,
+            max_orders_per_day=risk.max_orders_per_day,
+            max_contracts_per_symbol=risk.max_contracts_per_symbol,
+            max_position_per_symbol=risk.max_position_per_symbol,
+            max_symbol_pct_nav=risk.max_symbol_pct_nav,
+            margin=book.margin,
+            max_short_opt_margin_pct=risk.max_short_opt_margin_pct,
+        )
+        short = leg["tactic"][5:] if str(leg["tactic"]).startswith("OPEN_") else leg["tactic"]
+        items.append({
+            "tactic": short,
+            "outcome": "blocked",
+            "detail": detail,
+            "draft_id": draft_id,
+            "contracts": int(leg["contracts"]),
+        })
+        risk_legs.append({
+            "draft_id": draft_id,
+            "tactic": leg["tactic"],
+            "contracts": int(leg["contracts"]),
+            "cash_need": need,
+            "note": note,
+        })
+    return {
+        "reason": reason,
+        "cash": None if book.cash is None else str(book.cash),
+        "nav": None if book.nav is None else str(book.nav),
+        "cash_pct": None if cash_pct is None else str(cash_pct),
+        "cash_reserve_pct": str(cash_reserve_pct),
+        "reserve_floor": None if math["reserve_floor"] is None else str(math["reserve_floor"]),
+        "shortfall": None if math["shortfall"] is None else str(math["shortfall"]),
+        "orders_today": used,
+        "max_orders_per_day": risk.max_orders_per_day,
+        "items": items,
+    }, risk_legs
 
 
 def _pending(conn, settings: SettingsPayload, account_id: str, draft_ids: list[str]) -> list[dict]:

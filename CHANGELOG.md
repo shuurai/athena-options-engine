@@ -73,6 +73,13 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-14 | Cap max orders per day per symbol | [C-20261014-20](logs/2026-10-14.md#c-20261014-20) |
 | 2026-10-14 | Telegram fill notices show qty cost fee | [C-20261014-21](logs/2026-10-14.md#c-20261014-21) |
 | 2026-10-14 | Prep repo for open source release | [C-20261014-22](logs/2026-10-14.md#c-20261014-22) |
+| 2026-10-14 | Link blocked drafts into History and Audit detail | [C-20261014-23](logs/2026-10-14.md#c-20261014-23) |
+| 2026-10-14 | Size max position in book currency with FX | [C-20261014-24](logs/2026-10-14.md#c-20261014-24) |
+| 2026-10-14 | Show IB book base on Risk and Strategy | [C-20261014-25](logs/2026-10-14.md#c-20261014-25) |
+| 2026-10-14 | Put book-base note behind Limits help | [C-20261014-26](logs/2026-10-14.md#c-20261014-26) |
+| 2026-10-14 | Show cash reserve floor and shortfall in detail | [C-20261014-27](logs/2026-10-14.md#c-20261014-27) |
+| 2026-10-14 | Enrich risk-block Detail with comparison numbers | [C-20261014-28](logs/2026-10-14.md#c-20261014-28) |
+| 2026-10-14 | Document short-horizon forecast R&D proposal | [C-20261014-29](logs/2026-10-14.md#c-20261014-29) |
 
 ## Notes
 

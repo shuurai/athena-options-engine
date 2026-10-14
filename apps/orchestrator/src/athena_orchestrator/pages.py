@@ -169,6 +169,7 @@ HISTORY_STATUSES = (
     ("filled", "Filled"),
     ("approved", "Approved"),
     ("rejected", "Rejected"),
+    ("blocked", "Blocked"),
 )
 PRIVILEGES = {
     "all_orders": "Every open, roll, and close needs Approve. This is the active privilege.",
@@ -229,7 +230,7 @@ def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
     if _wants_rows(query):
         status, needle = _decision_choice(query)
         rows, more, nxt = _decision_slice(conn, account, _offset(query), status, needle)
-        html = _decision_trs(rows)
+        html = _decision_trs(rows, conn, account)
         if not html and _offset(query) == 0:
             html = '<tr><td colspan="4">No decision is stored yet.</td></tr>'
         return _fragment(html, more, nxt)
@@ -253,7 +254,7 @@ def _drafts(conn, account: str, query: dict, note: str = "") -> dict:
     cards = "".join(_draft_card(conn, account, row, index == 0) for index, row in enumerate(pending))
     if not cards:
         cards = f'<div class="card draft-empty"><div class="sim-idle">{_SIM_IDLE}<p>No draft is waiting.</p></div></div>'
-    body_rows = _decision_trs(recent) or '<tr><td colspan="4">No decision is stored yet.</td></tr>'
+    body_rows = _decision_trs(recent, conn, account) or '<tr><td colspan="4">No decision is stored yet.</td></tr>'
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
     banner = _draft_banner(conn, account)
     table = (
@@ -322,16 +323,27 @@ def _decision_slice(conn, account: str, offset: int, status: str = "all", needle
     like = _decision_like(needle)
     rows = conn.execute(
         """
-        SELECT created_at, draft_id, symbol, tactic, decision, actor
+        SELECT created_at, draft_id, symbol, tactic, decision, actor, contracts, phase, reason, steps
         FROM (
-            SELECT a.created_at, a.draft_id, d.symbol, d.tactic, a.decision, a.actor
+            SELECT a.created_at, a.draft_id, d.symbol, d.tactic, a.decision, a.actor,
+                   d.contracts, COALESCE(d.phase, '') AS phase, COALESCE(a.reason, d.reason, '') AS reason,
+                   NULL::jsonb AS steps
             FROM approvals a
             JOIN drafts d ON d.id = a.draft_id
             WHERE a.account_id = %s
             UNION ALL
-            SELECT created_at, id, symbol, tactic, 'blocked', COALESCE(reason, '')
-            FROM drafts
-            WHERE account_id = %s AND status = 'blocked'
+            SELECT d.created_at, d.id, d.symbol, d.tactic, 'blocked', COALESCE(d.reason, ''),
+                   d.contracts, COALESCE(d.phase, ''), COALESCE(d.reason, ''), t.steps
+            FROM drafts d
+            LEFT JOIN LATERAL (
+                SELECT steps FROM decision_trails
+                WHERE account_id = d.account_id
+                  AND source = 'risk'
+                  AND (steps->>'draft_id') = d.id
+                ORDER BY logged_at DESC
+                LIMIT 1
+            ) t ON true
+            WHERE d.account_id = %s AND d.status = 'blocked'
         ) events
         WHERE (%s = 'all' OR decision = %s)
           AND (
@@ -340,32 +352,127 @@ def _decision_slice(conn, account: str, offset: int, status: str = "all", needle
             OR tactic ILIKE %s ESCAPE '\\'
             OR actor ILIKE %s ESCAPE '\\'
             OR draft_id ILIKE %s ESCAPE '\\'
+            OR reason ILIKE %s ESCAPE '\\'
           )
         ORDER BY created_at DESC
         LIMIT %s OFFSET %s
         """,
-        (account, account, status, status, needle, like, like, like, like, _PAGE + 1, offset),
+        (account, account, status, status, needle, like, like, like, like, like, _PAGE + 1, offset),
     ).fetchall()
     more = len(rows) > _PAGE
     shown = rows[:_PAGE]
     return shown, more, offset + len(shown)
 
 
-def _decision_trs(rows) -> str:
+def _decision_trs(rows, conn=None, account: str = "") -> str:
     body = []
-    for created, draft_id, symbol, tactic, decision, actor in rows:
+    for row in rows:
+        created = row[0]
+        draft_id = row[1]
+        symbol = row[2]
+        tactic = row[3]
+        decision = row[4]
+        actor = row[5]
+        contracts = row[6] if len(row) > 6 else None
+        phase = row[7] if len(row) > 7 else ""
+        reason = row[8] if len(row) > 8 else (actor if decision == "blocked" else "")
+        steps = row[9] if len(row) > 9 else None
+        trail = steps if isinstance(steps, dict) else {}
         label = {"approve": "APPROVED", "reject": "REJECTED", "blocked": "BLOCKED"}.get(decision, str(decision).upper())
         tag = {"approve": "green", "blocked": "amber"}.get(decision, "red")
         short = tactic[5:] if str(tactic).startswith("OPEN_") else tactic
+        qty = "" if contracts is None else f" · {escape(_plain_number(contracts))}"
+        by = actor or ""
+        cash_view = _decision_cash_view(
+            conn, account, decision, reason, tactic, contracts, trail, symbol=symbol or "",
+        )
+        blob = escape(
+            json.dumps({
+                "title": f"{symbol} {tactic}",
+                "draft_id": draft_id or DASH,
+                "symbol": symbol or DASH,
+                "tactic": tactic or DASH,
+                "phase": phase or DASH,
+                "qty": DASH if contracts is None else _plain_number(contracts),
+                "status": label,
+                "reason": reason or by or DASH,
+                "by": by or DASH,
+                "detail": cash_view["detail"] or reason or by or DASH,
+                "cash": cash_view["cash"] or DASH,
+                "nav": cash_view["nav"] or DASH,
+                "cash_pct": cash_view["cash_pct"] or DASH,
+                "cash_reserve_pct": cash_view["cash_reserve_pct"] or DASH,
+                "reserve_floor": cash_view["reserve_floor"] or DASH,
+                "shortfall": cash_view["shortfall"] or DASH,
+                "cash_need": cash_view["cash_need"] or DASH,
+                "orders_today": cash_view.get("orders_today") or DASH,
+                "max_orders_per_day": cash_view.get("max_orders_per_day") or DASH,
+                "limit": trail.get("limit") or DASH,
+            }),
+            quote=True,
+        )
         body.append(
-            "<tr>"
+            f'<tr data-cmd="decision-row" data-json="{blob}">'
             f"<td class=\"mono\">{escape(_stamp(created))}</td>"
-            f"<td class=\"mono\">{escape(draft_id)} · {escape(symbol)} {escape(short)}</td>"
+            f"<td class=\"mono\">{escape(draft_id)} · {escape(symbol)} {escape(short)}{qty}</td>"
             f"<td><span class=\"tag {tag}\">{escape(label)}</span></td>"
-            f"<td>{escape(actor or '')}</td>"
+            f"<td>{escape(by)}</td>"
             "</tr>"
         )
     return "".join(body)
+
+
+def _decision_cash_view(
+    conn, account: str, decision: str, reason: str, tactic: str, contracts, trail: dict,
+    symbol: str = "",
+) -> dict:
+    """Risk comparison for a decision row. Live-backfills thin trails."""
+    from athena_settings import load_active
+    from athena_strategy.drafts import (
+        _account_cash_marks,
+        _orders_today,
+        cash_comparison_view,
+        is_cash_reserve_reason,
+        is_day_orders_reason,
+    )
+
+    empty = {
+        "cash": "", "nav": "", "cash_pct": "", "cash_reserve_pct": "",
+        "reserve_floor": "", "shortfall": "", "cash_need": "",
+        "orders_today": "", "max_orders_per_day": "", "detail": "",
+    }
+    if decision != "blocked":
+        items = trail.get("items") if isinstance(trail.get("items"), list) else []
+        detail = ""
+        if items and isinstance(items[0], dict):
+            detail = items[0].get("detail") or ""
+        return {**empty, "detail": detail}
+
+    cash = nav = reserve = None
+    orders_today = max_orders = None
+    thin_cash = not (trail.get("cash") and trail.get("nav") and trail.get("cash_pct"))
+    thin_orders = trail.get("orders_today") is None or trail.get("max_orders_per_day") is None
+    if conn and account:
+        if thin_cash and is_cash_reserve_reason(reason):
+            cash, nav, reserve = _account_cash_marks(conn, account)
+        if thin_orders and is_day_orders_reason(reason):
+            try:
+                max_orders = load_active(conn, account).risk.max_orders_per_day
+            except Exception:
+                max_orders = None
+            if symbol:
+                orders_today = _orders_today(conn, account, symbol)
+    return cash_comparison_view(
+        tactic=tactic or "",
+        contracts=contracts,
+        reason=reason or "",
+        trail=trail,
+        cash=cash,
+        nav=nav,
+        cash_reserve_pct=reserve,
+        orders_today=orders_today,
+        max_orders_per_day=max_orders,
+    )
 
 
 def _draft_card(conn, account: str, row, hot: bool) -> str:
@@ -518,16 +625,17 @@ def _draft_risk(conn, account: str, symbol: str, contracts: int, expiry, tactic:
         badges.append(("SIZE", "red"))
     elif opening and limits.max_position_per_symbol > 0:
         from athena_risk import allowed_open
-        from athena_strategy.drafts import _exposure, last_tradeable_price
+        from athena_strategy.drafts import last_tradeable_price, position_in_book
 
         price = last_tradeable_price(conn, symbol)
         if price is not None:
-            mult = Decimal(multiplier or "100")
-            if mult <= 0:
-                mult = Decimal(100)
-            allowed = allowed_open(limits, price, mult, _exposure(conn, account, symbol, price))
-            if contracts > allowed:
+            unit, existing, err = position_in_book(conn, account, symbol, price, multiplier or "100")
+            if err or unit is None or existing is None:
                 badges.append(("POSITION", "red"))
+            else:
+                allowed = allowed_open(limits, unit, Decimal(1), existing)
+                if contracts > allowed:
+                    badges.append(("POSITION", "red"))
     if not badges:
         return "—"
     return "".join(f'<span class="tag {color}">{escape(text)}</span>' for text, color in badges)
@@ -833,14 +941,14 @@ def _history(conn, account: str, query: dict) -> dict:
         f'<div class="card stat"><div class="label">Worst month{badge}</div>'
         f'<div class="value {worst[2]}">{escape(worst[0])}</div><div class="meta">{escape(worst[1])}</div></div>'
         "</div>"
-        '<div class="card fill"><h2>Fills and approvals '
+        '<div class="card fill"><h2>Fills, approvals, and blocks '
         f'<a class="more" id="history-export" data-base="/history.csv" href="{escape(export, quote=True)}">export csv →</a></h2>'
         f"{_history_filters(status, needle)}"
         f'{_feed("/history", nxt, more, _history_table(body_rows), "history-feed")}</div></div>'
     )
     return _html(
         "History",
-        "Fills and approvals for this account. Open a row for size, cost, fees, and the approval trail.",
+        "Fills, approvals, and blocked drafts for this account. Open a row for size, cash, fees, and the trail.",
         body,
         _history_chips(everything),
         _REFRESH,
@@ -2239,12 +2347,42 @@ def _iv_window(conn, symbol: str) -> tuple[str, int, Decimal | None, Decimal | N
     return method, len(same), proxy, underlying, [(Decimal(proxy), Decimal(underlying)) for proxy, underlying in pairs]
 
 
+def _book_base(conn, account: str) -> str:
+    """IB account base used by risk and strategy. Not Settings display currency."""
+    if not account:
+        return ""
+    row = conn.execute(
+        """
+        SELECT base_currency FROM account_marks
+        WHERE account_id = %s ORDER BY day DESC LIMIT 1
+        """,
+        (account,),
+    ).fetchone()
+    return str(row[0]) if row and row[0] else ""
+
+
+def _position_cap_help(book_base: str) -> str:
+    label = book_base or "IB base"
+    return (
+        f"Notional in book currency ({label}). One unit is latest price × multiplier, "
+        "FX-converted into that base. A total within 10% still fits. When one unit is "
+        "already above this, the contract limit is used. Zero turns this off."
+    )
+
+
 def _risk(conn, account: str, query: dict, note: str = "") -> dict:
     if not account:
         return _html("Risk & Strategy", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
     current = load_active(conn, account)
     risk = current.risk
     strategy = current.strategy
+    book_base = _book_base(conn, account)
+    display = current.global_currency or "—"
+    limits_help = (
+        f"Book base from IB is {book_base or 'unknown'}. "
+        f"Cash, NAV, margin, and max position use this. "
+        f"Settings Currency ({display}) is display only."
+    )
     cards = []
     viewing = shown_profile(risk.profile)
     for name, values in PROFILES.items():
@@ -2289,12 +2427,15 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Profit take %', 'profit_take_pct', strategy.profit_take_pct, 'Close a short when this percent of the credit is captured.')}"
         "</div></div>"
         f"{_volatility_card(risk, strategy)}"
-        '<div class="card risk-span-2"><h2>Limits</h2><div class="form-grid">'
+        '<div class="card risk-span-2"><h2>Limits'
+        '<span><button class="help-q" type="button" data-cmd="help-q" aria-label="About book currency" '
+        f'data-help="{escape(limits_help, quote=True)}">?</button></span></h2>'
+        '<div class="form-grid">'
         f"{_limit('Max symbol % NAV', 'max_symbol', risk.max_symbol_pct_nav, 'Share of net liquidation one underlying may use. A new open above this is blocked.')}"
         f"{_limit('Cash reserve %', 'cash', risk.cash_reserve_pct, 'Cash that must stay free, as a percent of net liquidation. A cash-secured open below this is blocked.')}"
         f"{_limit('Daily loss halt %', 'halt', risk.daily_loss_halt_pct, 'Trading pauses when today drops this percent from the first mark. Zero turns this off.')}"
         f"{_limit('Max contracts / symbol', 'contracts', risk.max_contracts_per_symbol, 'Most contracts one symbol may use. A draft above this is blocked.')}"
-        f"{_limit('Max position / symbol', 'position', risk.max_position_per_symbol, 'Ticker currency. One contract is the latest price times the multiplier. A total within 10% still fits. When one contract is already above this, the contract limit is used. Zero turns this off.')}"
+        f"{_limit('Max position / symbol', 'position', risk.max_position_per_symbol, _position_cap_help(book_base))}"
         f"{_limit('Max orders / day', 'max_orders', risk.max_orders_per_day, 'Per symbol. New orders for a name stop for the day after this many on that name. A profile that differs here is custom.')}"
         f"{_limit('Min DTE new', 'min_dte', risk.min_dte_new, 'A new open is blocked when days to expiry are below this.')}"
         f"{_limit('Seller margin budget %', 'margin', risk.max_short_opt_margin_pct, 'Short-option margin may not exceed this percent of net liquidation.')}"
@@ -2324,11 +2465,16 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
         "</div></form>"
         "</div>"
     )
+    chips = [("info", shown_profile(risk.profile).upper()), ("", f"V{current.id}")]
+    if book_base:
+        chips.append(("ok", f"BOOK {book_base}"))
+    else:
+        chips.append(("", "BOOK —"))
     return _html(
         "Risk & Strategy",
         "Pick a profile to fill the limits, then save. Strategy knobs are on this page. Privilege does not change.",
         body,
-        [("info", shown_profile(risk.profile).upper()), ("", f"V{current.id}")],
+        chips,
     )
 
 
@@ -3124,6 +3270,7 @@ _AUDIT_AGENTS = {
     "Consolidator": "blue",
     "Universe": "teal",
     "Decision": "amber",
+    "Risk": "red",
 }
 _AUDIT_STATUS = {
     "ok": ("OK", "green"),
@@ -3132,6 +3279,7 @@ _AUDIT_STATUS = {
     "drafted": ("DRAFTED", "green"),
     "dropped": ("DROPPED", "red"),
     "invalid": ("INVALID", "red"),
+    "blocked": ("BLOCKED", "amber"),
 }
 
 
@@ -3173,6 +3321,10 @@ _BUDGET_LABEL = {
     "cycle assignment cap": "ASSIGN CAP",
     "assignment would breach min cash": "MIN CASH",
     "missing mark": "NO MARK",
+    "cash is below cash_reserve_pct": "CASH RESERVE",
+    "i2: ticket breaches cash_reserve_pct": "CASH RESERVE",
+    "orders exceed max orders per day": "DAY ORDERS",
+    "i2: ticket breaches max orders per day": "DAY ORDERS",
 }
 
 
@@ -3181,6 +3333,8 @@ def _budget_label(reason: str) -> str:
     key = text.lower()
     if key in _BUDGET_LABEL:
         return _BUDGET_LABEL[key]
+    if "cash_reserve" in key.replace(" ", "_") or "cash reserve" in key:
+        return "CASH RESERVE"
     bucket = re.match(r"cycle bucket \S+ at (\d+)%", key)
     if bucket:
         return f"BUCKET {bucket.group(1)}%"
@@ -3199,12 +3353,16 @@ def _audit_badges(result: str, status: str) -> list[dict]:
         reason = (match.group("reason") or "kept").strip()
         state = (status or "").lower()
         kind = "green" if reason.replace("_", " ").lower() == "kept" or state in {"ok", "drafted"} else "red"
-        if state in {"error", "dropped", "invalid"}:
+        if state in {"error", "dropped", "invalid", "blocked"}:
             kind = "red"
         return [
             {"text": _budget_label(reason), "kind": kind},
             {"text": f"ORDER {match.group('order')}", "kind": ""},
         ]
+    state = (status or "").lower()
+    if state == "blocked" or raw.lower() in _BUDGET_LABEL or "cash_reserve" in raw.lower().replace(" ", "_"):
+        label = _budget_label(raw) if raw else "BLOCKED"
+        return [{"text": label, "kind": "red" if state in {"blocked", "dropped", "invalid", "error"} else "amber"}]
     shown = _audit_shown(raw)
     if not shown:
         return []
@@ -3216,7 +3374,7 @@ def _audit_result_kind(shown: str, status: str) -> str:
     key = shown.strip().lower()
     if key == "quiet":
         return ""
-    if state in {"error", "dropped", "invalid"}:
+    if state in {"error", "dropped", "invalid", "blocked"}:
         return "red"
     if "wash" in key:
         return "amber"
@@ -3246,6 +3404,7 @@ def _result_legend() -> str:
         ("INVALID", "The reply did not match the expected JSON."),
         ("DRAFTED", "A draft is waiting for Approve."),
         ("DROPPED", "The ticket was not kept. Result names why."),
+        ("BLOCKED", "Risk refused the draft. Result names the cap."),
         ("OBSERVED", "Tags were stored. This pass did not write a ticket."),
         ("NO_DATA", "Bars or another input was missing, so the symbol was skipped."),
     ]
@@ -3376,11 +3535,12 @@ def _audit_rows(conn, account: str, limit: int) -> list[dict]:
         payload = steps if isinstance(steps, dict) else {}
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         badges = _audit_badges(summary, outcome)
+        agent = "Risk" if (source or "").lower() == "risk" else "Decision"
         rows.append({
             "_at": when,
             "kind": "decision",
             "time": when.strftime("%m-%d %H:%M:%S"),
-            "agent": "Decision",
+            "agent": agent,
             "symbol": symbol,
             "source": source,
             "model": "",
@@ -4124,15 +4284,16 @@ def _history_filters(status: str, needle: str) -> str:
 
 def _history_empty(everything: list, status: str, needle: str) -> str:
     if not everything and status == "all" and not needle:
-        text = "No fills or approvals yet."
+        text = "No fills, approvals, or blocks yet."
     else:
-        text = "No fills or approvals for this filter."
+        text = "No fills, approvals, or blocks for this filter."
     return f'<tr><td colspan="7">{text}</td></tr>'
 
 
 def _history_rows(conn, account: str) -> list[dict]:
     if not account:
         return []
+    replay = _replaying(conn, account)
     fills = conn.execute(
         """
         SELECT f.created_at, f.symbol, f.tactic, COALESCE(d.phase, ''), f.draft_id,
@@ -4157,7 +4318,7 @@ def _history_rows(conn, account: str) -> list[dict]:
         ) a ON true
         WHERE f.account_id = %s AND (f.simulated = false OR %s)
         """,
-        (account, _replaying(conn, account)),
+        (account, replay),
     ).fetchall()
     filled_drafts = set()
     rows = []
@@ -4185,6 +4346,7 @@ def _history_rows(conn, account: str) -> list[dict]:
                 commission_currency=commission_ccy or "",
                 exec_id=exec_id or "",
                 sec_type=sec_type or "STK",
+                draft_id=draft_id or "",
             )
         )
     approvals = conn.execute(
@@ -4211,6 +4373,63 @@ def _history_rows(conn, account: str) -> list[dict]:
                 None,
                 actor,
                 reason or draft_reason,
+                draft_id=draft_id or "",
+            )
+        )
+    blocked = conn.execute(
+        """
+        SELECT d.created_at, d.symbol, d.tactic, COALESCE(d.phase, ''), d.id, d.contracts,
+               COALESCE(d.reason, ''), COALESCE(d.limit_price::text, ''),
+               COALESCE(d.put_strike::text, ''), COALESCE(d.call_strike::text, ''),
+               COALESCE(d.multiplier, '100'),
+               t.steps
+        FROM drafts d
+        LEFT JOIN LATERAL (
+            SELECT steps FROM decision_trails
+            WHERE account_id = d.account_id
+              AND source = 'risk'
+              AND (steps->>'draft_id') = d.id
+            ORDER BY logged_at DESC
+            LIMIT 1
+        ) t ON true
+        WHERE d.account_id = %s AND d.status = 'blocked' AND (d.simulated = false OR %s)
+        """,
+        (account, replay),
+    ).fetchall()
+    for (
+        created, symbol, tactic, phase, draft_id, contracts, reason,
+        limit_price, put_strike, call_strike, multiplier, steps,
+    ) in blocked:
+        trail = steps if isinstance(steps, dict) else {}
+        cash_view = _decision_cash_view(
+            conn, account, "blocked", reason, tactic, contracts, trail, symbol=symbol or "",
+        )
+        rows.append(
+            _history_item(
+                created,
+                symbol,
+                tactic,
+                phase,
+                "blocked",
+                None,
+                "",
+                reason,
+                qty=contracts,
+                multiplier=multiplier or "",
+                draft_id=draft_id or "",
+                limit=limit_price or trail.get("limit") or "",
+                put_strike=put_strike or trail.get("put_strike") or "",
+                call_strike=call_strike or trail.get("call_strike") or "",
+                cash=cash_view["cash"],
+                nav=cash_view["nav"],
+                cash_pct=cash_view["cash_pct"],
+                cash_reserve_pct=cash_view["cash_reserve_pct"],
+                cash_need=cash_view["cash_need"],
+                reserve_floor=cash_view["reserve_floor"],
+                shortfall=cash_view["shortfall"],
+                orders_today=cash_view.get("orders_today") or "",
+                max_orders_per_day=cash_view.get("max_orders_per_day") or "",
+                detail_override=cash_view["detail"],
             )
         )
     rows.sort(key=lambda item: item["sort"], reverse=True)
@@ -4235,6 +4454,20 @@ def _history_item(
     commission_currency: str = "",
     exec_id: str = "",
     sec_type: str = "",
+    draft_id: str = "",
+    limit: str = "",
+    put_strike: str = "",
+    call_strike: str = "",
+    cash: str = "",
+    nav: str = "",
+    cash_pct: str = "",
+    cash_reserve_pct: str = "",
+    cash_need: str = "",
+    reserve_floor: str = "",
+    shortfall: str = "",
+    orders_today: str = "",
+    max_orders_per_day: str = "",
+    detail_override: str = "",
 ) -> dict:
     local = created.astimezone(HKT)
     item = {
@@ -4255,14 +4488,52 @@ def _history_item(
         "commission_currency": commission_currency or "",
         "exec_id": exec_id or "",
         "sec_type": sec_type or "",
+        "draft_id": draft_id or "",
+        "limit": limit or "",
+        "put_strike": put_strike or "",
+        "call_strike": call_strike or "",
+        "cash": cash or "",
+        "nav": nav or "",
+        "cash_pct": cash_pct or "",
+        "cash_reserve_pct": cash_reserve_pct or "",
+        "cash_need": cash_need or "",
+        "reserve_floor": reserve_floor or "",
+        "shortfall": shortfall or "",
+        "orders_today": orders_today or "",
+        "max_orders_per_day": max_orders_per_day or "",
         "sort": created,
     }
-    item["detail"] = _history_detail(item)
+    item["detail"] = detail_override or _history_detail(item)
     return item
 
 
 def _history_detail(item: dict) -> str:
     """One-line audit summary. Fills show size, cost, and fee when known."""
+    if item["status"] == "blocked":
+        from athena_strategy.drafts import is_cash_reserve_reason
+
+        if is_cash_reserve_reason(item.get("reason") or "") and item.get("cash_pct") and item.get("cash_reserve_pct"):
+            from athena_strategy.drafts import format_risk_block_detail
+
+            return format_risk_block_detail(
+                tactic=item.get("tactic") or "",
+                contracts=int(item["qty"] or 0),
+                cash=item.get("cash") or None,
+                nav=item.get("nav") or None,
+                cash_pct=item.get("cash_pct") or None,
+                cash_reserve_pct=item.get("cash_reserve_pct") or None,
+                reserve_floor=item.get("reserve_floor") or None,
+                shortfall=item.get("shortfall") or None,
+                cash_need=item.get("cash_need") or None,
+                reason=item.get("reason") or "",
+            )
+        short = item["tactic"][5:] if str(item.get("tactic") or "").startswith("OPEN_") else (item.get("tactic") or "")
+        qty = item.get("qty")
+        head = " ".join(bit for bit in (short, None if qty is None else _plain_number(qty)) if bit)
+        reason = (item.get("reason") or "").strip()
+        if head and reason:
+            return f"{head} · {reason}"
+        return head or reason or (item.get("actor") or "").strip()
     if item["status"] != "filled":
         return (item.get("reason") or item.get("actor") or "").strip()
     parts: list[str] = []
@@ -4309,8 +4580,12 @@ def _history_visible(item: dict, status: str, needle: str = "") -> bool:
 
 
 def _history_tr(item: dict) -> str:
-    status = {"filled": "FILLED", "rejected": "REJECTED", "approved": "APPROVED"}[item["status"]]
-    tag = {"filled": "tag green", "rejected": "tag red", "approved": "tag"}[item["status"]]
+    status = {
+        "filled": "FILLED", "rejected": "REJECTED", "approved": "APPROVED", "blocked": "BLOCKED",
+    }[item["status"]]
+    tag = {
+        "filled": "tag green", "rejected": "tag red", "approved": "tag", "blocked": "tag amber",
+    }[item["status"]]
     pnl = "—" if item["pnl"] is None else _pnl_text(item["pnl"])
     pnl_class = "mono" if item["pnl"] is None else ("pnl-pos" if item["pnl"] > 0 else "pnl-neg" if item["pnl"] < 0 else "mono")
     by = f"{item['actor']} {item['clock']} HKT" if item["actor"] else "—"
@@ -4327,6 +4602,7 @@ def _history_tr(item: dict) -> str:
         json.dumps({
             "title": title,
             "phase": item["phase"] or DASH,
+            "tactic": item.get("tactic") or DASH,
             "status": status,
             "pnl": pnl,
             "side": item.get("side") or DASH,
@@ -4337,6 +4613,19 @@ def _history_tr(item: dict) -> str:
             "multiplier": item.get("multiplier") or DASH,
             "sec_type": item.get("sec_type") or DASH,
             "exec_id": item.get("exec_id") or DASH,
+            "draft_id": item.get("draft_id") or DASH,
+            "limit": item.get("limit") or DASH,
+            "put_strike": item.get("put_strike") or DASH,
+            "call_strike": item.get("call_strike") or DASH,
+            "cash": item.get("cash") or DASH,
+            "nav": item.get("nav") or DASH,
+            "cash_pct": item.get("cash_pct") or DASH,
+            "cash_reserve_pct": item.get("cash_reserve_pct") or DASH,
+            "reserve_floor": item.get("reserve_floor") or DASH,
+            "shortfall": item.get("shortfall") or DASH,
+            "cash_need": item.get("cash_need") or DASH,
+            "orders_today": item.get("orders_today") or DASH,
+            "max_orders_per_day": item.get("max_orders_per_day") or DASH,
             "by": by,
             "reason": item.get("reason") or DASH,
             "detail": detail or DASH,
@@ -4426,7 +4715,10 @@ _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 def _history_chips(rows: list[dict]) -> list[tuple[str, str]]:
     filled = sum(1 for item in rows if item["status"] == "filled")
     rejected = sum(1 for item in rows if item["status"] == "rejected")
+    blocked = sum(1 for item in rows if item["status"] == "blocked")
     chips = [("ok", f"{filled} FILLED"), ("", f"{rejected} REJECTED")]
+    if blocked:
+        chips.append(("", f"{blocked} BLOCKED"))
     if not rows:
         return chips
     start = min(item["sort"] for item in rows).astimezone(HKT)

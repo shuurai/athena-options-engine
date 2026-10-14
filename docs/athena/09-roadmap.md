@@ -72,6 +72,7 @@ No live money until Settings + Approve path + IB slots are proven in paper.
 | Social scrapers | Compliance review |
 | Cloud trading host | Not planned as primary |
 | Extra IB market data subs | Sleeve pays for them |
+| Short-horizon ML bid/ask / stop / TP | R&D only — see [12-short-horizon-forecast-rnd.md](12-short-horizon-forecast-rnd.md); shadow + paper HITL before any privilege change |
 
 ## Near-term decisions checklist
 
