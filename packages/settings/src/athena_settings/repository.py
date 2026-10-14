@@ -129,7 +129,10 @@ def _payload_of(version: SettingsVersion) -> SettingsPayload:
     return SettingsPayload.model_validate({key: data[key] for key in SettingsPayload.model_fields})
 
 
-_SECRET_LEAVES = {"api_key", "bot_token", "deepseek_token", "openrouter_token", "claude_token", "kimi_token"}
+_SECRET_LEAVES = {
+    "api_key", "api_token", "bot_token",
+    "deepseek_token", "openrouter_token", "claude_token", "kimi_token",
+}
 
 
 def _diff(old: SettingsPayload, new: SettingsPayload) -> str:

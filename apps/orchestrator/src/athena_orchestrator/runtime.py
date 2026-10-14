@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import socket
 import threading
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -25,17 +27,23 @@ _step = 0
 _lines = [""] * len(STEPS)
 _marks = ["pending"] * len(STEPS)
 _activity: deque[str] = deque(maxlen=12)
+_saver: Callable[[dict], None] | None = None
+_loader: Callable[[], dict | None] | None = None
+log = logging.getLogger("athena")
 
 
 def note_cycle(count: int) -> None:
     global cycle
-    cycle = count
+    with _LOCK:
+        cycle = count
+    persist()
 
 
 def note_loop(seconds: int) -> None:
     global _loop_seconds
     with _LOCK:
         _loop_seconds = max(1, seconds)
+    persist()
 
 
 def begin(count: int) -> None:
@@ -51,6 +59,7 @@ def begin(count: int) -> None:
             _marks[index] = "pending"
         _marks[0] = "running"
         _activity.clear()
+    persist()
 
 
 def begin_running(count: int) -> None:
@@ -92,10 +101,121 @@ def wait(seconds: int | None = None) -> None:
         _state = "waiting"
         span = _loop_seconds if seconds is None else max(0, seconds)
         _next_at = datetime.now(timezone.utc) + timedelta(seconds=span)
+    persist()
 
 
 def begin_waiting(seconds: int | None = None) -> None:
     wait(seconds)
+
+
+def snapshot() -> dict:
+    with _LOCK:
+        return {
+            "cycle": cycle,
+            "state": _state,
+            "loop_seconds": _loop_seconds,
+            "step": _step,
+            "next_at": None if _next_at is None else _next_at.isoformat(),
+            "marks": list(_marks),
+            "lines": list(_lines),
+        }
+
+
+def apply_snapshot(data: dict) -> None:
+    """Restore cycle strip state from a cached payload."""
+    global cycle, _state, _loop_seconds, _step, _next_at
+    marks = data.get("marks") or []
+    lines = data.get("lines") or []
+    next_raw = data.get("next_at")
+    nxt = None
+    if next_raw:
+        nxt = datetime.fromisoformat(str(next_raw))
+        if nxt.tzinfo is None:
+            nxt = nxt.replace(tzinfo=timezone.utc)
+    with _LOCK:
+        cycle = int(data.get("cycle") or 0)
+        _state = str(data.get("state") or "waiting")
+        _loop_seconds = max(1, int(data.get("loop_seconds") or 300))
+        _step = max(0, min(int(data.get("step") or 0), len(STEPS) - 1))
+        _next_at = nxt
+        for index in range(len(STEPS)):
+            _marks[index] = marks[index] if index < len(marks) else "pending"
+            _lines[index] = lines[index] if index < len(lines) else ""
+        _activity.clear()
+
+
+def bind_progress(
+    saver: Callable[[dict], None] | None,
+    loader: Callable[[], dict | None] | None,
+) -> None:
+    """Hook used by tests. Production binds Postgres through bind_database."""
+    global _saver, _loader
+    _saver = saver
+    _loader = loader
+
+
+def bind_database(database_url: str) -> None:
+    """Persist cycle progress in Postgres so a restart can resume."""
+
+    def save(payload: dict) -> None:
+        from athena_store import connect
+
+        with connect(database_url) as conn:
+            conn.execute(
+                """
+                INSERT INTO cycle_progress (id, payload, updated_at)
+                VALUES (1, %s::jsonb, now())
+                ON CONFLICT (id) DO UPDATE
+                SET payload = EXCLUDED.payload, updated_at = now()
+                """,
+                (json.dumps(payload),),
+            )
+            conn.commit()
+
+    def load() -> dict | None:
+        from athena_store import connect
+
+        with connect(database_url) as conn:
+            row = conn.execute("SELECT payload FROM cycle_progress WHERE id = 1").fetchone()
+        if row is None or row[0] is None:
+            return None
+        payload = row[0]
+        return payload if isinstance(payload, dict) else json.loads(payload)
+
+    bind_progress(save, load)
+
+
+def persist() -> None:
+    if _saver is None:
+        return
+    try:
+        _saver(snapshot())
+    except Exception:
+        log.exception("cycle progress save failed")
+
+
+def restore() -> dict | None:
+    """Load the last cycle strip into memory. None when nothing was cached."""
+    if _loader is None:
+        return None
+    try:
+        data = _loader()
+    except Exception:
+        log.exception("cycle progress load failed")
+        return None
+    if not data:
+        return None
+    apply_snapshot(data)
+    return snapshot()
+
+
+def wait_remaining() -> int:
+    """Seconds left in the wait bar. Zero when running or the deadline passed."""
+    now = datetime.now(timezone.utc)
+    with _LOCK:
+        if _state != "waiting" or _next_at is None:
+            return 0
+        return max(0, int((_next_at - now).total_seconds()))
 
 
 def cycle_view() -> dict:
@@ -112,7 +232,7 @@ def cycle_view() -> dict:
         activity = list(_activity)
     if state == "waiting" and nxt is not None:
         remaining = max(0, int((nxt - now).total_seconds()))
-        progress = min(1.0, (loop - remaining) / loop)
+        progress = min(1.0, (loop - remaining) / loop) if loop else 1.0
         label = ""
         visible = len(STEPS)
     else:

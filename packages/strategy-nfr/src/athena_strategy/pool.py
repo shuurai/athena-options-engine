@@ -101,14 +101,16 @@ def store_profile(
     thesis = "" if picked is None else picked["thesis"]
     conn.execute(
         """
-        INSERT INTO symbol_facts (symbol, name, market_cap)
-        VALUES (%s, %s, %s)
+        INSERT INTO symbol_facts (symbol, name, market_cap, classifiers, thesis)
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (symbol) DO UPDATE
         SET name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE symbol_facts.name END,
             market_cap = COALESCE(EXCLUDED.market_cap, symbol_facts.market_cap),
+            classifiers = CASE WHEN EXCLUDED.classifiers <> '' THEN EXCLUDED.classifiers ELSE symbol_facts.classifiers END,
+            thesis = CASE WHEN EXCLUDED.thesis <> '' THEN EXCLUDED.thesis ELSE symbol_facts.thesis END,
             updated_at = now()
         """,
-        (symbol, name, facts["market_cap"]),
+        (symbol, name, facts["market_cap"], classifiers, thesis),
     )
     conn.execute(
         """
@@ -121,6 +123,17 @@ def store_profile(
         """,
         (account, symbol, classifiers, thesis),
     )
+    if classifiers or thesis:
+        conn.execute(
+            """
+            UPDATE symbol_phases
+            SET classifiers = CASE WHEN %s <> '' THEN %s ELSE classifiers END,
+                thesis = CASE WHEN %s <> '' THEN %s ELSE thesis END,
+                updated_at = now()
+            WHERE symbol = %s AND account_id <> %s
+            """,
+            (classifiers, classifiers, thesis, thesis, symbol, account),
+        )
     conn.commit()
     log.info("pool fill symbol=%s classifiers=%s", symbol, classifiers or "-")
     return _note(verb, symbol, name, classifiers, ai_note, quote_note)

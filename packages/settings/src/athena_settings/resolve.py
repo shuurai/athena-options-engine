@@ -22,6 +22,11 @@ def itick_key(settings: SettingsPayload) -> str:
     return pick(settings.itick.api_key, "ITICK_API_KEY")
 
 
+def prediction_token(settings: SettingsPayload) -> str:
+    """Bearer token for the Prediction OpenAI-protocol endpoint."""
+    return pick(settings.prediction.api_token, "ATHENA_PREDICTION_TOKEN")
+
+
 def deepseek_token(settings: SettingsPayload) -> str:
     """The credential for the selected provider. DSH does not use one."""
     field = {

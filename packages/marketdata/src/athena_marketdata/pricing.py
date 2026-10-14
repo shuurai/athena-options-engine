@@ -71,18 +71,19 @@ def last_tradeable_price(conn: psycopg.Connection, symbol: str) -> Decimal | Non
 
 
 def year_band(conn: psycopg.Connection, symbol: str) -> str:
-    """52-week high/low once 252 daily sessions exist. Otherwise -/-."""
+    """52-week high/low, or since-inception when fewer than 252 sessions exist."""
     return year_view(conn, symbol)[0]
 
 
 def year_view(conn: psycopg.Connection, symbol: str) -> tuple[str, str, str]:
     """High/low, then today's percent versus the high and versus the low.
 
-    A short history returns (-/-, "", ""). A missing price returns the range
-    and a single -/- for the percent line.
+    Uses the last 252 sessions when available; otherwise the full stored
+    history since inception. No bars returns (-/-, "", ""). A missing price
+    returns the range and a single -/- for the percent line.
     """
     bars = daily_bars(conn, symbol, 252)
-    if len(bars) < 252:
+    if not bars:
         return "-/-", "", ""
     high = max(bar.high for bar in bars)
     low = min(bar.low for bar in bars)

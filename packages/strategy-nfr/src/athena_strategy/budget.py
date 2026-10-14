@@ -240,12 +240,10 @@ def _put_delta(conn, settings: SettingsPayload | None, symbol: str, strike, expi
 
 
 def _classifiers(conn, account_id: str, symbol: str) -> list[str]:
+    del account_id
     row = conn.execute(
-        """
-        SELECT classifiers FROM symbol_phases
-        WHERE account_id = %s AND symbol = %s
-        """,
-        (account_id, symbol.upper()),
+        "SELECT classifiers FROM symbol_facts WHERE symbol = %s",
+        (symbol.upper(),),
     ).fetchone()
     if row is None or not row[0]:
         return []

@@ -1069,7 +1069,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(context["range_sessions"], "1")
         from athena_marketdata.pricing import year_band
 
-        self.assertEqual(year_band(self.conn, SYMBOL), "-/-")
+        self.assertEqual(year_band(self.conn, SYMBOL), "12.00/10.00")
 
     def test_year_band_uses_252_sessions(self) -> None:
         from datetime import timedelta
@@ -1089,6 +1089,51 @@ class WorkflowTest(unittest.TestCase):
         last = Decimal("155")
         self.assertEqual(high_pct, f"{(last - Decimal('234.23')) / Decimal('234.23') * 100:+.2f}%")
         self.assertEqual(low_pct, f"{(last - Decimal('140.12')) / Decimal('140.12') * 100:+.2f}%")
+
+    def test_store_profile_shares_classifiers_across_accounts(self) -> None:
+        from athena_strategy.pool import store_profile
+
+        other = "ZZTEST2"
+        self.conn.execute(
+            """
+            INSERT INTO symbol_phases (account_id, symbol, phase, tags, tactic)
+            VALUES (%s, %s, 'P1', '', 'HOLD'), (%s, %s, 'P1', '', 'HOLD')
+            ON CONFLICT (account_id, symbol) DO NOTHING
+            """,
+            (ACCOUNT, SYMBOL, other, SYMBOL),
+        )
+        self.conn.commit()
+        picked = {"name": "Zed Tech", "classifiers": "SEMIS", "thesis": "Chip wash risk"}
+        result = {"error": "", "latency_ms": 1, "tokens": 1, "text": ""}
+        with (
+            patch("athena_strategy.pool.classify_symbol", return_value=(picked, result)),
+            patch("athena_strategy.pool.record_call"),
+        ):
+            store_profile(
+                self.conn,
+                ACCOUNT,
+                SYMBOL,
+                {"name": "Zed Tech", "market_cap": None},
+                "deepseek-flash",
+            )
+        facts = self.conn.execute(
+            "SELECT classifiers, thesis FROM symbol_facts WHERE symbol = %s",
+            (SYMBOL,),
+        ).fetchone()
+        self.assertEqual(facts, ("SEMIS", "Chip wash risk"))
+        shared = self.conn.execute(
+            "SELECT classifiers, thesis FROM symbol_phases WHERE account_id = %s AND symbol = %s",
+            (other, SYMBOL),
+        ).fetchone()
+        self.assertEqual(shared, ("SEMIS", "Chip wash risk"))
+        from athena_orchestrator.pages import _pool_profile
+
+        name, _cap, classifiers, thesis = _pool_profile(self.conn, other, SYMBOL)
+        self.assertEqual(name, "Zed Tech")
+        self.assertEqual(classifiers, "SEMIS")
+        self.assertEqual(thesis, "Chip wash risk")
+        self.conn.execute("DELETE FROM symbol_phases WHERE account_id = %s", (other,))
+        self.conn.commit()
 
     def test_two_year_pull_marks_a_short_book(self) -> None:
         from datetime import timedelta

@@ -218,6 +218,20 @@ form.fill > .settings-cols {
 .settings-field { position: relative; display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .settings-field > .tag { align-self: flex-start; white-space: nowrap; }
 .settings-field > label, .toggle-row > div:first-child { display: inline-flex; align-items: center; gap: 6px; }
+.card.prediction-card {
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(139, 92, 246, 0.22), transparent 55%),
+    linear-gradient(165deg, rgba(76, 29, 149, 0.28) 0%, rgba(24, 20, 36, 0.55) 42%, var(--site-surface) 100%);
+  border-color: rgba(167, 139, 250, 0.38);
+  box-shadow: inset 0 1px 0 rgba(216, 180, 254, 0.12);
+}
+.card.prediction-card h2 { color: #e9d5ff; }
+.card.prediction-card .card-lead { color: #c4b5fd; }
+.card.prediction-card .input,
+.card.prediction-card .seg {
+  background: rgba(15, 12, 28, 0.55);
+  border-color: rgba(167, 139, 250, 0.28);
+}
 .toggle-row { position: relative; }
 .toggle-row .help-pop, .settings-field .help-pop { top: calc(100% - 4px); left: 0; right: auto; width: min(280px, 100%); }
 .preset-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -1874,8 +1888,12 @@ _CLIENT_JS = r"""
       }
       saving = true;
       const credential = settingsForm.querySelector("[name=credential_token]");
+      const maskedSecrets = settingsForm.querySelectorAll("input.secret-mask");
       const body = new URLSearchParams(new FormData(settingsForm));
       if (credential && credential.dataset.edited !== "1") body.delete("credential_token");
+      maskedSecrets.forEach((input) => {
+        if (input.dataset.edited !== "1") body.delete(input.name);
+      });
       fetch(settingsForm.getAttribute("action") || "/settings", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1908,6 +1926,12 @@ _CLIENT_JS = r"""
           credential.value = masked;
           credential.dataset.edited = "";
         }
+        maskedSecrets.forEach((input) => {
+          if (input.dataset.edited !== "1") return;
+          const typed = input.value.trim();
+          input.value = typed && !typed.includes("•") ? maskCenter(typed) : typed;
+          input.dataset.edited = "";
+        });
         toast("Saved", sub, "ok");
       }).catch(() => {
         toast("Not saved", "The console did not answer.", "err");
@@ -1965,6 +1989,11 @@ _CLIENT_JS = r"""
         credentialInput.dataset.edited = "1";
       });
     }
+    settingsForm.querySelectorAll("input.secret-mask").forEach((input) => {
+      input.addEventListener("input", () => {
+        input.dataset.edited = "1";
+      });
+    });
     settingsForm.addEventListener("change", (event) => {
       const target = event.target;
       if (!target || !target.name) return;
@@ -2924,7 +2953,7 @@ _CLIENT_JS = r"""
       wrap.appendChild(actions);
       const note = document.createElement("p");
       note.className = "slot-note edit-note";
-      note.textContent = "Name and market cap are shared. Classifiers and thesis stay on this account. Price and IVR come from stored bars.";
+      note.textContent = "Name, market cap, classifiers, and thesis are shared across accounts. Price and IVR come from stored bars.";
       wrap.appendChild(note);
       panel("Edit " + symbol, wrap);
       return;

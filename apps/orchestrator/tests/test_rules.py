@@ -18,6 +18,7 @@ from athena_orchestrator.money import DASH, cash_rows, convert, ledger, marked, 
 from athena_orchestrator.pages import PROFILES, _audit_result_tag, _audit_status_tag, _audit_tr, _position_nlv_stat, sim_targets
 from athena_orchestrator.runtime import (
     begin,
+    bind_progress,
     cycle_view,
     finish,
     install_activity_log,
@@ -25,12 +26,14 @@ from athena_orchestrator.runtime import (
     note_activity,
     note_cycle,
     note_loop,
+    restore,
     wait,
+    wait_remaining,
 )
 from athena_orchestrator.sim import _add_months, duration_for
 from athena_risk import CycleBook, allowed_open, block_reason, block_ticket_reason, book_amount
 from athena_settings.model import AISettings, AgentPrompt, IBSlots, RiskLimits, SettingsPayload, TacticFlags, standard_payload
-from athena_settings.prompts import default_agents, range_names, resolved_agents
+from athena_settings.prompts import PREDICTION_NAME, default_agents, range_names, resolved_agents
 from athena_settings.repository import SettingsVersion, format_settings, save_settings, set_knob
 from athena_settings.resolve import (
     allowlist_ids,
@@ -41,6 +44,7 @@ from athena_settings.resolve import (
     live_allowlist,
     live_settings,
     pick,
+    prediction_token,
     scoring_model,
 )
 from athena_strategy.dsh import request_body
@@ -1618,6 +1622,7 @@ class SimMathAndRuntimeTest(unittest.TestCase):
         self.assertEqual(sim_targets(["AAPL"], ["NVDA"], ["AAPL"]), ["AAPL"])
 
     def test_cycle_view_moves_from_running_to_waiting(self) -> None:
+        bind_progress(None, None)
         note_cycle(3)
         note_loop(60)
         begin(4)
@@ -1634,9 +1639,43 @@ class SimMathAndRuntimeTest(unittest.TestCase):
         self.assertEqual(waiting["roll"][1]["detail"], "2 bars")
         self.assertEqual(waiting["activity"], [])
 
+    def test_cycle_progress_restores_from_cache(self) -> None:
+        cache: dict = {}
+
+        def save(payload: dict) -> None:
+            cache.clear()
+            cache.update(payload)
+
+        def load() -> dict | None:
+            return dict(cache) if cache else None
+
+        bind_progress(save, load)
+        note_loop(120)
+        begin(7)
+        finish(0, "session=ok")
+        finish(1, "bars=3")
+        wait(90)
+        saved = dict(cache)
+        self.assertEqual(saved["cycle"], 7)
+        self.assertEqual(saved["state"], "waiting")
+        bind_progress(None, None)
+        begin(1)
+        self.assertEqual(cycle_view()["cycle"], 1)
+        bind_progress(save, lambda: dict(saved))
+        restored = restore()
+        self.assertIsNotNone(restored)
+        view = cycle_view()
+        self.assertEqual(view["cycle"], 7)
+        self.assertEqual(view["state"], "waiting")
+        self.assertEqual(view["roll"][0]["detail"], "session=ok")
+        self.assertEqual(view["roll"][1]["detail"], "bars=3")
+        self.assertGreater(wait_remaining(), 0)
+        bind_progress(None, None)
+
     def test_a_running_step_keeps_recent_log_lines(self) -> None:
         import logging
 
+        bind_progress(None, None)
         begin(5)
         note_activity("news yahoo NVDA")
         install_activity_log()
@@ -1663,6 +1702,115 @@ class PayloadTest(unittest.TestCase):
         self.assertIn("NVDA", payload.watchlist)
         with self.assertRaises(Exception):
             SettingsPayload.model_validate({"privilege": "nope", "risk": payload.risk.model_dump()})
+
+
+class ForecastPrepareTest(unittest.TestCase):
+    def test_prediction_defaults_off(self) -> None:
+        payload = standard_payload()
+        self.assertFalse(payload.prediction.enabled)
+        self.assertEqual(payload.prediction.horizons, [1, 3, 5])
+        self.assertEqual(payload.prediction.model, "forecast")
+        self.assertIn(PREDICTION_NAME, default_agents())
+        self.assertIn(PREDICTION_NAME, resolved_agents(payload))
+        with patch.dict(os.environ, {"ATHENA_PREDICTION_TOKEN": "from-env"}):
+            self.assertEqual(prediction_token(payload), "from-env")
+        cleared = payload.model_copy(
+            update={"prediction": payload.prediction.model_copy(update={"api_token": ""})},
+        )
+        self.assertEqual(prediction_token(cleared), "")
+
+    def test_parse_forecast_accepts_canonical_json(self) -> None:
+        from athena_strategy.forecast import parse_forecast, prediction_request_body
+
+        text = (
+            '{"symbol":"NVDA","as_of":"2026-10-14T15:30:00+08:00","model":"forecast",'
+            '"horizons":{"1":{"bid":180.1,"ask":180.4,"stop":176,"take_profit":185,"dir_conf":0.62},'
+            '"3":{"bid":179.5,"ask":180.8,"stop":174,"take_profit":188,"dir_conf":0.55},'
+            '"5":{"bid":178,"ask":181.5,"stop":170,"take_profit":192,"dir_conf":0.51}},'
+            '"risks":[{"code":"earnings_near","note":"within 5d"}]}'
+        )
+        signal = parse_forecast(text, symbol="NVDA", horizons=[1, 3, 5])
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["horizons"]["1"]["bid"], 180.1)
+        self.assertEqual(signal["risks"][0]["code"], "earnings_near")
+        self.assertIsNone(parse_forecast('{"symbol":"NVDA"}', symbol="NVDA"))
+        self.assertIsNone(parse_forecast(
+            '{"symbol":"NVDA","horizons":{"1":{"bid":2,"ask":1,"stop":1,"take_profit":3,"dir_conf":0.5}},'
+            '"risks":[]}',
+            symbol="NVDA",
+            horizons=[1],
+        ))
+        body = prediction_request_body(
+            model="forecast", system="sys", user="user",
+            max_tokens=512, temperature=0.0, stop=["END"], reasoning=True,
+        )
+        self.assertEqual(body["max_tokens"], 512)
+        self.assertEqual(body["stop"], ["END"])
+        self.assertEqual(body["reasoning_effort"], "medium")
+
+    def test_fetch_forecast_skips_when_disabled(self) -> None:
+        from athena_strategy.forecast import fetch_forecast, prediction_chat
+
+        settings = standard_payload()
+        with patch("athena_strategy.forecast.prediction_chat") as chat:
+            signal, result = fetch_forecast(settings, symbol="NVDA", last="180")
+        self.assertIsNone(signal)
+        self.assertEqual(result["error"], "disabled")
+        chat.assert_not_called()
+        enabled = settings.model_copy(
+            update={"prediction": settings.prediction.model_copy(update={
+                "enabled": True, "api_token": "tok", "base_url": "http://127.0.0.1:9/v1",
+            })},
+        )
+        with patch(
+            "athena_strategy.forecast.prediction_chat",
+            return_value={
+                "text": (
+                    '{"symbol":"NVDA","as_of":"2026-10-14T00:00:00Z","model":"forecast",'
+                    '"horizons":{"1":{"bid":1,"ask":2,"stop":0.5,"take_profit":3,"dir_conf":0.5},'
+                    '"3":{"bid":1,"ask":2,"stop":0.5,"take_profit":3,"dir_conf":0.5},'
+                    '"5":{"bid":1,"ask":2,"stop":0.5,"take_profit":3,"dir_conf":0.5}},"risks":[]}'
+                ),
+                "tokens": 10, "error": "", "request": {}, "latency_ms": 1,
+            },
+        ) as chat:
+            signal, result = fetch_forecast(enabled, symbol="NVDA", last="180", news="none")
+        self.assertIsNotNone(signal)
+        self.assertEqual(signal["symbol"], "NVDA")
+        chat.assert_called_once()
+        self.assertTrue(callable(prediction_chat))
+
+    def test_settings_and_orchestration_expose_prediction(self) -> None:
+        from athena_orchestrator.pages import _prediction_prompt_card, _settings
+
+        class _Conn:
+            def execute(self, *_args, **_kwargs):
+                return self
+
+            def fetchone(self):
+                return (0,)
+
+        settings = standard_payload()
+        with patch("athena_orchestrator.pages.load_active", return_value=settings), patch(
+            "athena_orchestrator.pages.trading_mode", return_value="paper",
+        ), patch(
+            "athena_orchestrator.pages._book_card", return_value="",
+        ), patch(
+            "athena_orchestrator.pages._sim_card", return_value="",
+        ), patch(
+            "athena_orchestrator.pages._developer_card", return_value="",
+        ), patch(
+            "athena_orchestrator.pages._telegram_block", return_value="",
+        ):
+            page = _settings(_Conn(), "ZZTEST", {})
+        self.assertIn("<h2>Prediction</h2>", page["body"])
+        self.assertIn('name="prediction_enabled"', page["body"])
+        self.assertIn('name="prediction_url"', page["body"])
+        self.assertIn('name="prediction_stop"', page["body"])
+        prompt = resolved_agents(settings)[PREDICTION_NAME]
+        card = _prediction_prompt_card(prompt)
+        self.assertIn(f'value="{PREDICTION_NAME}"', card)
+        self.assertIn("Save prompts", card)
 
 
 def _book_row(market, currency: str = "USD") -> dict:

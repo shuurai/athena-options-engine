@@ -1480,6 +1480,14 @@ class WheelDbTest(unittest.TestCase):
         self._stock(1, "400")
         self.conn.execute(
             """
+            INSERT INTO symbol_facts (symbol, name, market_cap, classifiers)
+            VALUES (%s, '', NULL, 'AI_NARRATIVE')
+            ON CONFLICT (symbol) DO UPDATE SET classifiers = 'AI_NARRATIVE'
+            """,
+            (SYMBOL,),
+        )
+        self.conn.execute(
+            """
             INSERT INTO symbol_phases (account_id, symbol, phase, tags, tactic, classifiers)
             VALUES (%s, %s, 'P1', '', 'HOLD', 'AI_NARRATIVE')
             ON CONFLICT (account_id, symbol) DO UPDATE SET classifiers = 'AI_NARRATIVE'

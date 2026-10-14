@@ -24,6 +24,7 @@ RUN_ORDER = (
 )
 
 TRADE_NAME = "Trade"
+PREDICTION_NAME = "Prediction"
 
 AGENT_ROLES = {
     "Location": "Tags only. No order. Names where price sits in the 63-session channel and the long range.",
@@ -34,6 +35,10 @@ AGENT_ROLES = {
     "Call": "One covered call, or quiet. Used at the upper rail or the long-range high, and only when shares are already held.",
     "Consolidator": "Thinking on. Chooses the cash-secured put, covered call, or share price, and may sequence them.",
     "Trade": "Suggests a limit and a stop for one manual stock order. The cycle does not call it.",
+    "Prediction": (
+        "Advisory short-horizon forecast. Emits bid/ask, stop, take-profit, and risks for H=1/3/5. "
+        "Off unless Prediction is enabled on Settings. Never sizes or Approves."
+    ),
 }
 
 
@@ -225,6 +230,27 @@ def _standing_agents() -> dict[str, AgentPrompt]:
                 "Last in the 52-week range: {{place_252}}\n"
                 "Prior close: {{prior_close}}\n"
                 "Headlines:\n{{headlines}}"
+            ),
+        ),
+        "Prediction": AgentPrompt(
+            system=(
+                "You are Athena's short-horizon forecast advisor. You do not place orders and you do not size.\n"
+                "Predict bid, ask, stop, take_profit, and dir_conf for each horizon in sessions: {{horizons}}.\n"
+                "Prices are absolute levels in the ticker currency, not returns.\n"
+                "dir_conf is calibrated P(r > 0) in [0, 1]. risks is a list of {code, note} objects; use [] when quiet.\n"
+                "Reply with JSON only matching:\n"
+                '{"symbol":"","as_of":"","model":"","horizons":{"1":{"bid":0,"ask":0,"stop":0,'
+                '"take_profit":0,"dir_conf":0},"3":{"bid":0,"ask":0,"stop":0,"take_profit":0,'
+                '"dir_conf":0},"5":{"bid":0,"ask":0,"stop":0,"take_profit":0,"dir_conf":0}},'
+                '"risks":[{"code":"","note":""}]}'
+            ),
+            execution=(
+                "Symbol: {{symbol}}\n"
+                "Last: {{last}}\n"
+                "Horizons (sessions): {{horizons}}\n"
+                "As of: {{as_of}}\n"
+                "Model id: {{model}}\n"
+                "News:\n{{news}}"
             ),
         ),
         "Narrator": AgentPrompt(

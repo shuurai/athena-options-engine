@@ -36,7 +36,7 @@ from athena_settings.model import (
     TacticFlags,
     normalize_provider,
 )
-from athena_settings.prompts import AGENT_ORDER, AGENT_ROLES, TRADE_NAME, resolved_agents
+from athena_settings.prompts import AGENT_ORDER, AGENT_ROLES, PREDICTION_NAME, TRADE_NAME, resolved_agents
 from athena_settings.repository import save_settings
 from athena_settings.resolve import (
     allowlist_ids,
@@ -45,6 +45,7 @@ from athena_settings.resolve import (
     control_flag,
     deepseek_token,
     itick_key,
+    prediction_token,
     scoring_model,
 )
 from athena_strategy.classifiers import CLASSIFIER_BADGE, CLASSIFIER_MEANING, CLASSIFIERS, clean_classifiers
@@ -1081,9 +1082,10 @@ def _book_points(conn, settings, account: str, compute, load_bars) -> tuple[list
 
 
 def _symbol_classifiers(conn, account: str, symbol: str) -> list[str]:
+    del account
     row = conn.execute(
-        "SELECT classifiers FROM symbol_phases WHERE account_id = %s AND symbol = %s",
-        (account, symbol.upper()),
+        "SELECT classifiers FROM symbol_facts WHERE symbol = %s",
+        (symbol.upper(),),
     ).fetchone()
     if row is None or not row[0]:
         return []
@@ -1111,14 +1113,20 @@ def _bucket_count(conn, account: str, name: str) -> int:
     if name == UNCLASSIFIED_BUCKET:
         row = conn.execute(
             """
-            SELECT count(*) FROM symbol_phases
-            WHERE account_id = %s AND (classifiers IS NULL OR classifiers = '')
+            SELECT count(*) FROM symbol_phases sp
+            LEFT JOIN symbol_facts sf ON sf.symbol = sp.symbol
+            WHERE sp.account_id = %s
+              AND (sf.classifiers IS NULL OR sf.classifiers = '')
             """,
             (account,),
         ).fetchone()
         return int(row[0])
     rows = conn.execute(
-        "SELECT classifiers FROM symbol_phases WHERE account_id = %s AND classifiers <> ''",
+        """
+        SELECT sf.classifiers FROM symbol_phases sp
+        JOIN symbol_facts sf ON sf.symbol = sp.symbol
+        WHERE sp.account_id = %s AND sf.classifiers <> ''
+        """,
         (account,),
     ).fetchall()
     return sum(1 for (text,) in rows if name in [part.strip() for part in str(text).split(",")])
@@ -2623,7 +2631,8 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
     current = load_active(conn, account)
     news = current.news
     mode = trading_mode().upper()
-    key_ready = bool(itick_key(current))
+    pred = current.prediction
+    stop_text = ", ".join(pred.stop)
     dsh_ready = bool(os.environ.get("DSH_BIN", "").strip())
     token_ready = bool(bot_token(current))
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
@@ -2645,7 +2654,6 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Concurrent subscriptions', 'concurrent_subscriptions', current.ib.concurrent_subscriptions, 'How many IB quotes may be open at once. Further quotes wait.')}"
         '<p class="slot-note">Host, port, and client id stay on the logged-in Gateway. Slot windows are on the cockpit.</p></div></div>'
         '<div class="card fill"><h2>AI</h2><div class="scroll-y">'
-        '<p class="card-lead">Scores news sentiment. Does not place orders.</p>'
         f"{_field('Provider', 'DSH runs the local binary. The others call that provider.', f'<select class=\"input\" name=\"ai_provider\">{_ai_provider_options(current.ai.provider)}</select>')}"
         f"{_field('Model', 'The model sent with each AI call. The list follows the provider.', f'<select class=\"input\" name=\"model\">{_model_options(current)}</select>')}"
         f'<script type="application/json" id="ai-models">{json.dumps({key: list(names) for key, names in MODELS.items()})}</script>'
@@ -2660,17 +2668,23 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         '<div class="card"><h2>Market data</h2><div class="scroll-y">'
         '<p class="card-lead">iTick for live quotes. IB is used for history and orders inside Athena slots.</p>'
         f"{_field('iTick URL', 'Base URL for live quotes.', f'<input class=\"input\" name=\"itick_url\" required value=\"{escape(current.itick.base_url)}\">')}"
-        f"{_row('API token', _tag('SET', 'green') if key_ready else _tag('EMPTY'), 'Whether an iTick token is stored.')}"
-        f"{_field('Token', 'Leave blank to keep the current iTick token. Clear token removes it.', '<input class=\"input\" name=\"itick_key\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
+        f'<div class="settings-field">{_masked_secret("itick_key", itick_key(current), "iTick API token")}</div>'
         '<button class="btn" type="submit" name="action" value="clear-itick" data-explicit>Clear token</button>'
         f"{_row('Watchlist', _tag(str(len(current.watchlist))), 'How many symbols the universe is watching.')}</div></div>"
-        '<div class="card fill"><h2>Notify</h2><div class="scroll-y">'
-        f"{_limit('Draft TTL minutes', 'draft_ttl', current.notify.draft_ttl_minutes, 'How long a pending draft and its control link stay open.')}"
-        f"{_telegram_block(current, token_ready)}"
-        f"{_row('Bot token', _tag('SET', 'green') if token_ready else _tag('EMPTY'), 'Whether a Telegram bot token is stored or inherited.')}"
-        f"{_field('Bot username', 'Telegram bot name without the @. Used to build the link.', f'<input class=\"input\" name=\"bot_username\" value=\"{escape(bot_username(current))}\" placeholder=\"athena_hk_bot\">')}"
-        f"{_field('Bot token', 'Leave blank to keep the current bot token. Clear bot token removes it.', '<input class=\"input\" name=\"bot_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
-        '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div></div>'
+        '<div class="card fill prediction-card"><h2>Prediction</h2><div class="scroll-y">'
+        '<p class="card-lead">OpenAI-protocol short-horizon forecast. Advisory only. Off unless you turn it on. Prompts are on Orchestration.</p>'
+        f"{_switch('Enabled', 'prediction_enabled', pred.enabled, 'When on, the cycle may call the forecast endpoint and store a shadow signal. Never sizes or Approves.')}"
+        f"{_field('API URL', 'OpenAI root ending in /v1. Athena posts to /chat/completions.', f'<input class=\"input\" name=\"prediction_url\" value=\"{escape(pred.base_url)}\">')}"
+        f"{_field('Model', 'Model id sent with each forecast call.', f'<input class=\"input\" name=\"prediction_model\" value=\"{escape(pred.model)}\">')}"
+        f'<div class="settings-field">{_masked_secret("prediction_token", prediction_token(current), "Prediction API token")}</div>'
+        '<button class="btn" type="submit" name="action" value="clear-prediction" data-explicit>Clear token</button>'
+        f"{_limit('Max tokens', 'prediction_max_tokens', pred.max_tokens, 'Completion budget for one forecast reply.')}"
+        f"{_field('Temperature', '0 is deterministic. Keep low for calibrated prices.', f'<input class=\"input\" name=\"prediction_temperature\" value=\"{escape(str(pred.temperature))}\">')}"
+        f"{_limit('Timeout seconds', 'prediction_timeout', pred.timeout_seconds, 'HTTP wait for one forecast call.')}"
+        f"{_field('Stop lines', 'Comma-separated generation stop sequences. Empty means none.', f'<input class=\"input\" name=\"prediction_stop\" value=\"{escape(stop_text)}\" placeholder=\"</json>, END\">')}"
+        f"{_switch('Reasoning', 'prediction_reasoning', pred.reasoning, 'When on, send a medium reasoning / thinking flag if the server supports it.')}"
+        f"{_row('Horizons', _tag('1, 3, 5'), 'Sessions locked for v1. Edit the Prediction prompt on Orchestration.')}"
+        "</div></div></div>"
         '<div class="settings-col">'
         f"{_developer_card(current)}"
         '<div class="card fill"><h2>News</h2><div class="scroll-y">'
@@ -2682,6 +2696,13 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Poll seconds', 'poll_seconds', news.poll_seconds, 'How often the news sources are checked.')}"
         f"{_limit('Wash count', 'wash_min_negative', news.wash_min_negative, 'How many negative headlines count as a wash.')}"
         f"{_limit('Wash window days', 'wash_window_days', news.wash_window_days, 'Those headlines must fall inside this many days.')}</div></div>"
+        '<div class="card fill"><h2>Notify</h2><div class="scroll-y">'
+        f"{_limit('Draft TTL minutes', 'draft_ttl', current.notify.draft_ttl_minutes, 'How long a pending draft and its control link stay open.')}"
+        f"{_telegram_block(current, token_ready)}"
+        f"{_row('Bot token', _tag('SET', 'green') if token_ready else _tag('EMPTY'), 'Whether a Telegram bot token is stored or inherited.')}"
+        f"{_field('Bot username', 'Telegram bot name without the @. Used to build the link.', f'<input class=\"input\" name=\"bot_username\" value=\"{escape(bot_username(current))}\" placeholder=\"athena_hk_bot\">')}"
+        f"{_field('Bot token', 'Leave blank to keep the current bot token. Clear bot token removes it.', '<input class=\"input\" name=\"bot_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
+        '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div>'
         "</div></div>"
         "</form>"
     )
@@ -3109,6 +3130,9 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     if action == "clear-itick":
         payload.itick = payload.itick.model_copy(update={"api_key": ""})
         return _save_live(conn, account, payload, actor, "cleared itick token")
+    if action == "clear-prediction":
+        payload.prediction = payload.prediction.model_copy(update={"api_token": ""})
+        return _save_live(conn, account, payload, actor, "cleared prediction token")
     if action == "clear-bot":
         payload.notify = payload.notify.model_copy(update={"bot_token": ""})
         return _save_live(conn, account, payload, actor, "cleared bot token")
@@ -3124,6 +3148,8 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         "poll_seconds": (15, 600),
         "draft_ttl": (15, 240),
         "cycle_minutes": (1, 60),
+        "prediction_max_tokens": (64, 16384),
+        "prediction_timeout": (5, 300),
     }
     try:
         numbers = {key: int((form.get(key) or [""])[0]) for key in ranges}
@@ -3143,7 +3169,7 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         return _settings(conn, account, {}, "Model name is required.") | {"status": 400}
     itick_update = {"base_url": url}
     posted_key = (form.get("itick_key") or [""])[0].strip()
-    if posted_key:
+    if posted_key and "•" not in posted_key:
         itick_update["api_key"] = posted_key
     notify_update = {
         "draft_ttl_minutes": numbers["draft_ttl"],
@@ -3165,6 +3191,35 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         if "•" not in posted_token:
             ai_update[field] = posted_token
     payload.ai = payload.ai.model_copy(update=ai_update)
+    prediction_url = (form.get("prediction_url") or [payload.prediction.base_url])[0].strip()
+    prediction_model = (form.get("prediction_model") or [payload.prediction.model])[0].strip()
+    if prediction_url and not prediction_url.startswith("http"):
+        return _settings(conn, account, {}, "Prediction URL must start with http.") | {"status": 400}
+    if not prediction_model or any(char in prediction_model for char in "\n\r "):
+        return _settings(conn, account, {}, "Prediction model name is required.") | {"status": 400}
+    try:
+        prediction_temperature = float((form.get("prediction_temperature") or [str(payload.prediction.temperature)])[0])
+    except ValueError:
+        return _settings(conn, account, {}, "Prediction temperature must be a number.") | {"status": 400}
+    if not 0 <= prediction_temperature <= 2:
+        return _settings(conn, account, {}, "Prediction temperature must be 0 to 2.") | {"status": 400}
+    stop_raw = (form.get("prediction_stop") or [""])[0]
+    stop_lines = [part.strip() for part in stop_raw.split(",") if part.strip()]
+    prediction_update = {
+        "enabled": _checked(form, "prediction_enabled"),
+        "base_url": prediction_url or payload.prediction.base_url,
+        "model": prediction_model,
+        "max_tokens": numbers["prediction_max_tokens"],
+        "timeout_seconds": numbers["prediction_timeout"],
+        "temperature": prediction_temperature,
+        "stop": stop_lines,
+        "reasoning": _checked(form, "prediction_reasoning"),
+        "horizons": [1, 3, 5],
+    }
+    posted_prediction = (form.get("prediction_token") or [""])[0].strip()
+    if posted_prediction and "•" not in posted_prediction:
+        prediction_update["api_token"] = posted_prediction
+    payload.prediction = payload.prediction.model_copy(update=prediction_update)
     payload.news = payload.news.model_copy(
         update={
             "yahoo": _checked(form, "yahoo"),
@@ -3270,6 +3325,7 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         "</div>"
         f'<div class="agent-grid">{"".join(cards)}</div>'
         f"{_trade_prompt_card(prompts[TRADE_NAME])}"
+        f"{_prediction_prompt_card(prompts[PREDICTION_NAME])}"
         "</div>"
     )
     return _html(
@@ -3302,11 +3358,36 @@ def _trade_prompt_card(prompt) -> str:
     )
 
 
+def _prediction_prompt_card(prompt) -> str:
+    note = AGENT_ROLES.get(
+        PREDICTION_NAME,
+        "Advisory forecast. Off unless Prediction is enabled on Settings.",
+    )
+    return (
+        '<form class="card agent" method="post" action="/orchestration">'
+        f"<h2><span>{escape(PREDICTION_NAME)}</span></h2>"
+        '<div class="body">'
+        f'<p class="role">{escape(note)}</p>'
+        f'<input type="hidden" name="agent" value="{escape(PREDICTION_NAME, quote=True)}">'
+        '<label class="prompt">System prompt'
+        f'<textarea class="prompt" name="system">{escape(prompt.system)}</textarea></label>'
+        '<label class="prompt">Execution prompt'
+        f'<textarea class="prompt" name="execution">{escape(prompt.execution)}</textarea></label>'
+        '<div class="toggle-row"><div>Reasoning</div><div class="toggle-end">'
+        '<input type="hidden" name="reasoning" value="0">'
+        f'<input type="checkbox" name="reasoning" value="1"{" checked" if prompt.reasoning else ""}>'
+        "</div></div>"
+        '<p class="slot-note">When on, the Prediction endpoint may send a reasoning flag. Settings also has a Prediction reasoning switch.</p>'
+        '<button class="btn primary" type="submit">Save prompts</button>'
+        "</div></form>"
+    )
+
+
 def _post_strategy(conn, account: str, form: dict, actor: str) -> dict:
     if not account:
         return _strategy(conn, account, {}, "No account is configured.") | {"status": 400}
     name = (form.get("agent") or [""])[0]
-    if name not in AGENT_ORDER and name != TRADE_NAME:
+    if name not in AGENT_ORDER and name not in {TRADE_NAME, PREDICTION_NAME}:
         return _strategy(conn, account, {}, "Unknown agent.") | {"status": 400}
     system = (form.get("system") or [""])[0].strip()
     execution = (form.get("execution") or [""])[0].strip()
@@ -4195,18 +4276,17 @@ def _closes(conn, symbol: str) -> tuple[str, str, str]:
 
 
 def _pool_profile(conn, account: str, symbol: str) -> tuple[str, Decimal | None, str, str]:
+    del account
     fact = conn.execute(
-        "SELECT name, market_cap FROM symbol_facts WHERE symbol = %s",
+        "SELECT name, market_cap, classifiers, thesis FROM symbol_facts WHERE symbol = %s",
         (symbol,),
     ).fetchone()
-    name = "" if fact is None else fact[0] or ""
-    cap = None if fact is None else fact[1]
-    book = conn.execute(
-        "SELECT classifiers, thesis FROM symbol_phases WHERE account_id = %s AND symbol = %s",
-        (account, symbol),
-    ).fetchone() if account else None
-    classifiers = "" if book is None else book[0] or ""
-    thesis = "" if book is None else book[1] or ""
+    if fact is None:
+        return "", None, "", ""
+    name = fact[0] or ""
+    cap = fact[1]
+    classifiers = fact[2] or ""
+    thesis = fact[3] or ""
     return name, cap, classifiers, thesis
 
 
@@ -4224,12 +4304,16 @@ def _save_pool_facts(conn, account: str, symbol: str, form: dict) -> dict:
         return _universe(conn, account, {}, message) | {"status": 400}
     conn.execute(
         """
-        INSERT INTO symbol_facts (symbol, name, market_cap)
-        VALUES (%s, %s, %s)
+        INSERT INTO symbol_facts (symbol, name, market_cap, classifiers, thesis)
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (symbol) DO UPDATE
-        SET name = EXCLUDED.name, market_cap = EXCLUDED.market_cap, updated_at = now()
+        SET name = EXCLUDED.name,
+            market_cap = EXCLUDED.market_cap,
+            classifiers = EXCLUDED.classifiers,
+            thesis = EXCLUDED.thesis,
+            updated_at = now()
         """,
-        (symbol, name, cap),
+        (symbol, name, cap, classifiers, thesis),
     )
     conn.execute(
         """
@@ -4239,6 +4323,14 @@ def _save_pool_facts(conn, account: str, symbol: str, form: dict) -> dict:
         SET classifiers = EXCLUDED.classifiers, thesis = EXCLUDED.thesis, updated_at = now()
         """,
         (account, symbol, classifiers, thesis),
+    )
+    conn.execute(
+        """
+        UPDATE symbol_phases
+        SET classifiers = %s, thesis = %s, updated_at = now()
+        WHERE symbol = %s AND account_id <> %s
+        """,
+        (classifiers, thesis, symbol, account),
     )
     conn.commit()
     message = f"Saved {symbol}."
@@ -5197,6 +5289,18 @@ def _credential_input(current) -> str:
     )
 
 
+def _masked_secret(name: str, token: str, aria: str) -> str:
+    """One masked token field. Empty when nothing is stored."""
+    shown = _mask_center(token) if token else ""
+    value = escape(shown, quote=True)
+    label = escape(aria, quote=True)
+    return (
+        f'<input class="input secret-mask" name="{escape(name, quote=True)}" type="text" '
+        f'autocomplete="off" spellcheck="false" aria-label="{label}" '
+        f'placeholder="Token" value="{value}">'
+    )
+
+
 def _currency_options(current: str) -> str:
     return "".join(
         f'<option value="{code}"{" selected" if code == current else ""}>{code}</option>'
@@ -5310,8 +5414,6 @@ def _developer_card(current) -> str:
     button = "" if key else '<button class="btn" type="submit" name="action" value="generate-api-key" data-explicit>Generate key</button>'
     return (
         '<div class="card"><h2>Developer</h2><div class="scroll-y">'
-        '<p class="card-lead">A key lets another app on this machine read prices. It does not place orders. '
-        '<a class="more" href="/skill">How to call it</a></p>'
         f"{_field('API key', 'Secret for the local price API. Reveal shows it. Copy puts it on the clipboard.', shown)}"
         f"{button}"
         "</div></div>"

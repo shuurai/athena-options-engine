@@ -111,6 +111,25 @@ The old name `strangle_otm_pct` is not read. The old name `min_iv_rank_new_short
 
 The Volatility reading shows two badges, not inputs. `premium_ratio` is the mark written today: planned put credit plus call credit, divided by the stock price. `chain_bs` is the future chain method. It cannot be selected, and nothing reads `chain_marks` yet.
 
+### 2b. Prediction (short-horizon forecast)
+
+OpenAI-protocol advisory forecast. **Off by default.** See [12-short-horizon-forecast-rnd.md](12-short-horizon-forecast-rnd.md).
+
+| Key | Default | Role |
+|-----|---------|------|
+| `prediction.enabled` | false | When on, the wheel may call the forecast endpoint (shadow only) |
+| `prediction.base_url` | `http://127.0.0.1:8080/v1` | OpenAI root; Athena posts to `/chat/completions` |
+| `prediction.api_token` | inherit / cleared | Bearer token (`ATHENA_PREDICTION_TOKEN` when unset) |
+| `prediction.model` | `forecast` | Model id |
+| `prediction.max_tokens` | 2048 | Completion budget |
+| `prediction.stop` | `[]` | Generation stop sequences |
+| `prediction.temperature` | 0 | Sampling temperature |
+| `prediction.reasoning` | false | Optional reasoning / thinking flag |
+| `prediction.timeout_seconds` | 30 | HTTP timeout |
+| `prediction.horizons` | `[1, 3, 5]` | Sessions (locked for v1) |
+
+Prompts live on Orchestration under **Prediction**. Output is stored on `forecast_marks` and `decision_trails.steps.forecast`. It does not size drafts or skip Approve.
+
 ### 3. Preference / UX
 
 | Key | Role |

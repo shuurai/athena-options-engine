@@ -15,7 +15,7 @@ from psycopg.types.json import Jsonb
 from athena_exec.halt import active_reason
 from athena_marketdata.pricing import Bar, daily_bars, last_daily_close
 from athena_settings.model import SettingsPayload, StrategySettings, TacticFlags
-from athena_settings.prompts import RUN_ORDER, TRADE_NAME, range_names, resolved_agents
+from athena_settings.prompts import PREDICTION_NAME, RUN_ORDER, TRADE_NAME, range_names, resolved_agents
 from athena_settings.resolve import deepseek_token, scoring_model
 from athena_strategy.drafts import apply_ticket_block, has_open_draft, open_quantity, stage_draft
 from athena_strategy.dsh import chat
@@ -366,6 +366,7 @@ def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: 
             return []
         answers[name] = payload
     tags = set(_tag_set(context, answers))
+    forecast = _shadow_prediction(conn, settings, account_id, symbol, context)
     preview = decide_opening(conn, settings, account_id, symbol, tags)
     if preview.outcome != "drafted":
         return execute_opening(conn, settings, account_id, symbol, tags)
@@ -381,18 +382,24 @@ def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: 
     if stop:
         write_decision(
             conn, account_id, symbol, "wheel", "invalid", stop,
-            {"items": [_step("Narrator", "dropped", stop)], "reason": preview.reason},
+            _with_forecast(
+                {"items": [_step("Narrator", "dropped", stop)], "reason": preview.reason},
+                forecast,
+            ),
         )
         return []
     sentence = str((payload or {}).get("sentence") or "")
     if not bool((payload or {}).get("open")):
         write_decision(
             conn, account_id, symbol, "wheel", "quiet", "narrator_quiet",
-            {
-                "reason": preview.reason,
-                "thinking": sentence,
-                "items": [_step("Narrator", "quiet", sentence or "narrator_quiet")],
-            },
+            _with_forecast(
+                {
+                    "reason": preview.reason,
+                    "thinking": sentence,
+                    "items": [_step("Narrator", "quiet", sentence or "narrator_quiet")],
+                },
+                forecast,
+            ),
         )
         return []
     raw_strike = (payload or {}).get("strike")
@@ -402,7 +409,61 @@ def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: 
             strike = Decimal(str(raw_strike))
         except Exception:
             strike = None
+    if forecast:
+        write_decision(
+            conn, account_id, symbol, "wheel", "drafted", "prediction_shadow",
+            _with_forecast(
+                {
+                    "reason": preview.reason,
+                    "thinking": sentence,
+                    "items": [_step(PREDICTION_NAME, "kept", "shadow forecast")],
+                },
+                forecast,
+            ),
+        )
     return execute_opening(conn, settings, account_id, symbol, tags, strike, sentence)
+
+
+def _with_forecast(steps: dict, forecast: dict | None) -> dict:
+    if forecast:
+        steps = dict(steps)
+        steps["forecast"] = forecast
+    return steps
+
+
+def _shadow_prediction(conn, settings: SettingsPayload, account_id: str, symbol: str, context: dict) -> dict | None:
+    """Advisory forecast when Prediction is enabled. Does not size or Approve."""
+    if not settings.prediction.enabled:
+        return None
+    from athena_strategy.forecast import fetch_forecast, store_forecast_mark
+
+    signal, result = fetch_forecast(
+        settings,
+        symbol=symbol,
+        last=str(context.get("last") or ""),
+        news=str(context.get("headlines") or context.get("news") or ""),
+    )
+    thinking = "on" if settings.prediction.reasoning else "off"
+    prompt = resolved_agents(settings).get(PREDICTION_NAME)
+    if prompt is not None and prompt.reasoning is not None:
+        thinking = "on" if prompt.reasoning else "off"
+    status = "ok" if signal is not None else ("error" if result.get("error") else "invalid")
+    _record(
+        conn,
+        account_id,
+        PREDICTION_NAME,
+        symbol,
+        settings.prediction.model or "forecast",
+        "OPENAI",
+        thinking,
+        result,
+        signal or {"error": result.get("error") or "invalid schema", "raw": result.get("text") or ""},
+        status,
+    )
+    if signal is None:
+        return None
+    store_forecast_mark(conn, account_id, signal)
+    return signal
 
 
 def eligible(conn, settings: SettingsPayload, account_id: str, symbol: str) -> tuple[str, str]:
@@ -821,6 +882,11 @@ def _result_line(agent: str, payload: dict, error: str) -> str:
     if agent == "Location":
         tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
         return ", ".join(str(tag) for tag in tags) or "QUIET"
+    if agent == PREDICTION_NAME:
+        horizons = payload.get("horizons") if isinstance(payload.get("horizons"), dict) else {}
+        if horizons:
+            return f"H={','.join(sorted(horizons.keys(), key=lambda item: int(item) if str(item).isdigit() else 0))}"
+        return str(payload.get("model") or "forecast")
     if agent == "News":
         if payload.get("news_wash"):
             return "News wash"
@@ -1115,9 +1181,10 @@ def _plan(conn, symbol: str) -> dict | None:
 
 
 def _classifiers(conn, account_id: str, symbol: str) -> str:
+    del account_id
     row = conn.execute(
-        "SELECT classifiers FROM symbol_phases WHERE account_id = %s AND symbol = %s",
-        (account_id, symbol.upper()),
+        "SELECT classifiers FROM symbol_facts WHERE symbol = %s",
+        (symbol.upper(),),
     ).fetchone()
     if row is None or not row[0]:
         return ""

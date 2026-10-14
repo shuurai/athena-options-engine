@@ -134,6 +134,21 @@ class ITickSettings(BaseModel):
     api_key: str | None = None
 
 
+class PredictionSettings(BaseModel):
+    """OpenAI-protocol short-horizon forecast. Off unless turned on. Advisory only."""
+
+    enabled: bool = False
+    base_url: str = "http://127.0.0.1:8080/v1"
+    api_token: str | None = None
+    model: str = "forecast"
+    max_tokens: int = 2048
+    stop: list[str] = Field(default_factory=list)
+    temperature: float = 0.0
+    reasoning: bool = False
+    timeout_seconds: int = 30
+    horizons: list[int] = Field(default_factory=lambda: [1, 3, 5])
+
+
 class AccountEntry(BaseModel):
     """A configured id. It is not the Gateway session until the environment lists it."""
 
@@ -276,6 +291,7 @@ class SettingsPayload(BaseModel):
     news: NewsSettings = Field(default_factory=NewsSettings)
     ai: AISettings = Field(default_factory=AISettings)
     itick: ITickSettings = Field(default_factory=ITickSettings)
+    prediction: PredictionSettings = Field(default_factory=PredictionSettings)
     notify: NotifySettings = Field(default_factory=NotifySettings)
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)

@@ -89,6 +89,11 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-14 | Cash reserve uses excess liquidity post-trade | [C-20261014-36](logs/2026-10-14.md#c-20261014-36) |
 | 2026-10-14 | Universe rows pulse and sort by key columns | [C-20261014-37](logs/2026-10-14.md#c-20261014-37) |
 | 2026-10-14 | Mark the console version 1.0.1 | [C-20261014-38](logs/2026-10-14.md#c-20261014-38) |
+| 2026-10-14 | Prepare Prediction LLM settings default off | [C-20261014-39](logs/2026-10-14.md#c-20261014-39) |
+| 2026-10-14 | Share classifiers and inception range highs | [C-20261014-40](logs/2026-10-14.md#c-20261014-40) |
+| 2026-10-14 | Cache cycle progress across restarts | [C-20261014-41](logs/2026-10-14.md#c-20261014-41) |
+| 2026-10-14 | Polish Settings tokens Notify and Prediction | [C-20261014-42](logs/2026-10-14.md#c-20261014-42) |
+| 2026-10-14 | Mark the console version 1.0.2 | [C-20261014-43](logs/2026-10-14.md#c-20261014-43) |
 
 ## Notes
 

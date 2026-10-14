@@ -15,7 +15,16 @@ from athena_orchestrator.backfill import start_history_backfill
 from athena_orchestrator.console import start_console_server
 from athena_orchestrator.control import allowlist_from_env, start_control_server
 from athena_orchestrator.paper import run_paper_cycle
-from athena_orchestrator.runtime import begin_running, begin_waiting, mark, note_loop, note_telegram
+from athena_orchestrator.runtime import (
+    begin_running,
+    begin_waiting,
+    bind_database,
+    mark,
+    note_loop,
+    note_telegram,
+    restore,
+    wait_remaining,
+)
 from athena_strategy.dsh import set_score_listener
 from athena_orchestrator.tunnel import start_tunnel, stop_tunnel
 from athena_settings import load_active, seed_standard_if_empty
@@ -44,6 +53,18 @@ def _cycle_sleep(database_url: str, fallback: int) -> int:
     return max(1, minutes) * 60
 
 
+async def _sleep_interruptible(seconds: int) -> bool:
+    """Sleep in one-second slices. True when an ops restart was requested."""
+    waited = 0
+    while waited < seconds:
+        if consume_restart():
+            return True
+        step = min(1, seconds - waited)
+        await asyncio.sleep(step)
+        waited += step
+    return False
+
+
 async def run_loop() -> None:
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
@@ -52,7 +73,6 @@ async def run_loop() -> None:
     fallback = _env_int("ATHENA_LOOP_SECONDS", 300)
     cycles = _env_int("ATHENA_LOOP_CYCLES", 0)
     sleep_seconds = _cycle_sleep(database_url, fallback)
-    note_loop(sleep_seconds)
     set_score_listener(lambda status, detail="": mark(3, status, detail))
 
     log.info("state=INIT")
@@ -67,6 +87,16 @@ async def run_loop() -> None:
         for account in accounts:
             if seed_standard_if_empty(conn, account):
                 log.info("settings_seed account=%s profile=standard", account)
+
+    bind_database(database_url)
+    cached = restore()
+    if cached:
+        log.info(
+            "cycle resume state=%s cycle=%s remaining=%ss",
+            cached.get("state"),
+            cached.get("cycle"),
+            wait_remaining(),
+        )
 
     accounts = active_accounts()
     log.info("state=IDLE mode=%s accounts=%s", trading_mode(), ",".join(accounts) or "none")
@@ -106,20 +136,16 @@ async def run_loop() -> None:
         except Exception:
             log.exception("cycle failed")
 
-    completed = 1
-    begin_running(completed)
-    cycle()
-    begin_waiting(sleep_seconds)
+    completed = await _bootstrap_cycle(cached, sleep_seconds, cycle)
+    if completed is None:
+        log.info("ops restart")
+        stop_tunnel()
+        return
     while cycles == 0 or completed < cycles:
-        waited = 0
-        while waited < sleep_seconds:
-            if consume_restart():
-                log.info("ops restart")
-                stop_tunnel()
-                return
-            step = min(1, sleep_seconds - waited)
-            await asyncio.sleep(step)
-            waited += step
+        if await _sleep_interruptible(sleep_seconds):
+            log.info("ops restart")
+            stop_tunnel()
+            return
         completed += 1
         begin_running(completed)
         cycle()
@@ -127,3 +153,40 @@ async def run_loop() -> None:
         note_loop(sleep_seconds)
         begin_waiting(sleep_seconds)
         log.info("health ok cycle=%s state=IDLE", completed)
+
+
+async def _bootstrap_cycle(cached: dict | None, sleep_seconds: int, cycle) -> int | None:
+    """Continue a cached wait, re-run an interrupted cycle, or start at #1.
+
+    Returns None when an ops restart interrupts the resumed wait.
+    """
+    state = "" if cached is None else str(cached.get("state") or "")
+    prior = 0 if cached is None else int(cached.get("cycle") or 0)
+
+    if state == "waiting" and prior > 0:
+        remaining = wait_remaining()
+        if await _sleep_interruptible(remaining):
+            return None
+        completed = prior + 1
+        note_loop(sleep_seconds)
+        begin_running(completed)
+        cycle()
+        begin_waiting(sleep_seconds)
+        log.info("health ok cycle=%s state=IDLE", completed)
+        return completed
+
+    if state == "running" and prior > 0:
+        completed = prior
+        note_loop(sleep_seconds)
+        begin_running(completed)
+        cycle()
+        begin_waiting(sleep_seconds)
+        log.info("health ok cycle=%s state=IDLE", completed)
+        return completed
+
+    note_loop(sleep_seconds)
+    completed = 1
+    begin_running(completed)
+    cycle()
+    begin_waiting(sleep_seconds)
+    return completed
