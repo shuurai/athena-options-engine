@@ -7,11 +7,14 @@ print stays the limit price.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import psycopg
+
+log = logging.getLogger("athena.marketdata")
 
 
 @dataclass(frozen=True)
@@ -178,6 +181,36 @@ def set_history_short(conn: psycopg.Connection, symbol: str, short: bool) -> Non
         """,
         (symbol.upper(), short),
     )
+
+
+def run_bar_write(conn, write) -> bool:
+    """Commit one bar write. A deadlock rolls back and tries again."""
+    from psycopg.errors import DeadlockDetected
+
+    for _attempt in range(3):
+        try:
+            write()
+            conn.commit()
+            return True
+        except DeadlockDetected:
+            conn.rollback()
+    log.warning("market bar deadlock")
+    return False
+
+
+def upsert_delayed(conn, symbol: str, price: Decimal, hour: datetime) -> bool:
+    """One hourly delayed close. The commit releases the row before the next symbol."""
+    def write() -> None:
+        conn.execute(
+            """
+            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+            VALUES (%s, %s, %s, %s, %s, %s, 0, 'ib-delayed')
+            ON CONFLICT (symbol, ts, source) DO UPDATE SET close = EXCLUDED.close
+            """,
+            (symbol, hour, price, price, price, price),
+        )
+
+    return run_bar_write(conn, write)
 
 
 def store_ib_daily(conn: psycopg.Connection, symbol: str, bars: list[tuple]) -> int:

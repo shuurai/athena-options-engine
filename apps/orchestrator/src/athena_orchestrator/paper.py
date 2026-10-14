@@ -139,10 +139,12 @@ def _live_session(conn, settings, account: str, session_ids: set[str]) -> None:
         trading=trading_on,
         also_sync=extra_sync_ids(settings, account, session_ids),
     )
-    for account_id, symbol, tactic, action, draft_id, price in noticed:
+    for notice in noticed:
+        account_id, symbol, tactic, action, draft_id, price = notice[:6]
+        shares = notice[6] if len(notice) > 6 else None
         log.info("fill notice symbol=%s price=%s", symbol, price)
         try:
-            notify_fill(account_id, symbol, tactic, action, draft_id, price)
+            notify_fill(account_id, symbol, tactic, action, draft_id, price, shares)
         except RuntimeError as exc:
             log.error("%s", exc)
 

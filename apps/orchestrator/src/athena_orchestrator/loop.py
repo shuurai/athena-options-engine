@@ -100,8 +100,11 @@ async def run_loop() -> None:
         log.info("telegram polling")
 
     def cycle() -> None:
-        with connect(database_url) as conn:
-            run_paper_cycle(conn)
+        try:
+            with connect(database_url) as conn:
+                run_paper_cycle(conn)
+        except Exception:
+            log.exception("cycle failed")
 
     completed = 1
     begin_running(completed)

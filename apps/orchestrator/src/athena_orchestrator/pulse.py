@@ -346,18 +346,12 @@ def _take_tickers(tickers, seen: dict[str, Decimal], prior: dict, names: dict[st
 
 
 def _store_prints(rows: list[tuple[str, Decimal]]) -> None:
+    from athena_marketdata.pricing import upsert_delayed
+
     hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
     with connect(_URL) as conn:
-        for symbol, price in rows:
-            conn.execute(
-                """
-                INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
-                VALUES (%s, %s, %s, %s, %s, %s, 0, 'ib-delayed')
-                ON CONFLICT (symbol, ts, source) DO UPDATE SET close = EXCLUDED.close
-                """,
-                (symbol, hour, price, price, price, price),
-            )
-        conn.commit()
+        for symbol, price in sorted(rows, key=lambda item: item[0].upper()):
+            upsert_delayed(conn, symbol, price, hour)
 
 
 def _fill_history(broker, symbols: list[str]) -> None:

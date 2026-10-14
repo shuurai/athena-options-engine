@@ -141,10 +141,10 @@ class IbBroker:
             log.info("gateway disconnect: %s", exc)
         self._ib = None
 
-    def place_market(self, account: str, symbol: str, action: str, quantity: int) -> int:
+    def place_market(self, account: str, symbol: str, action: str, quantity: int, tif: str = "DAY") -> int:
         from ib_insync import MarketOrder
 
-        return self._place_stock(account, symbol, MarketOrder(action, quantity))
+        return self._place_stock(account, symbol, MarketOrder(action, quantity), tif)
 
     def place_limit(
         self,
@@ -153,10 +153,11 @@ class IbBroker:
         action: str,
         quantity: int,
         limit_price: Decimal,
+        tif: str = "DAY",
     ) -> int:
         from ib_insync import LimitOrder
 
-        return self._place_stock(account, symbol, LimitOrder(action, quantity, float(limit_price)))
+        return self._place_stock(account, symbol, LimitOrder(action, quantity, float(limit_price)), tif)
 
     def place_stop_limit(
         self,
@@ -166,6 +167,7 @@ class IbBroker:
         quantity: int,
         limit_price: Decimal,
         stop_price: Decimal,
+        tif: str = "DAY",
     ) -> int:
         from ib_insync import StopLimitOrder
 
@@ -173,9 +175,10 @@ class IbBroker:
             account,
             symbol,
             StopLimitOrder(action, quantity, float(limit_price), float(stop_price)),
+            tif,
         )
 
-    def _place_stock(self, account: str, symbol: str, order) -> int:
+    def _place_stock(self, account: str, symbol: str, order, tif: str = "DAY") -> int:
         if self.readonly or self._ib is None:
             raise RuntimeError("placeOrder refused on a read-only session")
         from ib_insync import Stock
@@ -186,7 +189,7 @@ class IbBroker:
         if not qualified:
             raise RuntimeError(f"IB did not find {symbol} on {exchange}")
         order.account = account
-        order.tif = "DAY"
+        order.tif = "GTC" if str(tif).upper() == "GTC" else "DAY"
         trade = self._ib.placeOrder(contract, order)
         status = ""
         for _ in range(5):
@@ -380,21 +383,21 @@ class IbBroker:
         return chain.expirations, chain.strikes, chain.tradingClass, chain.exchange, str(chain.multiplier)
 
     def expiry_strikes(self, symbol: str, expiry: date, trading_class: str, exchange: str) -> list[float]:
-        """Strikes that exist on this expiry. The chain list mixes every month."""
+        """Strikes on this expiry and trading class. The full chain mixes months and classes."""
         if self._ib is None:
             return []
         from ib_insync import Option
 
         currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
-        details = self._ib.reqContractDetails(
-            Option(
-                symbol,
-                expiry.strftime("%Y%m%d"),
-                exchange=exchange,
-                currency=currency,
-            )
+        contract = Option(
+            symbol,
+            expiry.strftime("%Y%m%d"),
+            exchange=exchange,
+            currency=currency,
         )
-        return [detail.contract.strike for detail in details]
+        if trading_class:
+            contract.tradingClass = trading_class
+        return _class_strikes(self._ib.reqContractDetails(contract), trading_class)
 
     def option_quote(
         self,
@@ -717,6 +720,18 @@ class IbBroker:
                 )
             )
         return rows
+
+
+def _class_strikes(details, trading_class: str) -> list[float]:
+    """Keep strikes from this trading class. A different class is not that contract."""
+    strikes = []
+    for detail in details or []:
+        contract = detail.contract
+        listed = contract.tradingClass or ""
+        if trading_class and listed and listed != trading_class:
+            continue
+        strikes.append(contract.strike)
+    return strikes
 
 
 def _option(

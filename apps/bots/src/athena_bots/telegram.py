@@ -90,8 +90,18 @@ def fill_text(
     action: str,
     draft_id: str,
     price: object | None,
+    shares: int | None = None,
 ) -> str:
-    """One fill notice. A missing price means IB reported Filled without an execution print."""
+    """One execution notice. Filled is only for an Athena order."""
+    if (tactic or "").upper() == "EXTERNAL":
+        verb = "sell" if str(action).upper() in {"SLD", "SELL"} else "buy"
+        if shares is not None and price is not None:
+            amount = f"{shares} at {price}"
+        elif price is not None:
+            amount = f"Price {price}"
+        else:
+            amount = "Price unknown"
+        return f"External {verb} {symbol}\n{amount}\nAccount {account_id}"
     price_line = f"Price {price}" if price is not None else "IB reports the order filled."
     return f"Filled {action} {symbol} {tactic}\n{price_line}\nAccount {account_id}\nDraft {draft_id}"
 
@@ -103,9 +113,10 @@ def notify_fill(
     action: str,
     draft_id: str,
     price: object | None = None,
+    shares: int | None = None,
 ) -> None:
-    """Tell the allowlist about a fill. No-op when the token is empty."""
-    _send_plain(fill_text(account_id, symbol, tactic, action, draft_id, price))
+    """Tell the allowlist about an execution. No-op when the token is empty."""
+    _send_plain(fill_text(account_id, symbol, tactic, action, draft_id, price, shares))
     log.info("telegram fill symbol=%s draft=%s", symbol, draft_id)
 
 

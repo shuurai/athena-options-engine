@@ -53,6 +53,14 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-13 | Give each Gateway login its own client id | [C-20261013-34](logs/2026-10-13.md#c-20261013-34) |
 | 2026-10-14 | Stream delayed prices, left-align each IVR, and clip the cockpit log | [C-20261014-1](logs/2026-10-14.md#c-20261014-1) |
 | 2026-10-14 | Show one notice when a stock order is sent | [C-20261014-2](logs/2026-10-14.md#c-20261014-2) |
+| 2026-10-14 | Quote only strikes on the option trading class | [C-20261014-3](logs/2026-10-14.md#c-20261014-3) |
+| 2026-10-14 | Play a ding when a pending draft is ready for review | [C-20261014-4](logs/2026-10-14.md#c-20261014-4) |
+| 2026-10-14 | Commit each price bar so two writers do not deadlock | [C-20261014-5](logs/2026-10-14.md#c-20261014-5) |
+| 2026-10-14 | Say Filled only when an Athena order fills | [C-20261014-6](logs/2026-10-14.md#c-20261014-6) |
+| 2026-10-14 | Sync open and completed orders from the IB account | [C-20261014-7](logs/2026-10-14.md#c-20261014-7) |
+| 2026-10-14 | Add a GTC toggle on the universe trade panel | [C-20261014-8](logs/2026-10-14.md#c-20261014-8) |
+| 2026-10-14 | Keep a closed browser connection out of the orchestrator log | [C-20261014-9](logs/2026-10-14.md#c-20261014-9) |
+| 2026-10-14 | Recover when the browser closes a console connection | [C-20261014-10](logs/2026-10-14.md#c-20261014-10) |
 
 ## Notes
 

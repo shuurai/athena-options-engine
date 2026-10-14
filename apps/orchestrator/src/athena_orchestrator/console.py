@@ -7,7 +7,7 @@ import os
 import re
 from datetime import datetime
 from html import escape, unescape
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -28,6 +28,7 @@ from athena_orchestrator.cockpit import (
 )
 from athena_settings import load_active
 from athena_store import connect
+from athena_orchestrator.httpd import QuietHandler
 from athena_orchestrator import pages
 from athena_orchestrator.tasks import begin_fill, begin_positions, list_tasks
 from athena_orchestrator.view import bind_view, current_view
@@ -350,6 +351,7 @@ button.sort[data-dir="desc"] .down { opacity: 1; }
 .trade-box label { display: block; margin: 12px 0 0; font-size: 11px; color: var(--site-text-3); }
 .trade-box .input { margin-top: 6px; }
 .trade-box .seg { margin-top: 8px; }
+.trade-box .trade-gtc { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 12px; color: var(--site-text-2); }
 .trade-box .row-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .trade-box .row-actions .btn { width: 100%; }
 .trade-box .row-actions + .slot-note { padding-top: 16px; margin-bottom: 0; }
@@ -658,7 +660,7 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
     from athena_orchestrator.pulse import configure
 
     configure(database_url)
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(QuietHandler):
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
             if path.startswith("/api/v1"):
@@ -688,6 +690,10 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                 from athena_orchestrator.runtime import cycle_view
 
                 self._send(200, json.dumps(cycle_view()), "json")
+                return
+            if parsed.path == "/api/review":
+                with connect(database_url) as conn:
+                    self._send(200, json.dumps({"ids": review_ids(conn, _account())}), "json")
                 return
             if parsed.path == "/api/pulse/ticks":
                 self._send_pulse()
@@ -736,9 +742,6 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                     status, body, kind = _post(conn, path, form, actor, live)
             self._send(status, body, kind)
 
-        def log_message(self, fmt: str, *args: object) -> None:
-            return
-
         def _send(self, status: int, body: str, kind: str = "html") -> None:
             data = body.encode("utf-8")
             self.send_response(status)
@@ -780,6 +783,9 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                     self.wfile.write(("data: " + json.dumps(payload) + "\n\n").encode("utf-8"))
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                from athena_orchestrator.httpd import client_closed
+
+                client_closed(self)
                 return
             finally:
                 unsubscribe_ticks(listener)
@@ -809,6 +815,9 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                     self.wfile.write(("data: " + json.dumps(line) + "\n\n").encode("utf-8"))
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                from athena_orchestrator.httpd import client_closed
+
+                client_closed(self)
                 return
             finally:
                 unsubscribe_trail(listener)
@@ -842,6 +851,9 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                     self.wfile.write(line.encode("utf-8"))
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                from athena_orchestrator.httpd import client_closed
+
+                client_closed(self)
                 return
             finally:
                 unsubscribe(account, listener)
@@ -1040,6 +1052,21 @@ def _toast_title(text: str, ok: bool) -> tuple[str, str]:
     if "already" in text.lower():
         return "Already stored", "warn"
     return "Saved", "ok"
+
+
+def review_ids(conn, account: str) -> list[str]:
+    """Pending drafts waiting for a person. A blocked draft is not a review."""
+    if not account:
+        return []
+    rows = conn.execute(
+        """
+        SELECT id FROM drafts
+        WHERE account_id = %s AND status = 'pending'
+        ORDER BY created_at, id
+        """,
+        (account,),
+    ).fetchall()
+    return [row[0] for row in rows]
 
 
 def _nav_badges(conn) -> dict[str, tuple[int | str, bool, str]]:
@@ -2833,6 +2860,8 @@ _CLIENT_JS = r"""
         '<button type="button" data-order="STP LMT">Stop limit</button></div>' +
         '<label data-trade-limit>Limit<input class="input" name="limit" inputmode="decimal"></label>' +
         '<label data-trade-stop hidden>Stop<input class="input" name="stop" inputmode="decimal"></label>' +
+        '<div class="trade-gtc"><span>Good till cancelled</span>' +
+        '<button type="button" class="status-tgl on" data-trade-gtc aria-pressed="true"></button></div>' +
         '<div class="row-actions">' +
         '<button class="btn" type="button" data-trade-auto>Auto Set Price</button>' +
         '<button class="btn primary" type="button" data-trade-send>Place order</button></div>' +
@@ -2846,6 +2875,15 @@ _CLIENT_JS = r"""
       const reason = reasonCard.querySelector("p");
       const reasonLabel = reasonCard.querySelector(".k");
       const auto = wrap.querySelector("[data-trade-auto]");
+      const gtc = wrap.querySelector("[data-trade-gtc]");
+      gtc.addEventListener("click", () => {
+        const on = !gtc.classList.contains("on");
+        gtc.classList.toggle("on", on);
+        gtc.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      function gtcOn() {
+        return gtc.classList.contains("on");
+      }
       function showReason(text, failed) {
         const message = text || "";
         reason.textContent = message;
@@ -2925,7 +2963,8 @@ _CLIENT_JS = r"""
         let price = "at market";
         if (kind === "LMT") price = "at limit " + (limit || "—");
         if (kind === "STP LMT") price = "at stop " + (stop || "—") + " limit " + (limit || "—");
-        const text = side() + " " + (qty || "—") + " " + symbol + " " + price + " on " + (accountId || "this account") + "?";
+        const life = gtcOn() ? "GTC" : "day";
+        const text = side() + " " + (qty || "—") + " " + symbol + " " + price + " " + life + " on " + (accountId || "this account") + "?";
         confirmBox("Place order", text, () => {
           if (sending) return;
           sending = true;
@@ -2936,7 +2975,8 @@ _CLIENT_JS = r"""
             quantity: qty,
             order: kind,
             limit: limit,
-            stop: stop
+            stop: stop,
+            tif: gtcOn() ? "GTC" : "DAY"
           });
           fetch("/universe", {
             method: "POST",
@@ -3528,6 +3568,57 @@ _CLIENT_JS = r"""
   }
   function pollCycle() {
     fetch("/api/cycle").then((res) => res.json()).then(paintCycle).catch(() => {});
+  }
+  let audioCtx = null;
+  function ding() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const start = audioCtx.currentTime;
+    [880, 1174].forEach((freq, index) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const at = start + index * 0.12;
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, at);
+      gain.gain.exponentialRampToValueAtTime(0.18, at + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.42);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(at);
+      osc.stop(at + 0.46);
+    });
+  }
+  document.addEventListener("pointerdown", () => {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  });
+  let reviewSeen = null;
+  function pollReview() {
+    fetch("/api/review").then((res) => res.json()).then((body) => {
+      const ids = body.ids || [];
+      if (reviewSeen === null) {
+        let heard = null;
+        const stored = sessionStorage.getItem("ath-review-heard");
+        try { heard = stored ? JSON.parse(stored) : null; } catch (err) { heard = null; }
+        reviewSeen = new Set(Array.isArray(heard) ? heard : ids);
+        if (!Array.isArray(heard)) sessionStorage.setItem("ath-review-heard", JSON.stringify(ids));
+        return;
+      }
+      let fresh = false;
+      ids.forEach((id) => {
+        if (reviewSeen.has(id)) return;
+        reviewSeen.add(id);
+        fresh = true;
+      });
+      if (!fresh) return;
+      sessionStorage.setItem("ath-review-heard", JSON.stringify([...reviewSeen]));
+      ding();
+    }).catch(() => {});
   }
   document.querySelectorAll("tr.phase-pick").forEach((row) => {
     const open = () => { location.href = row.getAttribute("data-href"); };
@@ -4357,6 +4448,8 @@ _CLIENT_JS = r"""
   setInterval(pollTasks, 1000);
   pollCycle();
   setInterval(pollCycle, 1000);
+  pollReview();
+  setInterval(pollReview, 5000);
   showFlashes();
 })();
 </script>

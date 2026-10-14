@@ -25,7 +25,7 @@ from athena_exec.options import (
     strike_shortlist,
     wide_band,
 )
-from athena_marketdata.pricing import has_daily_on, has_ib_daily, last_tradeable_price
+from athena_marketdata.pricing import has_daily_on, has_ib_daily, last_tradeable_price, run_bar_write, upsert_delayed
 
 log = logging.getLogger("athena.exec")
 
@@ -93,7 +93,6 @@ def _name_market(settings: SettingsPayload, symbol: str) -> str:
 
 def _cache_quotes(conn, broker, settings: SettingsPayload, now: datetime) -> None:
     hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
-    wrote = False
     for symbol in settings.watchlist:
         if not cash_open(symbol, now, _name_market(settings, symbol)):
             log.info("quote closed symbol=%s", symbol)
@@ -102,22 +101,11 @@ def _cache_quotes(conn, broker, settings: SettingsPayload, now: datetime) -> Non
         if price is None:
             log.info("quote missing symbol=%s", symbol)
             continue
-        conn.execute(
-            """
-            INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'ib-delayed')
-            ON CONFLICT (symbol, ts, source) DO UPDATE SET close = EXCLUDED.close
-            """,
-            (symbol, hour, price, price, price, price, 0),
-        )
-        wrote = True
-        log.info("quote symbol=%s close=%s", symbol, price)
-    if wrote:
-        conn.commit()
+        if upsert_delayed(conn, symbol, price, hour):
+            log.info("quote symbol=%s close=%s", symbol, price)
 
 
 def _cache_history(conn, broker, settings: SettingsPayload, now: datetime) -> None:
-    wrote = False
     today = now.astimezone(HKT).date()
     for symbol in settings.watchlist:
         if not cash_open(symbol, now, _name_market(settings, symbol)):
@@ -129,26 +117,27 @@ def _cache_history(conn, broker, settings: SettingsPayload, now: datetime) -> No
         if not bars:
             log.info("history missing symbol=%s", symbol)
             continue
-        for bar in bars:
-            day = bar.date
-            ts = datetime(day.year, day.month, day.day, tzinfo=UTC)
-            conn.execute(
-                """
-                INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'ib-daily')
-                ON CONFLICT (symbol, ts, source) DO UPDATE SET
-                    open = EXCLUDED.open,
-                    high = EXCLUDED.high,
-                    low = EXCLUDED.low,
-                    close = EXCLUDED.close,
-                    volume = EXCLUDED.volume
-                """,
-                (symbol, ts, bar.open, bar.high, bar.low, bar.close, bar.volume or 0),
-            )
-            wrote = True
-        log.info("history symbol=%s bars=%s", symbol, len(bars))
-    if wrote:
-        conn.commit()
+
+        def write(bars=bars, symbol=symbol) -> None:
+            for bar in bars:
+                day = bar.date
+                ts = datetime(day.year, day.month, day.day, tzinfo=UTC)
+                conn.execute(
+                    """
+                    INSERT INTO market_bars (symbol, ts, open, high, low, close, volume, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, 'ib-daily')
+                    ON CONFLICT (symbol, ts, source) DO UPDATE SET
+                        open = EXCLUDED.open,
+                        high = EXCLUDED.high,
+                        low = EXCLUDED.low,
+                        close = EXCLUDED.close,
+                        volume = EXCLUDED.volume
+                    """,
+                    (symbol, ts, bar.open, bar.high, bar.low, bar.close, bar.volume or 0),
+                )
+
+        if run_bar_write(conn, write):
+            log.info("history symbol=%s bars=%s", symbol, len(bars))
 
 
 def _connect_athena(broker, host: str, port: int, client_id: int, slot: str, attempts: int = 3, pause: float = 1.0) -> bool:
@@ -662,7 +651,9 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
                 (account, symbol, signed, price, sec_type),
             )
             conn.commit()
-            noticed.append((account, symbol, "EXTERNAL", "SLD" if side == "SLD" else "BOT", "", price))
+            noticed.append((
+                account, symbol, "EXTERNAL", "SELL" if side == "SLD" else "BUY", "", price, abs(int(quantity)),
+            ))
             log.info("external fill symbol=%s price=%s", symbol, price)
             continue
         order_id, draft_id, tactic, contracts, action = row

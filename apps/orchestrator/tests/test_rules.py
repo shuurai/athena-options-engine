@@ -484,6 +484,8 @@ class OptionsAndSlotsTest(unittest.TestCase):
         market = ib.placeOrder.call_args[0][1]
         self.assertEqual(market.orderType, "MKT")
         self.assertEqual(market.tif, "DAY")
+        self.assertEqual(broker.place_limit("U1", "ZZT", "BUY", 1, Decimal("9"), "GTC"), 44)
+        self.assertEqual(ib.placeOrder.call_args[0][1].tif, "GTC")
         self.assertEqual(broker.place_stop_limit("U1", "ZZT", "SELL", 4, Decimal("12.4"), Decimal("12.1")), 44)
         stopped = ib.placeOrder.call_args[0][1]
         self.assertEqual(stopped.orderType, "STP LMT")
@@ -540,6 +542,66 @@ class OptionsAndSlotsTest(unittest.TestCase):
         self.assertEqual(matched_profile(PROFILES["defensive"], {}), "custom")
         self.assertEqual(matched_profile(PROFILES["paper"], {}), "paper")
         self.assertNotIn(7, {preset[5] for name, preset in PROFILES.items() if name != "paper"})
+
+    def test_a_deadlocked_bar_write_is_tried_again(self) -> None:
+        from psycopg.errors import DeadlockDetected
+
+        from athena_marketdata.pricing import run_bar_write
+
+        class Conn:
+            def __init__(self) -> None:
+                self.writes = 0
+                self.commits = 0
+                self.rollbacks = 0
+
+            def commit(self) -> None:
+                self.commits += 1
+
+            def rollback(self) -> None:
+                self.rollbacks += 1
+
+        conn = Conn()
+
+        def write() -> None:
+            conn.writes += 1
+            if conn.writes == 1:
+                raise DeadlockDetected()
+
+        self.assertTrue(run_bar_write(conn, write))
+        self.assertEqual(conn.writes, 2)
+        self.assertEqual(conn.commits, 1)
+        self.assertEqual(conn.rollbacks, 1)
+
+    def test_filled_is_only_an_athena_order(self) -> None:
+        from athena_bots.telegram import fill_text
+
+        own = fill_text("U1", "SKHY", "MANUAL", "BUY", "draft_1", "151.5")
+        self.assertTrue(own.startswith("Filled BUY SKHY MANUAL"))
+        self.assertIn("Draft draft_1", own)
+        external = fill_text("U1", "SKHY", "EXTERNAL", "BOT", "", "152.12", 100)
+        self.assertEqual(external, "External buy SKHY\n100 at 152.12\nAccount U1")
+        self.assertNotIn("Filled", external)
+        sold = fill_text("U1", "SKHY", "EXTERNAL", "SLD", "", "10", 5)
+        self.assertTrue(sold.startswith("External sell SKHY"))
+
+    def test_a_strike_from_another_class_is_not_quoted(self) -> None:
+        from athena_exec.broker import _class_strikes
+
+        class Contract:
+            def __init__(self, strike, trading_class):
+                self.strike = strike
+                self.tradingClass = trading_class
+
+        class Detail:
+            def __init__(self, contract):
+                self.contract = contract
+
+        strikes = _class_strikes([
+            Detail(Contract(200.0, "NVDA")),
+            Detail(Contract(203.0, "NVDA1")),
+            Detail(Contract(205.0, "NVDA")),
+        ], "NVDA")
+        self.assertEqual(strikes, [200.0, 205.0])
 
 
 class PricePhaseTest(unittest.TestCase):
@@ -1533,6 +1595,34 @@ class PulseStreamTest(unittest.TestCase):
         self.assertNotIn('toast("Sending"', _CLIENT_JS)
         self.assertIn('task.kind === "trade" && task.status !== "running"', _CLIENT_JS)
         self.assertIn("watchedTasks.has(id)", _CLIENT_JS)
+        self.assertIn('class="status-tgl on" data-trade-gtc', _CLIENT_JS)
+        self.assertIn('tif: gtcOn() ? "GTC" : "DAY"', _CLIENT_JS)
+        from athena_orchestrator.tasks import trade_tif
+
+        self.assertEqual(trade_tif(""), "GTC")
+        self.assertEqual(trade_tif("day"), "DAY")
+
+    def test_a_reset_connection_is_logged_and_released(self) -> None:
+        from athena_orchestrator.httpd import QuietHandler
+
+        class Closed(QuietHandler):
+            def handle_one_request(self) -> None:
+                self.path = "/api/logs"
+                raise ConnectionResetError(54, "Connection reset by peer")
+
+        probe = Closed.__new__(Closed)
+        probe.client_address = ("127.0.0.1", 50964)
+        with self.assertLogs("athena.http", level="INFO") as caught:
+            probe.handle()
+        self.assertTrue(probe.close_connection)
+        self.assertIn("client closed 127.0.0.1 /api/logs", caught.output[0])
+
+        class Broken(QuietHandler):
+            def handle_one_request(self) -> None:
+                raise RuntimeError("bad request")
+
+        with self.assertRaises(RuntimeError):
+            Broken.__new__(Broken).handle()
 
 
 class PositionNlvTest(unittest.TestCase):

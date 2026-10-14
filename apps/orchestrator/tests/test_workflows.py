@@ -28,6 +28,25 @@ RUN = "sim_zztest"
 SYMBOL = "ZZT"
 
 
+def _ib_trade(order_id: int, perm_id: int, symbol: str, action: str, qty: int, status: str, limit: str):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        order=SimpleNamespace(
+            orderId=order_id,
+            permId=perm_id,
+            account=ACCOUNT,
+            action=action,
+            totalQuantity=qty,
+            orderType="LMT",
+            lmtPrice=limit,
+            auxPrice=0,
+        ),
+        contract=SimpleNamespace(symbol=symbol, secType="STK", multiplier="1"),
+        orderStatus=SimpleNamespace(status=status, filled=0, remaining=qty, avgFillPrice=0),
+    )
+
+
 def _url() -> str:
     return os.environ.get("DATABASE_URL", "").strip()
 
@@ -118,6 +137,24 @@ class WorkflowTest(unittest.TestCase):
     def _cursor(self) -> date | None:
         row = self.conn.execute("SELECT cursor_date, status FROM sim_runs WHERE id = %s", (RUN,)).fetchone()
         return None if row is None else row
+
+    def test_a_pending_draft_is_ready_for_review(self) -> None:
+        from athena_orchestrator.console import review_ids
+
+        self._draft("draft_ok", False)
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase,
+                account_id, instrument, limit_price, simulated
+            )
+            VALUES ('draft_no', %s, 'BUY', 1, 'blocked', 'cap', 'P1', %s, 'STK', 12.5, false)
+            """,
+            (SYMBOL, ACCOUNT),
+        )
+        self.conn.commit()
+        self.assertEqual(review_ids(self.conn, ACCOUNT), ["draft_ok"])
+        self.assertEqual(review_ids(self.conn, ""), [])
 
     def test_replay_plays_halts_and_resumes(self) -> None:
         from athena_orchestrator.sim import cycle_gate, halt, progress, resume
@@ -710,6 +747,55 @@ class WorkflowTest(unittest.TestCase):
                 listener.get_nowait()
         finally:
             unsubscribe(ACCOUNT, listener)
+
+    def test_an_ib_account_order_is_stored(self) -> None:
+        from athena_exec.order_watch import sync_ib_order
+        from athena_orchestrator.pages import _orders_page
+
+        trade = _ib_trade(77, 88001, "ZZT", "BUY", 30, "Submitted", "151.5")
+        self.assertEqual(sync_ib_order(self.conn, trade), ACCOUNT)
+        page = _orders_page(self.conn, ACCOUNT, {"status": ["working"]})
+        self.assertIn("ZZT", page["body"])
+        self.assertIn("EXTERNAL", page["body"])
+        trade.orderStatus.filled = 10
+        self.assertEqual(sync_ib_order(self.conn, trade), ACCOUNT)
+        self.assertIsNone(sync_ib_order(self.conn, trade))
+        stored = self.conn.execute(
+            "SELECT count(*), max(filled_qty) FROM orders WHERE account_id = %s AND perm_id = 88001",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(stored, (1, Decimal("10")))
+        other = _ib_trade(77, 88002, "ZZX", "SELL", 5, "Submitted", "2")
+        sync_ib_order(self.conn, other)
+        rows = self.conn.execute(
+            "SELECT symbol, tactic FROM orders WHERE account_id = %s AND ib_order_id = 77 ORDER BY symbol",
+            (ACCOUNT,),
+        ).fetchall()
+        self.assertEqual(rows, [("ZZT", "EXTERNAL"), ("ZZX", "EXTERNAL")])
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id, instrument
+            )
+            VALUES ('draft_zzkeep', %s, 'MANUAL', 4, 'approved', 'seed', '', %s, 'STK')
+            """,
+            (SYMBOL, ACCOUNT),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO orders (
+                id, draft_id, account_id, symbol, tactic, action, contracts, status, ib_order_id
+            )
+            VALUES ('ord_zzkeep', 'draft_zzkeep', %s, %s, 'MANUAL', 'BUY', 4, 'submitted', 78)
+            """,
+            (ACCOUNT, SYMBOL),
+        )
+        self.conn.commit()
+        sync_ib_order(self.conn, _ib_trade(78, 88003, SYMBOL, "BUY", 4, "Submitted", "9"))
+        kept = self.conn.execute(
+            "SELECT tactic, perm_id FROM orders WHERE id = 'ord_zzkeep'"
+        ).fetchone()
+        self.assertEqual(kept, ("MANUAL", 88003))
 
     def test_mock_send_order_stays_a_pending_draft(self) -> None:
         from athena_strategy.mock import prepare_mock_orders

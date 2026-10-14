@@ -331,6 +331,12 @@ def begin_simulate(database_url: str, account: str, start: str, months: str) -> 
     return task
 
 
+def trade_tif(value: str) -> str:
+    """Universe trades stay open until cancelled unless the toggle is off."""
+    text = (value or "").strip().upper()
+    return text if text in {"GTC", "DAY"} else "GTC"
+
+
 def begin_trade(
     database_url: str,
     account: str,
@@ -341,6 +347,7 @@ def begin_trade(
     order_type: str,
     limit_price: Decimal | None,
     stop_price: Decimal | None,
+    tif: str = "GTC",
 ) -> dict:
     """Send one stock order. The confirm on the Universe page is the consent."""
     if not database_url:
@@ -355,11 +362,15 @@ def begin_trade(
         raise ValueError("Limit price is required.")
     if order_type == "STP LMT" and (stop_price is None or stop_price <= 0):
         raise ValueError("Stop price is required.")
+    life = trade_tif(tif)
     task, fresh = _start("trade", f"{side} {symbol}", "Sending to IB")
     if fresh:
         threading.Thread(
             target=_run_trade,
-            args=(task["id"], database_url, account, actor, symbol, side, quantity, order_type, limit_price, stop_price),
+            args=(
+                task["id"], database_url, account, actor, symbol, side, quantity,
+                order_type, limit_price, stop_price, life,
+            ),
             name="athena-trade",
             daemon=True,
         ).start()
@@ -377,6 +388,7 @@ def _run_trade(
     order_type: str,
     limit_price: Decimal | None,
     stop_price: Decimal | None,
+    tif: str,
 ) -> None:
     import asyncio
 
@@ -393,16 +405,18 @@ def _run_trade(
                 raise RuntimeError("IB Gateway did not connect.")
             try:
                 if order_type == "MKT":
-                    ib_order_id = broker.place_market(account, symbol, side, quantity)
+                    ib_order_id = broker.place_market(account, symbol, side, quantity, tif)
                 elif order_type == "STP LMT":
-                    ib_order_id = broker.place_stop_limit(account, symbol, side, quantity, limit_price, stop_price)
+                    ib_order_id = broker.place_stop_limit(
+                        account, symbol, side, quantity, limit_price, stop_price, tif,
+                    )
                 else:
-                    ib_order_id = broker.place_limit(account, symbol, side, quantity, limit_price)
+                    ib_order_id = broker.place_limit(account, symbol, side, quantity, limit_price, tif)
             finally:
                 broker.disconnect()
         with connect(database_url) as conn:
             _store_manual_order(
-                conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id,
+                conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id, tif,
             )
         _finish(task_id, "done", f"IB order {ib_order_id}.", f"{side} {symbol}")
     except Exception as exc:
@@ -412,7 +426,7 @@ def _run_trade(
 
 
 def _store_manual_order(
-    conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id,
+    conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id, tif: str = "GTC",
 ) -> None:
     draft_id = "draft_" + secrets.token_hex(3)
     order_id = "ord_" + secrets.token_hex(3)
@@ -422,7 +436,7 @@ def _store_manual_order(
         price_text = f"stop {stop_price} limit {limit_price}"
     else:
         price_text = f"limit {limit_price}"
-    reason = f"{side} {quantity} {symbol} at {price_text}"
+    reason = f"{side} {quantity} {symbol} at {price_text} {trade_tif(tif)}"
     conn.execute(
         """
         INSERT INTO drafts (

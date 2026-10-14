@@ -1561,7 +1561,7 @@ def _orders_page(conn, account: str, query: dict) -> dict:
     chips = [("info", f"{count} orders" if count else "none")]
     return _html(
         "Orders",
-        "Orders this account sent. A status change from IB replaces the row that is already on screen.",
+        "Orders on this account, including ones placed in IB. A status change replaces the row on screen.",
         body,
         chips,
         _REFRESH,
@@ -3941,7 +3941,7 @@ def _trade_price(conn, account: str, settings, symbol: str, form: dict) -> dict:
 
 
 def _trade_send(account: str, settings, actor: str, symbol: str, form: dict) -> dict:
-    from athena_orchestrator.tasks import begin_trade
+    from athena_orchestrator.tasks import begin_trade, trade_tif
     from athena_strategy.pool import clean_symbol
 
     if symbol not in {item.upper() for item in settings.watchlist}:
@@ -3963,6 +3963,7 @@ def _trade_send(account: str, settings, actor: str, symbol: str, form: dict) -> 
             order_type,
             limit_price,
             stop_price,
+            trade_tif((form.get("tif") or ["GTC"])[0]),
         )
     except (ValueError, InvalidOperation) as exc:
         return _pool_patch(False, str(exc) or "The order was not sent.", status=400)

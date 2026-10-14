@@ -6,9 +6,10 @@ import os
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from html import escape
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from athena_orchestrator.httpd import QuietHandler
 from athena_store import connect
 from athena_strategy import AmendError, amend_view, use_link
 
@@ -238,7 +239,7 @@ def render_message(title: str, detail: str) -> str:
 
 
 def start_control_server(database_url: str, port: int, allowlist: set[str]) -> ThreadingHTTPServer:
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(QuietHandler):
         def do_GET(self) -> None:
             token = _token(self.path)
             if token is None:
@@ -281,9 +282,6 @@ def start_control_server(database_url: str, port: int, allowlist: set[str]) -> T
                 return
             title = "Approved" if decision == "approve" else "Rejected"
             self._send(200, render_message(title, f"{title} {draft_id}."))
-
-        def log_message(self, fmt: str, *args: object) -> None:
-            return
 
         def _again(self, database_url: str, token: str, actor: str, error: str) -> str:
             with connect(database_url) as conn:
