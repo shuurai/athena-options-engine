@@ -128,7 +128,7 @@ OpenAI-protocol advisory forecast. **Off by default.** See [12-short-horizon-for
 | `prediction.timeout_seconds` | 30 | HTTP timeout |
 | `prediction.horizons` | `[1, 3, 5]` | Sessions (locked for v1) |
 
-Prompts live on Orchestration under **Prediction**. Output is stored on `forecast_marks` and `decision_trails.steps.forecast`. It does not size drafts or skip Approve.
+Connection knobs and prompts live on the **Prediction** page under Configs. Output is stored on `forecast_marks` and `decision_trails.steps.forecast`. It does not size drafts or skip Approve.
 
 ### 3. Preference / UX
 

@@ -40,7 +40,9 @@ _SCHEMA = {
     "Purchase": '{"quiet":false,"limit":1,"reason":""}',
     "Strangle": '{"quiet":false,"expiry":"YYYY-MM-DD","put_strike":1,"put_limit":1,"call_strike":1,"call_limit":1,"reason":""}',
     "Consolidator": '{"thinking":"","drafts":[{"tactic":"BUY","limit":1,"reason":""}]}',
-    "Narrator": '{"open":true,"sentence":"","strike":null}',
+    "Narrator": '{"open":true,"sentence":"","counsel":"","strike":null}',
+    "ManageExplainer": '{"sentence":"","counsel":""}',
+    "AdvisorExplainer": '{"action":"hold","confidence":0.0,"reason":""}',
 }
 
 
@@ -85,6 +87,10 @@ def _matches(agent: str, payload: dict) -> bool:
         return _consolidator(payload)
     if agent == "Narrator":
         return _narrator(payload)
+    if agent == "ManageExplainer":
+        return _manage_explainer(payload)
+    if agent == "AdvisorExplainer":
+        return _advisor_explainer(payload)
     return False
 
 
@@ -112,11 +118,40 @@ def _narrator(payload: dict) -> bool:
         return False
     if not isinstance(payload.get("sentence"), str):
         return False
+    if "counsel" in payload and payload["counsel"] is not None and not isinstance(payload["counsel"], str):
+        return False
+    if "counsel" not in payload or payload["counsel"] is None:
+        payload["counsel"] = ""
     strike = payload.get("strike")
     if strike is None:
         return True
     number = _decimal(strike)
     return number is not None and number > 0
+
+
+def _manage_explainer(payload: dict) -> bool:
+    if not isinstance(payload.get("sentence"), str):
+        return False
+    if "counsel" in payload and payload["counsel"] is not None and not isinstance(payload["counsel"], str):
+        return False
+    if "counsel" not in payload or payload["counsel"] is None:
+        payload["counsel"] = ""
+    return True
+
+
+def _advisor_explainer(payload: dict) -> bool:
+    action = str(payload.get("action") or "").strip().lower()
+    if action not in {"hold", "take_profit", "trim", "close"}:
+        return False
+    payload["action"] = action
+    confidence = payload.get("confidence")
+    number = _decimal(confidence)
+    if number is None or number < 0 or number > 1:
+        return False
+    payload["confidence"] = float(number)
+    if not isinstance(payload.get("reason"), str):
+        return False
+    return True
 
 
 def _news(payload: dict) -> bool:

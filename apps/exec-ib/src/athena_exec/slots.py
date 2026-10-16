@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from athena_settings.model import IBSlots
 
 HKT = ZoneInfo("Asia/Hong_Kong")
+BERLIN = ZoneInfo("Europe/Berlin")
 
 # The US regular session leaves daylight time on Sunday 1 Nov 2026.
 # Friday 30 Oct still ends Saturday 31 Oct at 04:00. Monday 2 Nov is the first standard session.
@@ -13,12 +14,14 @@ US_STANDARD_FROM = date(2026, 11, 2)
 US_DAYLIGHT = (time(21, 30), time(4, 0))
 US_STANDARD = (time(22, 30), time(5, 0))
 HK_CASH = ((time(9, 30), time(12, 0)), (time(13, 0), time(16, 0)))
+# Xetra cash (Frankfurt). DST is handled by Europe/Berlin.
+DE_CASH = (time(9, 0), time(17, 30))
 
 
 def symbol_market(symbol: str, explicit: str = "") -> str:
-    """us, hk, or ca. A blank value treats a numeric code as Hong Kong and the rest as US."""
+    """us, hk, ca, or de. A blank value treats a numeric code as Hong Kong and the rest as US."""
     kind = (explicit or "").strip().lower()
-    if kind in {"us", "hk", "ca"}:
+    if kind in {"us", "hk", "ca", "de"}:
         return kind
     if str(symbol).strip().isdigit():
         return "hk"
@@ -29,12 +32,21 @@ def cash_open(symbol: str, now: datetime, market: str = "") -> bool:
     """True during that name's own cash session.
 
     Hong Kong is the weekday morning and afternoon sessions.
+    Germany (Xetra) is weekday 09:00–17:30 Europe/Berlin.
     US and Canada use the US cash leg, including the Friday overnight tail.
     """
+    kind = symbol_market(symbol, market)
+    if kind == "de":
+        local = now.astimezone(BERLIN)
+        if local.weekday() >= 5:
+            return False
+        clock = local.timetz().replace(tzinfo=None)
+        start, end = DE_CASH
+        return start <= clock < end
     local = now.astimezone(HKT)
     clock = local.timetz().replace(tzinfo=None)
     weekday = local.weekday()
-    if symbol_market(symbol, market) == "hk":
+    if kind == "hk":
         return any(covers(weekday, clock, start, end) for start, end in HK_CASH)
     window = US_STANDARD if local.date() >= US_STANDARD_FROM else US_DAYLIGHT
     return covers(weekday, clock, window[0], window[1])

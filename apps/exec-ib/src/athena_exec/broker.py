@@ -40,7 +40,7 @@ class BrokerPosition(NamedTuple):
     realized_pnl: Decimal | None = None
 
 
-DISPLAY_CURRENCIES = ("HKD", "USD", "AUD", "CNY", "JPY", "CAD")
+DISPLAY_CURRENCIES = ("HKD", "USD", "AUD", "CNY", "JPY", "CAD", "EUR")
 _FX_DENIED = {162, 354, 10089, 10186}
 
 
@@ -129,7 +129,7 @@ class IbBroker:
         kind = self._kind(symbol)
         log.warning(
             "unknown stock symbol=%s market=%s venue=%s/%s — "
-            "set Universe Market to us/hk/ca (CAD names need ca), or remove foreign listings Athena cannot route",
+            "set Universe Market to us/hk/ca/de (CAD=ca, Xetra=de), or remove listings Athena cannot route",
             key, kind, exchange, currency,
         )
 
@@ -418,7 +418,10 @@ class IbBroker:
             raise RuntimeError("placeOrder refused on a read-only session")
         from ib_insync import LimitOrder
 
-        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
+        kind = self._kind(symbol)
+        if kind == "de":
+            raise RuntimeError("European options are not supported; Athena routes Germany equities only")
+        currency = {"hk": "HKD", "ca": "CAD", "de": "EUR"}.get(kind, "USD")
         contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
         if not self._ib.qualifyContracts(contract):
             raise RuntimeError(f"IB did not find {symbol} {right} {strike} {expiry}")
@@ -439,6 +442,8 @@ class IbBroker:
 
     def option_chain(self, symbol: str):
         """Listed expiries, strikes, trading class, and exchange. Empty when none exist."""
+        if self._kind(symbol) == "de":
+            return None
         stock = self._qualify_stock(symbol)
         if stock is None:
             return None
@@ -454,7 +459,9 @@ class IbBroker:
             return []
         from ib_insync import Option
 
-        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
+        if self._kind(symbol) == "de":
+            return []
+        currency = {"hk": "HKD", "ca": "CAD", "de": "EUR"}.get(self._kind(symbol), "USD")
         contract = Option(
             symbol,
             expiry.strftime("%Y%m%d"),
@@ -478,7 +485,9 @@ class IbBroker:
         """Delayed ask and bid from one ticker. The bid is the positive bid only."""
         if self._ib is None:
             return None, None
-        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
+        if self._kind(symbol) == "de":
+            return None, None
+        currency = {"hk": "HKD", "ca": "CAD", "de": "EUR"}.get(self._kind(symbol), "USD")
         contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
         if not self._ib.qualifyContracts(contract):
             return None, None
@@ -527,7 +536,9 @@ class IbBroker:
         """Delayed (bid + ask) / 2. Missing either side writes nothing."""
         if self._ib is None:
             return None
-        currency = {"hk": "HKD", "ca": "CAD"}.get(self._kind(symbol), "USD")
+        if self._kind(symbol) == "de":
+            return None
+        currency = {"hk": "HKD", "ca": "CAD", "de": "EUR"}.get(self._kind(symbol), "USD")
         contract = _option(symbol, expiry, strike, right, trading_class, exchange, currency, multiplier)
         if not self._ib.qualifyContracts(contract):
             return None
@@ -982,9 +993,10 @@ def _candle(bar) -> dict:
 def stock_venue(symbol: str, market: str = "") -> tuple[str, str]:
     """Venue and currency for one listed name. A blank market infers Hong Kong from a numeric code.
 
-    Athena markets are us / hk / ca only. Letter tickers default to us (SMART/USD).
+    Athena markets are us / hk / ca / de. Letter tickers default to us (SMART/USD).
     Canadian listings must set Universe Market = ca (SMART/CAD, primary TSE).
-    European listings (e.g. IFX on Xetra) are not routed — use a US ADR or remove them.
+    German listings (e.g. IFX on Xetra) must set Universe Market = de (SMART/EUR, primary IBIS).
+    European options are not routed.
     """
     from athena_exec.slots import symbol_market
 
@@ -993,11 +1005,13 @@ def stock_venue(symbol: str, market: str = "") -> tuple[str, str]:
         return "SEHK", "HKD"
     if kind == "ca":
         return "SMART", "CAD"
+    if kind == "de":
+        return "SMART", "EUR"
     return "SMART", "USD"
 
 
 def stock_contract(symbol: str, market: str = ""):
-    """ib_insync Stock for Athena's us / hk / ca venues."""
+    """ib_insync Stock for Athena's us / hk / ca / de venues."""
     from ib_insync import Stock
     from athena_exec.slots import symbol_market
 
@@ -1008,6 +1022,9 @@ def stock_contract(symbol: str, market: str = ""):
     if kind == "ca":
         # TSE primary disambiguates SMART CAD names for IB.
         return Stock(code, "SMART", "CAD", primaryExchange="TSE")
+    if kind == "de":
+        # IBIS primary disambiguates SMART EUR names (Xetra) for IB.
+        return Stock(code, "SMART", "EUR", primaryExchange="IBIS")
     return Stock(code, "SMART", "USD")
 
 
@@ -1033,6 +1050,13 @@ def quote_fields(kind: str, symbol: str) -> dict | str:
             "kind": "hk", "symbol": code, "show": code, "label": "HK stock",
             "exchange": "SEHK", "currency": "HKD", "sec": "STK",
         }
+    if kind == "de":
+        if not raw.isalpha():
+            return "Use letters, such as IFX."
+        return {
+            "kind": "de", "symbol": raw, "show": raw, "label": "DE stock",
+            "exchange": "SMART", "currency": "EUR", "sec": "STK", "primary": "IBIS",
+        }
     if kind == "fx":
         pair = raw.replace("/", "")
         if len(pair) != 6 or not pair.isalpha():
@@ -1051,6 +1075,9 @@ def _quote_contract(fields: dict):
         return Forex(fields["symbol"])
     from ib_insync import Stock
 
+    primary = fields.get("primary") or ""
+    if primary:
+        return Stock(fields["symbol"], fields["exchange"], fields["currency"], primaryExchange=primary)
     return Stock(fields["symbol"], fields["exchange"], fields["currency"])
 
 

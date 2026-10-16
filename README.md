@@ -152,6 +152,9 @@ and rows stay frozen on the last stored print.
 | **US equity options** | **OPRA** (US Options Exchanges Top of Book), usually in the same US equity+options add-on | Option chain asks, CSP/CC limit marks, option quotes |
 | **Hong Kong stocks** (SEHK / HKD digit codes) | **Hong Kong Securities Exchange (Stocks, Warrants & CBBCs)** Level I | Streaming quotes for HK names (`700`, `1810`, …) |
 | **Canada stocks** (if used) | **Toronto Stock Exchange (TSX)** Level I | CAD SMART names |
+| **Germany stocks** (Universe Market `de`, e.g. IFX) | **Xetra / Germany** equity Level I (IBIS) — or the European equities bundle that includes Germany | Streaming/delayed last for Xetra names; history for indicators |
+
+European **options** (EUREX) are **not** supported. Set Universe Market to **DE** for German equities (SMART/EUR, primary IBIS). Without the Germany equity package, IB returns permission errors and IFX-style names stay on the last stored print (or empty).
 
 **Historical daily bars (HMDS)** — Athena also pulls IB history for indicators and
 backfill. History often works with the same equity entitlements; if you see
@@ -165,6 +168,7 @@ not cover every permission).
 |------|-------------|
 | US NFR book (stocks + short options) | US equity Network A/B/C **and** OPRA (or one US equity+options streaming add-on) |
 | HK + US book | Above **plus** Hong Kong Securities Exchange Level I |
+| Germany equity (IFX, stocks only) | Above **plus** Germany / Xetra Level I; leave options tactics off for those names |
 | Quotes “good enough” without paying | IB free **delayed** data where available — cockpit still updates, but prints lag (~10–15 minutes on US). Athena is built around that delayed path today. |
 | Non-IB live prints | Optional `ITICK_API_KEY` — does not replace IB for chains, history, or orders |
 

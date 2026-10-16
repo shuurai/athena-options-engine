@@ -197,8 +197,10 @@ def build(conn, path: str, query: dict) -> dict | None:
         "/positions": _positions_page,
         "/orders": _orders_page,
         "/book": _book_page,
+        "/portfolio-analysis": _portfolio_analysis_page,
         "/accounts": _accounts,
         "/risk": _risk,
+        "/prediction": _prediction_page,
         "/settings": _settings,
         "/skill": _skill,
     }
@@ -222,6 +224,8 @@ def submit(conn, path: str, form: dict, actor: str, allowlist: set[str]) -> dict
         return _post_risk(conn, account, form, actor)
     if path == "/settings":
         return _post_settings(conn, account, form, actor)
+    if path == "/prediction":
+        return _post_prediction(conn, account, form, actor)
     if path == "/accounts":
         return _post_accounts(conn, account, form, actor)
     return None
@@ -499,6 +503,7 @@ def _draft_card(conn, account: str, row, hot: bool) -> str:
         badges += '<span class="tag green">MGMT</span>'
     badges += _phase_badge(phase)
     badges += "".join(_driver_tag(item) for item in tags)
+    badges += _draft_moneyness_badge(conn, symbol, put_strike, call_strike)
     link = _live_link(conn, draft_id)
     link_html = f'<a class="btn primary" href="{escape(link, quote=True)}">Open control link</a>' if link else ""
     view = amend_view(conn, draft_id)
@@ -521,8 +526,9 @@ def _draft_card(conn, account: str, row, hot: bool) -> str:
         f'<span class="mono draft-id">{escape(draft_id)} · expires {left}m</span></div>'
         f'<div class="draft-title">{_draft_title(symbol, tactic, put_strike, call_strike, expiry)}</div>'
         f'<div class="draft-sub">{_draft_sub(conn, symbol, contracts, expiry, put_limit, call_limit, limit_price, settings)}</div>'
-        f'<div class="field"><div class="k">Reason</div><div class="v">{escape(reason) or "—"}</div></div>'
-        f'<div class="field"><div class="k">Risk</div><div class="v">{_draft_risk(conn, account, symbol, int(contracts), expiry, tactic, settings, multiplier or "100")}</div></div>'
+        f'<div class="field"><div class="k">Reason</div>'
+        f'<div class="v" style="white-space:pre-wrap">{escape(reason) or "—"}</div></div>'
+        f'<div class="field"><div class="k">Risk</div><div class="v">{_draft_risk(conn, account, symbol, int(contracts), expiry, tactic, settings, multiplier or "100", put_strike, call_strike)}</div></div>'
         '<div class="row-actions" style="margin-top:14px">'
         f'<form method="post" action="/drafts" data-confirm="Approve {escape(symbol, quote=True)} {escape(tactic, quote=True)}?">'
         f'<input type="hidden" name="draft_id" value="{escape(draft_id, quote=True)}">'
@@ -589,10 +595,69 @@ def _draft_limit(put_limit, call_limit, limit_price) -> str:
     return ""
 
 
-def _draft_risk(conn, account: str, symbol: str, contracts: int, expiry, tactic: str, settings, multiplier: str = "100") -> str:
+def _draft_moneyness_badge(conn, symbol: str, put_strike, call_strike) -> str:
+    from athena_strategy.draft_facts import moneyness
+    from athena_strategy.drafts import last_tradeable_price
+
+    strike = put_strike if put_strike is not None else call_strike
+    right = "P" if put_strike is not None else ("C" if call_strike is not None else "")
+    if strike is None or not right:
+        return ""
+    spot = last_tradeable_price(conn, symbol)
+    label = moneyness(spot, Decimal(strike), right)
+    return _moneyness_tag(label)
+
+
+def _moneyness_tag(label: str | None) -> str:
+    if not label:
+        return ""
+    color = {"ITM": "amber", "OTM": "green", "ATM": "teal"}.get(label, "")
+    klass = f"tag {color}".strip()
+    return f'<span class="{klass}">{escape(label)}</span>'
+
+
+def _draft_assignment_risk(conn, symbol: str, expiry, put_strike, call_strike) -> str:
+    from athena_strategy.draft_facts import build_fact_lines
+    from athena_strategy.drafts import last_tradeable_price
+
+    strike = put_strike if put_strike is not None else call_strike
+    right = "P" if put_strike is not None else ("C" if call_strike is not None else "")
+    if strike is None or not right:
+        return ""
+    spot = last_tradeable_price(conn, symbol)
+    today = datetime.now(HKT).date()
+    lines = build_fact_lines(
+        symbol=symbol,
+        tactic="",
+        spot=spot,
+        strike=Decimal(strike),
+        right=right,
+        expiry=expiry if isinstance(expiry, date) else None,
+        today=today,
+    )
+    # Keep moneyness + assignment lines (skip empty ticket line).
+    kept = [line for line in lines if not line.startswith("Ticket ")]
+    return " ".join(kept[:3])
+
+
+def _draft_risk(
+    conn,
+    account: str,
+    symbol: str,
+    contracts: int,
+    expiry,
+    tactic: str,
+    settings,
+    multiplier: str = "100",
+    put_strike=None,
+    call_strike=None,
+) -> str:
     opening = tactic.startswith("OPEN_")
     limits = settings.risk
     badges = []
+    assignment = ""
+    if tactic in {"CLOSE", "ROLL"} or (opening and (put_strike is not None or call_strike is not None)):
+        assignment = _draft_assignment_risk(conn, symbol, expiry, put_strike, call_strike)
     if opening:
         nav = conn.execute(
             "SELECT last_nav FROM nav_marks WHERE account_id = %s ORDER BY day DESC LIMIT 1",
@@ -655,9 +720,14 @@ def _draft_risk(conn, account: str, symbol: str, contracts: int, expiry, tactic:
                 allowed = allowed_open(limits, unit, Decimal(1), existing)
                 if contracts > allowed:
                     badges.append(("POSITION", "red"))
-    if not badges:
+    parts = []
+    if badges:
+        parts.append("".join(f'<span class="tag {color}">{escape(text)}</span>' for text, color in badges))
+    if assignment:
+        parts.append(f'<div style="white-space:pre-wrap;margin-top:6px">{escape(assignment)}</div>')
+    if not parts:
         return "—"
-    return "".join(f'<span class="tag {color}">{escape(text)}</span>' for text, color in badges)
+    return "".join(parts)
 
 
 def _draft_banner(conn, account: str) -> str:
@@ -1509,6 +1579,186 @@ def _position_heatmap(rows: list[dict], intents: dict[str, str]) -> str:
     )
 
 
+def _portfolio_analysis_page(conn, account: str, query: dict) -> dict:
+    if not account:
+        return _html("Portfolio Analysis", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
+    settings = load_active(conn, account)
+    rows = _position_rows(conn, account)
+    from athena_strategy.advisor import today_signals
+
+    day = datetime.now(HKT).date()
+    signals = today_signals(conn, account, day)
+    report = _advisor_report(conn, account, settings, rows, signals, day)
+    actions = _advisor_actions_table(conn, account, settings, rows, signals, day)
+    body = (
+        '<div class="settings-cols analysis">'
+        f'<div class="settings-col">{report}</div>'
+        f'<div class="settings-col">{actions}</div>'
+        "</div>"
+    )
+    enabled = settings.advisor.enabled
+    chips = [("info", "ADVISORY" if enabled else "ADVISOR OFF")]
+    return _html(
+        "Portfolio Analysis",
+        "Advisor verdicts against your thesis and market guidance. Drafts stay pending until you Approve.",
+        body,
+        chips,
+    )
+
+
+def _advisor_report(conn, account, settings, rows, signals, day) -> str:
+    adv = settings.advisor
+    if not adv.enabled:
+        return (
+            '<div class="card fill"><h2>Advisor report</h2><div class="scroll-y">'
+            "<p>Advisor is off. Turn it on in Settings → Advisor.</p>"
+            "</div></div>"
+        )
+    acts = [s for s in signals.values() if s.get("action") in {"take_profit", "trim", "close"}]
+    high = max((float(s.get("confidence") or 0.0) for s in acts), default=0.0)
+    tone = "red" if high >= adv.close_conf_threshold else ("amber" if high >= adv.trim_conf_threshold else "green")
+    label = "RISK OFF" if tone == "red" else ("CAUTION" if tone == "amber" else "RISK ON")
+    themes: dict[str, dict] = {}
+    semi = {"NVDA", "AVGO", "MRVL", "MU", "TSM", "AMD", "SOXX", "QQQ"}
+    for row in rows:
+        symbol = row["symbol"]
+        signal = signals.get(symbol) or {}
+        theme = "Semiconductor/AI" if symbol in semi else "Other"
+        entry = themes.setdefault(theme, {"symbols": 0, "actions": 0, "max_conf": 0.0})
+        entry["symbols"] += 1
+        if signal.get("action") in {"take_profit", "trim", "close"}:
+            entry["actions"] += 1
+        entry["max_conf"] = max(entry["max_conf"], float(signal.get("confidence") or 0.0))
+    theme_rows = []
+    for theme, entry in themes.items():
+        theme_tone = "red" if entry["max_conf"] >= adv.close_conf_threshold else ("amber" if entry["max_conf"] >= adv.trim_conf_threshold else "green")
+        theme_rows.append(
+            f'<tr><td>{escape(theme)}</td><td class="mono">{entry["symbols"]}</td>'
+            f'<td class="mono">{entry["actions"]}</td>'
+            f'<td><span class="tag {theme_tone}">{entry["max_conf"]:.2f}</span></td></tr>'
+        )
+    theme_html = "".join(theme_rows) or '<tr><td colspan="4">No positions.</td></tr>'
+    return (
+        '<div class="card fill"><h2>Advisor report</h2><div class="scroll-y">'
+        f'<p><span class="tag {tone}">{escape(label)}</span> '
+        f'<span class="mono">max conf {high:.2f}</span></p>'
+        f'<p>Guidance: {escape(", ".join(adv.guidance_symbols) or "none configured")}</p>'
+        f'<table class="data"><thead><tr><th>Theme</th><th>Positions</th><th>Actions</th><th>Max conf</th></tr></thead><tbody>{theme_html}</tbody></table>'
+        "</div></div>"
+    )
+
+
+def _pending_drafts(conn, account: str) -> list[dict]:
+    found = conn.execute(
+        """
+        SELECT id, symbol, tactic, reason
+        FROM drafts
+        WHERE account_id = %s AND status = 'pending'
+        ORDER BY created_at DESC
+        """,
+        (account,),
+    ).fetchall()
+    return [
+        {"id": row[0], "symbol": row[1], "tactic": row[2], "reason": row[3] or ""}
+        for row in found
+    ]
+
+
+def _draft_links(drafts: list[dict]) -> str:
+    if not drafts:
+        return ""
+    return " ".join(
+        f'<a href="/drafts">{escape(item["id"])}</a>'
+        for item in drafts
+    )
+
+
+def _advisor_actions_table(conn, account, settings, rows, signals, day) -> str:
+    del settings, day
+    pending = _pending_drafts(conn, account)
+    by_symbol: dict[str, list[dict]] = {}
+    for draft in pending:
+        by_symbol.setdefault(draft["symbol"], []).append(draft)
+    lines = []
+    held = set()
+    for row in rows:
+        symbol = row["symbol"]
+        signal = signals.get(symbol) or {}
+        action = signal.get("action") or "hold"
+        confidence = float(signal.get("confidence") or 0.0)
+        reason = signal.get("reason") or "—"
+        urgency = {"close": 0, "take_profit": 1, "trim": 2, "hold": 3}.get(action, 4)
+        captured = ""
+        if row["sec_type"] == "OPT" and row["qty"] < 0:
+            mark = _decimal_or_none(row.get("mark"))
+            if mark is not None and row["avg"] > 0:
+                from athena_strategy.draft_facts import premium_captured_pct
+                pct = premium_captured_pct(row["avg"], mark)
+                captured = f"{pct:.0f}%" if pct is not None else ""
+        kind = "stock" if row["sec_type"] == "STK" else ("put" if row["right"] == "P" else "call")
+        held.add(symbol)
+        lines.append({
+            "symbol": symbol,
+            "kind": kind,
+            "moneyness": row.get("moneyness") or "",
+            "dte": row.get("dte") or "",
+            "captured": captured,
+            "action": action,
+            "confidence": confidence,
+            "reason": reason,
+            "urgency": urgency,
+            "drafts": by_symbol.get(symbol, []),
+        })
+    for draft in pending:
+        if draft["tactic"] not in {"BUY", "OPEN_CSP"} or draft["symbol"] in held:
+            continue
+        lines.append({
+            "symbol": draft["symbol"],
+            "kind": "buy" if draft["tactic"] == "BUY" else "csp",
+            "moneyness": "",
+            "dte": "",
+            "captured": "",
+            "action": "buy" if draft["tactic"] == "BUY" else "long",
+            "confidence": 0.0,
+            "reason": draft["reason"] or draft["tactic"],
+            "urgency": 5,
+            "drafts": [draft],
+        })
+        held.add(draft["symbol"])
+    lines.sort(key=lambda item: (item["urgency"], -float(item["captured"].rstrip("%") or 0)))
+    body_rows = []
+    for item in lines:
+        tone = {"close": "red", "take_profit": "amber", "trim": "amber", "hold": "green", "buy": "teal", "long": "teal"}.get(item["action"], "")
+        body_rows.append(
+            f'<tr><td><b><a href="/positions">{escape(item["symbol"])}</a></b></td>'
+            f'<td>{escape(item["kind"])}</td>'
+            f'<td>{escape(item["moneyness"])}</td>'
+            f'<td class="mono">{escape(item["dte"])}</td>'
+            f'<td class="mono">{escape(item["captured"])}</td>'
+            f'<td><span class="tag {tone}">{escape(item["action"])}</span></td>'
+            f'<td class="mono">{item["confidence"]:.2f}</td>'
+            f'<td class="mono">{_draft_links(item["drafts"])}</td>'
+            f'<td style="white-space:pre-wrap">{escape(item["reason"])}</td></tr>'
+        )
+    html = "".join(body_rows) or '<tr><td colspan="9">No positions.</td></tr>'
+    return (
+        '<div class="card fill"><h2>Advisor actions</h2><div class="scroll-y">'
+        '<table class="data"><thead><tr>'
+        "<th>Symbol</th><th>Kind</th><th>Money</th><th>DTE</th><th>Captured</th><th>Action</th><th>Conf</th><th>Draft</th><th>Reason</th>"
+        f"</tr></thead><tbody>{html}</tbody></table>"
+        "</div></div>"
+    )
+
+
+def _decimal_or_none(value):
+    if not value:
+        return None
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, ValueError):
+        return None
+
+
 def _positions_page(conn, account: str, query: dict) -> dict:
     kind = (query.get("kind") or ["all"])[0]
     if kind not in {"all", "stock", "option"}:
@@ -1628,6 +1878,13 @@ def _position_rows(conn, account: str) -> list[dict]:
         elif pnl is None and price is not None:
             pnl = (price - average) * qty * mult
         dte = "" if expiry is None else str((expiry - today).days)
+        money = ""
+        if sec == "OPT" and strike is not None and right:
+            from athena_strategy.draft_facts import moneyness as moneyness_of
+
+            if symbol not in closes:
+                closes[symbol] = last_tradeable_price(conn, symbol)
+            money = moneyness_of(closes[symbol], Decimal(strike), right) or ""
         rows.append({
             "symbol": symbol,
             "qty": qty,
@@ -1637,6 +1894,7 @@ def _position_rows(conn, account: str) -> list[dict]:
             "expiry": "" if expiry is None else expiry.isoformat(),
             "dte": dte,
             "strike": "" if strike is None else _plain_number(strike),
+            "moneyness": money,
             "mark": "" if price is None else f"{price:,.2f}",
             "day_change": day_change,
             "day_tone": day_tone,
@@ -2070,7 +2328,9 @@ def _position_tr(row: dict) -> str:
         + (' <span class="tag amber">SIM</span>' if row.get("simulated") else "")
         + (f'<div class="sym-name">{escape(row["currency"])}</div>' if row["currency"] else "")
         + "</td>"
-        f'<td><span class="tag {type_tag}">{escape(kind)}</span></td>'
+        f'<td><span class="tag {type_tag}">{escape(kind)}</span>'
+        + _moneyness_tag(row.get("moneyness") or None)
+        + "</td>"
         f'<td><span class="tag {side_tag}">{side}</span></td>'
         f'<td class="mono">{escape(qty)}</td>'
         f'<td class="mono">{escape(average)}</td>'
@@ -2625,14 +2885,60 @@ def _risk(conn, account: str, query: dict, note: str = "") -> dict:
     )
 
 
+def _advisor_card(current) -> str:
+    adv = current.advisor
+    symbols = ", ".join(adv.guidance_symbols)
+    return (
+        '<div class="card fill"><h2>Advisor</h2><div class="scroll-y">'
+        '<p class="card-lead">Take-profit and trim signals for the book. Drafts stay pending until you Approve.</p>'
+        f"{_switch('Enabled', 'advisor_enabled', adv.enabled, 'When on, each cycle writes an advisor signal for every held symbol.')}"
+        f"{_field('Guidance symbols', 'Comma-separated symbols the advisor reads as market guidance.', f'<input class=\"input\" name=\"guidance_symbols\" value=\"{escape(symbols)}\" placeholder=\"QQQ, NVDA, SOXX\">')}"
+        f"{_limit('Close confidence', 'advisor_close_conf', adv.close_conf_threshold, 'A signal at or above this can stage a close.', '0.01')}"
+        f"{_limit('Trim confidence', 'advisor_trim_conf', adv.trim_conf_threshold, 'A signal at or above this can stage a trim, or a take-profit close.', '0.01')}"
+        f"{_limit('Max confidence', 'advisor_max_conf', adv.max_conf, 'Confidence is capped at this value.', '0.01')}"
+        f"{_limit('Profit-take relief', 'advisor_relief', adv.profit_take_relief_pct, 'Points subtracted from the short-option profit-take threshold when the advisor acts. The threshold does not go below 20.')}"
+        "</div></div>"
+    )
+
+
+def _posted_advisor(form: dict, relief: int) -> tuple[dict, str]:
+    try:
+        close_conf = float((form.get("advisor_close_conf") or [""])[0])
+        trim_conf = float((form.get("advisor_trim_conf") or [""])[0])
+        max_conf = float((form.get("advisor_max_conf") or [""])[0])
+    except ValueError:
+        return {}, "Advisor confidence must be a number."
+    for label, value in (("Close confidence", close_conf), ("Trim confidence", trim_conf), ("Max confidence", max_conf)):
+        if not 0 <= value <= 1:
+            return {}, f"{label} must be 0 to 1."
+    if not trim_conf <= close_conf <= max_conf:
+        return {}, "Trim confidence must be at or below close confidence, and close confidence at or below max confidence."
+    symbols: list[str] = []
+    raw = (form.get("guidance_symbols") or [""])[0]
+    for part in raw.replace(";", ",").split(","):
+        symbol = part.strip().upper()
+        if not symbol:
+            continue
+        if not symbol.isalnum() or len(symbol) > 12:
+            return {}, "Guidance symbols must be ticker letters and numbers."
+        if symbol not in symbols:
+            symbols.append(symbol)
+    return {
+        "enabled": _checked(form, "advisor_enabled"),
+        "guidance_symbols": symbols,
+        "close_conf_threshold": close_conf,
+        "trim_conf_threshold": trim_conf,
+        "profit_take_relief_pct": relief,
+        "max_conf": max_conf,
+    }, ""
+
+
 def _settings(conn, account: str, query: dict, note: str = "") -> dict:
     if not account:
         return _html("Settings", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
     current = load_active(conn, account)
     news = current.news
     mode = trading_mode().upper()
-    pred = current.prediction
-    stop_text = ", ".join(pred.stop)
     dsh_ready = bool(os.environ.get("DSH_BIN", "").strip())
     token_ready = bool(bot_token(current))
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
@@ -2665,26 +2971,20 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         "</div></div></div></div>"
         '<div class="settings-col">'
         f"{_sim_card(conn, current)}"
-        '<div class="card"><h2>Market data</h2><div class="scroll-y">'
+        '<div class="card fill"><h2>Market data</h2><div class="scroll-y">'
         '<p class="card-lead">iTick for live quotes. IB is used for history and orders inside Athena slots.</p>'
         f"{_field('iTick URL', 'Base URL for live quotes.', f'<input class=\"input\" name=\"itick_url\" required value=\"{escape(current.itick.base_url)}\">')}"
         f'<div class="settings-field">{_masked_secret("itick_key", itick_key(current), "iTick API token")}</div>'
         '<button class="btn" type="submit" name="action" value="clear-itick" data-explicit>Clear token</button>'
         f"{_row('Watchlist', _tag(str(len(current.watchlist))), 'How many symbols the universe is watching.')}</div></div>"
-        '<div class="card fill prediction-card"><h2>Prediction</h2><div class="scroll-y">'
-        '<p class="card-lead">OpenAI-protocol short-horizon forecast. Advisory only. Off unless you turn it on. Prompts are on Orchestration.</p>'
-        f"{_switch('Enabled', 'prediction_enabled', pred.enabled, 'When on, the cycle may call the forecast endpoint and store a shadow signal. Never sizes or Approves.')}"
-        f"{_field('API URL', 'OpenAI root ending in /v1. Athena posts to /chat/completions.', f'<input class=\"input\" name=\"prediction_url\" value=\"{escape(pred.base_url)}\">')}"
-        f"{_field('Model', 'Model id sent with each forecast call.', f'<input class=\"input\" name=\"prediction_model\" value=\"{escape(pred.model)}\">')}"
-        f'<div class="settings-field">{_masked_secret("prediction_token", prediction_token(current), "Prediction API token")}</div>'
-        '<button class="btn" type="submit" name="action" value="clear-prediction" data-explicit>Clear token</button>'
-        f"{_limit('Max tokens', 'prediction_max_tokens', pred.max_tokens, 'Completion budget for one forecast reply.')}"
-        f"{_field('Temperature', '0 is deterministic. Keep low for calibrated prices.', f'<input class=\"input\" name=\"prediction_temperature\" value=\"{escape(str(pred.temperature))}\">')}"
-        f"{_limit('Timeout seconds', 'prediction_timeout', pred.timeout_seconds, 'HTTP wait for one forecast call.')}"
-        f"{_field('Stop lines', 'Comma-separated generation stop sequences. Empty means none.', f'<input class=\"input\" name=\"prediction_stop\" value=\"{escape(stop_text)}\" placeholder=\"</json>, END\">')}"
-        f"{_switch('Reasoning', 'prediction_reasoning', pred.reasoning, 'When on, send a medium reasoning / thinking flag if the server supports it.')}"
-        f"{_row('Horizons', _tag('1, 3, 5'), 'Sessions locked for v1. Edit the Prediction prompt on Orchestration.')}"
-        "</div></div></div>"
+        f"{_advisor_card(current)}"
+        '<div class="card fill"><h2>Notify</h2><div class="scroll-y">'
+        f"{_limit('Draft TTL minutes', 'draft_ttl', current.notify.draft_ttl_minutes, 'How long a pending draft and its control link stay open.')}"
+        f"{_telegram_block(current, token_ready)}"
+        f"{_row('Bot token', _tag('SET', 'green') if token_ready else _tag('EMPTY'), 'Whether a Telegram bot token is stored or inherited.')}"
+        f"{_field('Bot username', 'Telegram bot name without the @. Used to build the link.', f'<input class=\"input\" name=\"bot_username\" value=\"{escape(bot_username(current))}\" placeholder=\"athena_hk_bot\">')}"
+        f"{_field('Bot token', 'Leave blank to keep the current bot token. Clear bot token removes it.', '<input class=\"input\" name=\"bot_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
+        '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div></div>'
         '<div class="settings-col">'
         f"{_developer_card(current)}"
         '<div class="card fill"><h2>News</h2><div class="scroll-y">'
@@ -2696,13 +2996,6 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Poll seconds', 'poll_seconds', news.poll_seconds, 'How often the news sources are checked.')}"
         f"{_limit('Wash count', 'wash_min_negative', news.wash_min_negative, 'How many negative headlines count as a wash.')}"
         f"{_limit('Wash window days', 'wash_window_days', news.wash_window_days, 'Those headlines must fall inside this many days.')}</div></div>"
-        '<div class="card fill"><h2>Notify</h2><div class="scroll-y">'
-        f"{_limit('Draft TTL minutes', 'draft_ttl', current.notify.draft_ttl_minutes, 'How long a pending draft and its control link stay open.')}"
-        f"{_telegram_block(current, token_ready)}"
-        f"{_row('Bot token', _tag('SET', 'green') if token_ready else _tag('EMPTY'), 'Whether a Telegram bot token is stored or inherited.')}"
-        f"{_field('Bot username', 'Telegram bot name without the @. Used to build the link.', f'<input class=\"input\" name=\"bot_username\" value=\"{escape(bot_username(current))}\" placeholder=\"athena_hk_bot\">')}"
-        f"{_field('Bot token', 'Leave blank to keep the current bot token. Clear bot token removes it.', '<input class=\"input\" name=\"bot_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
-        '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div>'
         "</div></div>"
         "</form>"
     )
@@ -2711,6 +3004,46 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         "Changes save on their own. A blank secret keeps the current one.",
         body,
         [],
+    )
+
+
+def _prediction_page(conn, account: str, query: dict, note: str = "") -> dict:
+    if not account:
+        return _html("Prediction", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
+    current = load_active(conn, account)
+    pred = current.prediction
+    stop_text = ", ".join(pred.stop)
+    prompts = resolved_agents(current)
+    note_html = f'<p class="note">{escape(note)}</p>' if note else ""
+    body = (
+        f"{note_html}"
+        '<div class="settings-cols three">'
+        '<div class="settings-col">'
+        '<form id="prediction-form" method="post" action="/prediction" class="fill">'
+        '<button type="submit" hidden></button>'
+        '<div class="card fill prediction-card"><h2>Model Configuration</h2><div class="scroll-y">'
+        '<p class="card-lead">OpenAI-protocol short-horizon forecast. Advisory only. Off unless you turn it on.</p>'
+        f"{_switch('Enabled', 'prediction_enabled', pred.enabled, 'When on, the cycle may call the forecast endpoint and store a shadow signal. Never sizes or Approves.')}"
+        f"{_field('API URL', 'OpenAI root ending in /v1. Athena posts to /chat/completions.', f'<input class=\"input\" name=\"prediction_url\" value=\"{escape(pred.base_url)}\">')}"
+        f"{_field('Model', 'Model id sent with each forecast call.', f'<input class=\"input\" name=\"prediction_model\" value=\"{escape(pred.model)}\">')}"
+        f'<div class="settings-field">{_masked_secret("prediction_token", prediction_token(current), "Prediction API token")}</div>'
+        '<button class="btn" type="submit" name="action" value="clear-prediction" data-explicit>Clear token</button>'
+        f"{_limit('Max tokens', 'prediction_max_tokens', pred.max_tokens, 'Completion budget for one forecast reply.')}"
+        f"{_field('Temperature', '0 is deterministic. Keep low for calibrated prices.', f'<input class=\"input\" name=\"prediction_temperature\" value=\"{escape(str(pred.temperature))}\">')}"
+        f"{_limit('Timeout seconds', 'prediction_timeout', pred.timeout_seconds, 'HTTP wait for one forecast call.')}"
+        f"{_field('Stop lines', 'Comma-separated generation stop sequences. Empty means none.', f'<input class=\"input\" name=\"prediction_stop\" value=\"{escape(stop_text)}\" placeholder=\"</json>, END\">')}"
+        f"{_switch('Reasoning', 'prediction_reasoning', pred.reasoning, 'When on, send a medium reasoning / thinking flag if the server supports it.')}"
+        f"{_horizon_chips(pred.horizons)}"
+        "</div></div></form></div>"
+        f'<div class="settings-col">{_prediction_prompt_card(prompts[PREDICTION_NAME])}</div>'
+        f'<div class="settings-col">{_prediction_logs_card()}</div>'
+        "</div>"
+    )
+    return _html(
+        "Prediction",
+        "Connection and prompts for the advisory short-horizon forecast. Off unless Enabled is on.",
+        body,
+        [("info", "ADVISORY")],
     )
 
 
@@ -2886,7 +3219,7 @@ def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
             return fail(f"{symbol} is already in the pool.")
         payload.watchlist.append(symbol)
         kind = (form.get("market") or [""])[0].strip().lower()
-        if kind not in {"us", "hk", "ca"}:
+        if kind not in {"us", "hk", "ca", "de"}:
             from athena_exec.slots import symbol_market
 
             kind = symbol_market(symbol)
@@ -2911,7 +3244,7 @@ def _post_universe(conn, account: str, form: dict, actor: str) -> dict:
         removed = False
     elif action == "market":
         market = (form.get("market") or [""])[0].strip().lower()
-        if market not in {"us", "hk", "ca"}:
+        if market not in {"us", "hk", "ca", "de"}:
             return fail("Market must be US, HK, or CA.")
         flags = payload.tactic_flags.get(symbol, TacticFlags())
         payload.tactic_flags[symbol] = flags.model_copy(update={"market": market})
@@ -3130,9 +3463,6 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     if action == "clear-itick":
         payload.itick = payload.itick.model_copy(update={"api_key": ""})
         return _save_live(conn, account, payload, actor, "cleared itick token")
-    if action == "clear-prediction":
-        payload.prediction = payload.prediction.model_copy(update={"api_token": ""})
-        return _save_live(conn, account, payload, actor, "cleared prediction token")
     if action == "clear-bot":
         payload.notify = payload.notify.model_copy(update={"bot_token": ""})
         return _save_live(conn, account, payload, actor, "cleared bot token")
@@ -3148,8 +3478,7 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         "poll_seconds": (15, 600),
         "draft_ttl": (15, 240),
         "cycle_minutes": (1, 60),
-        "prediction_max_tokens": (64, 16384),
-        "prediction_timeout": (5, 300),
+        "advisor_relief": (0, 80),
     }
     try:
         numbers = {key: int((form.get(key) or [""])[0]) for key in ranges}
@@ -3191,35 +3520,6 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         if "•" not in posted_token:
             ai_update[field] = posted_token
     payload.ai = payload.ai.model_copy(update=ai_update)
-    prediction_url = (form.get("prediction_url") or [payload.prediction.base_url])[0].strip()
-    prediction_model = (form.get("prediction_model") or [payload.prediction.model])[0].strip()
-    if prediction_url and not prediction_url.startswith("http"):
-        return _settings(conn, account, {}, "Prediction URL must start with http.") | {"status": 400}
-    if not prediction_model or any(char in prediction_model for char in "\n\r "):
-        return _settings(conn, account, {}, "Prediction model name is required.") | {"status": 400}
-    try:
-        prediction_temperature = float((form.get("prediction_temperature") or [str(payload.prediction.temperature)])[0])
-    except ValueError:
-        return _settings(conn, account, {}, "Prediction temperature must be a number.") | {"status": 400}
-    if not 0 <= prediction_temperature <= 2:
-        return _settings(conn, account, {}, "Prediction temperature must be 0 to 2.") | {"status": 400}
-    stop_raw = (form.get("prediction_stop") or [""])[0]
-    stop_lines = [part.strip() for part in stop_raw.split(",") if part.strip()]
-    prediction_update = {
-        "enabled": _checked(form, "prediction_enabled"),
-        "base_url": prediction_url or payload.prediction.base_url,
-        "model": prediction_model,
-        "max_tokens": numbers["prediction_max_tokens"],
-        "timeout_seconds": numbers["prediction_timeout"],
-        "temperature": prediction_temperature,
-        "stop": stop_lines,
-        "reasoning": _checked(form, "prediction_reasoning"),
-        "horizons": [1, 3, 5],
-    }
-    posted_prediction = (form.get("prediction_token") or [""])[0].strip()
-    if posted_prediction and "•" not in posted_prediction:
-        prediction_update["api_token"] = posted_prediction
-    payload.prediction = payload.prediction.model_copy(update=prediction_update)
     payload.news = payload.news.model_copy(
         update={
             "yahoo": _checked(form, "yahoo"),
@@ -3233,6 +3533,10 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
         }
     )
     payload.notify = payload.notify.model_copy(update=notify_update)
+    advisor_update, advisor_error = _posted_advisor(form, numbers["advisor_relief"])
+    if advisor_error:
+        return _settings(conn, account, {}, advisor_error) | {"status": 400}
+    payload.advisor = payload.advisor.model_copy(update=advisor_update)
     raw_lines = (form.get("concurrent_subscriptions") or [""])[0].strip()
     if raw_lines:
         try:
@@ -3253,11 +3557,85 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     return _save_live(conn, account, payload, actor, "saved settings")
 
 
+def _post_prediction(conn, account: str, form: dict, actor: str) -> dict:
+    if not account:
+        return _prediction_page(conn, account, {}, "No account is configured.") | {"status": 400}
+    current = load_active(conn, account)
+    payload = SettingsPayload.model_validate(current.model_dump())
+    action = (form.get("action") or [""])[0]
+    if action == "clear-prediction":
+        payload.prediction = payload.prediction.model_copy(update={"api_token": ""})
+        return _save_live(conn, account, payload, actor, "cleared prediction token", page=_prediction_page)
+    if (form.get("agent") or [""])[0] == PREDICTION_NAME:
+        system = (form.get("system") or [""])[0].strip()
+        execution = (form.get("execution") or [""])[0].strip()
+        if not system or not execution:
+            return _prediction_page(conn, account, {}, "Both prompts are required.") | {"status": 400}
+        prompts = resolved_agents(payload)
+        prompts[PREDICTION_NAME] = prompts[PREDICTION_NAME].model_copy(
+            update={"system": system, "execution": execution}
+        )
+        payload.agents = prompts
+        try:
+            save_settings(conn, account, payload, f"console:{actor}", f"strategy {PREDICTION_NAME}")
+        except ValueError as exc:
+            if str(exc) == "no change":
+                return _prediction_page(conn, account, {})
+            return _prediction_page(conn, account, {}, str(exc)) | {"status": 400}
+        return _prediction_page(conn, account, {}, f"Saved {PREDICTION_NAME} prompts.")
+    ranges = {
+        "prediction_max_tokens": (64, 16384),
+        "prediction_timeout": (5, 300),
+    }
+    try:
+        numbers = {key: int((form.get(key) or [""])[0]) for key in ranges}
+    except ValueError:
+        return _prediction_page(conn, account, {}, "Knobs must be whole numbers.") | {"status": 400}
+    for key, (low, high) in ranges.items():
+        if not low <= numbers[key] <= high:
+            return _prediction_page(conn, account, {}, f"{key} must be {low} to {high}.") | {"status": 400}
+    prediction_url = (form.get("prediction_url") or [payload.prediction.base_url])[0].strip()
+    prediction_model = (form.get("prediction_model") or [payload.prediction.model])[0].strip()
+    if prediction_url and not prediction_url.startswith("http"):
+        return _prediction_page(conn, account, {}, "Prediction URL must start with http.") | {"status": 400}
+    if not prediction_model or any(char in prediction_model for char in "\n\r "):
+        return _prediction_page(conn, account, {}, "Prediction model name is required.") | {"status": 400}
+    try:
+        prediction_temperature = float((form.get("prediction_temperature") or [str(payload.prediction.temperature)])[0])
+    except ValueError:
+        return _prediction_page(conn, account, {}, "Prediction temperature must be a number.") | {"status": 400}
+    if not 0 <= prediction_temperature <= 2:
+        return _prediction_page(conn, account, {}, "Prediction temperature must be 0 to 2.") | {"status": 400}
+    stop_raw = (form.get("prediction_stop") or [""])[0]
+    stop_lines = [part.strip() for part in stop_raw.split(",") if part.strip()]
+    try:
+        horizons = _parse_horizons(form.get("prediction_horizon", []))
+    except ValueError as exc:
+        return _prediction_page(conn, account, {}, str(exc)) | {"status": 400}
+    prediction_update = {
+        "enabled": _checked(form, "prediction_enabled"),
+        "base_url": prediction_url or payload.prediction.base_url,
+        "model": prediction_model,
+        "max_tokens": numbers["prediction_max_tokens"],
+        "timeout_seconds": numbers["prediction_timeout"],
+        "temperature": prediction_temperature,
+        "stop": stop_lines,
+        "reasoning": _checked(form, "prediction_reasoning"),
+        "horizons": horizons,
+    }
+    posted_prediction = (form.get("prediction_token") or [""])[0].strip()
+    if posted_prediction and "•" not in posted_prediction:
+        prediction_update["api_token"] = posted_prediction
+    payload.prediction = payload.prediction.model_copy(update=prediction_update)
+    return _save_live(conn, account, payload, actor, "saved prediction", page=_prediction_page)
+
+
 _CYCLE_HELP = (
     "They are not one chain. Location and News run together and only emit tags. "
     "CSP, Strangle, Purchase, and Call each read that same tag set. They do not call one another. "
     "Call is the exception: it also sees the Purchase proposal, and stays quiet until a share purchase fills. "
     "The four proposals then join. The consolidator, with thinking on, is the only agent that chooses the drafts. "
+    "Advisor is a side path: held positions and guidance go to Advisor, the signal goes to Manage, and those drafts join Approve. "
     "Universe flags, risk caps, and Approve still apply."
 )
 
@@ -3325,14 +3703,13 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         "</div>"
         f'<div class="agent-grid">{"".join(cards)}</div>'
         f"{_trade_prompt_card(prompts[TRADE_NAME])}"
-        f"{_prediction_prompt_card(prompts[PREDICTION_NAME])}"
         "</div>"
     )
     return _html(
         "Orchestration",
         "The orchestration blueprint. Edit the system prompt and the execution prompt for each agent. Income or Accumulate, and Long, are set per symbol on Universe.",
         body,
-        [("info", "7 AGENTS")],
+        [("info", f"{len(AGENT_ORDER) + 1} AGENTS")],
     )
 
 
@@ -3359,35 +3736,90 @@ def _trade_prompt_card(prompt) -> str:
 
 
 def _prediction_prompt_card(prompt) -> str:
-    note = AGENT_ROLES.get(
-        PREDICTION_NAME,
-        "Advisory forecast. Off unless Prediction is enabled on Settings.",
-    )
     return (
-        '<form class="card agent" method="post" action="/orchestration">'
-        f"<h2><span>{escape(PREDICTION_NAME)}</span></h2>"
+        '<form class="card agent fill" method="post" action="/prediction">'
+        "<h2><span>Prompt Configuration"
+        + _q_btn(
+            "Prompt Configuration",
+            "Advisory forecast templates. Used only when Enabled is on in Model Configuration. Never sizes or Approves.",
+        )
+        + "</span></h2>"
         '<div class="body">'
-        f'<p class="role">{escape(note)}</p>'
         f'<input type="hidden" name="agent" value="{escape(PREDICTION_NAME, quote=True)}">'
         '<label class="prompt">System prompt'
         f'<textarea class="prompt" name="system">{escape(prompt.system)}</textarea></label>'
         '<label class="prompt">Execution prompt'
         f'<textarea class="prompt" name="execution">{escape(prompt.execution)}</textarea></label>'
-        '<div class="toggle-row"><div>Reasoning</div><div class="toggle-end">'
-        '<input type="hidden" name="reasoning" value="0">'
-        f'<input type="checkbox" name="reasoning" value="1"{" checked" if prompt.reasoning else ""}>'
-        "</div></div>"
-        '<p class="slot-note">When on, the Prediction endpoint may send a reasoning flag. Settings also has a Prediction reasoning switch.</p>'
         '<button class="btn primary" type="submit">Save prompts</button>'
         "</div></form>"
     )
+
+
+def _prediction_logs_card() -> str:
+    return (
+        '<div class="card fill"><h2>Prediction logs</h2><div class="scroll-y">'
+        '<ul class="pred-log-list" id="prediction-logs"></ul>'
+        '<p class="pred-log-empty">No prediction calls yet.</p>'
+        "</div></div>"
+    )
+
+
+def _horizon_chips(horizons: list[int]) -> str:
+    values = sorted({int(item) for item in (horizons or [1, 3, 5]) if int(item) >= 1})
+    if not values:
+        values = [1, 3, 5]
+    picks = []
+    for value in values:
+        text = str(value)
+        picks.append(
+            f'<span class="sim-pick"><b>{escape(text)}</b>'
+            f'<button class="sim-x" type="button" aria-label="Remove {escape(text, quote=True)}">'
+            '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>'
+            "</button>"
+            f'<input type="hidden" name="prediction_horizon" value="{escape(text, quote=True)}"></span>'
+        )
+    empty = "" if picks else '<p class="sim-empty">Add at least one horizon.</p>'
+    return (
+        '<div class="settings-field"><label>'
+        + _q("Horizons", "Session horizons for each forecast call. Add a number from 1 to 60. Remove with ×.")
+        + "</label>"
+        f'<div class="sim-picks" id="horizon-picks">{"".join(picks)}{empty}</div>'
+        '<div class="horizon-add">'
+        '<input class="input" id="horizon-add" type="number" min="1" max="60" step="1" '
+        'placeholder="Add sessions" autocomplete="off">'
+        '<button class="btn" type="button" id="horizon-add-btn">Add</button>'
+        "</div></div>"
+    )
+
+
+def _parse_horizons(raw) -> list[int]:
+    if not isinstance(raw, list):
+        raw = [raw] if raw else []
+    found: list[int] = []
+    for item in raw:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        try:
+            value = int(text)
+        except ValueError as exc:
+            raise ValueError("Horizons must be whole numbers.") from exc
+        if not 1 <= value <= 60:
+            raise ValueError("Each horizon must be 1 to 60.")
+        if value not in found:
+            found.append(value)
+    if not found:
+        raise ValueError("Add at least one horizon.")
+    return sorted(found)
 
 
 def _post_strategy(conn, account: str, form: dict, actor: str) -> dict:
     if not account:
         return _strategy(conn, account, {}, "No account is configured.") | {"status": 400}
     name = (form.get("agent") or [""])[0]
-    if name not in AGENT_ORDER and name not in {TRADE_NAME, PREDICTION_NAME}:
+    if name == PREDICTION_NAME:
+        return _post_prediction(conn, account, form, actor)
+    if name not in AGENT_ORDER and name != TRADE_NAME:
         return _strategy(conn, account, {}, "Unknown agent.") | {"status": 400}
     system = (form.get("system") or [""])[0].strip()
     execution = (form.get("execution") or [""])[0].strip()
@@ -3792,7 +4224,7 @@ def _market_select(symbol: str, market: str) -> str:
 
     chosen = symbol_market(symbol, market)
     options = []
-    for value, label in (("us", "US"), ("hk", "HK"), ("ca", "CA")):
+    for value, label in (("us", "US"), ("hk", "HK"), ("ca", "CA"), ("de", "DE")):
         selected = " selected" if chosen == value else ""
         options.append(f'<option value="{value}"{selected}>{label}</option>')
     return (
@@ -5831,11 +6263,11 @@ def _telegram_block(current, token_ready: bool) -> str:
     return f"{_row('Telegram', _tag('NOT LINKED'), 'No Telegram user is linked yet. Link sends a one-time code.')}" + '<button class="btn" type="submit" name="action" value="link" data-explicit>Link</button>' + link
 
 
-def _save_live(conn, account: str, payload, actor: str, note: str) -> dict:
+def _save_live(conn, account: str, payload, actor: str, note: str, page=_settings) -> dict:
     try:
         new_id, _changes = save_settings(conn, account, payload, f"console:{actor}", note)
     except ValueError as exc:
-        return _settings(conn, account, {}, str(exc)) | {"status": 400}
+        return page(conn, account, {}, str(exc)) | {"status": 400}
     database_url = os.environ.get("DATABASE_URL", "").strip()
     if database_url:
         from athena_bots.telegram import ensure_polling
@@ -5844,7 +6276,7 @@ def _save_live(conn, account: str, payload, actor: str, note: str) -> dict:
         threading.Thread(
             target=_quote_display_rates, args=(database_url,), daemon=True, name="fx-rates"
         ).start()
-    return _settings(conn, account, {}, f"Saved version {new_id}.")
+    return page(conn, account, {}, f"Saved version {new_id}.")
 
 
 def _quote_display_rates(database_url: str) -> None:

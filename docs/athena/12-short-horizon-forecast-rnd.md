@@ -3,7 +3,7 @@
 **Status:** Prepared in Athena (default **off**) — OpenAI-protocol LLM serve assumed done  
 **Date:** 2026-10-14  
 **Privilege:** Advisory only — never replaces risk rails or Approve  
-**Serve:** OpenAI `/v1/chat/completions` (Settings → Prediction)  
+**Serve:** OpenAI `/v1/chat/completions` (Configs → Prediction)  
 **Train box:** Local RTX 5090 (offline; optional vs LLM serve)  
 **Related:** [07-news-intake.md](07-news-intake.md), [02-architecture.md](02-architecture.md), [09-roadmap.md](09-roadmap.md), [04-settings-and-risk.md](04-settings-and-risk.md)  
 **Upstream method template:** [shuurai2000/shingan-finrisk-labels](https://huggingface.co/datasets/shuurai2000/shingan-finrisk-labels) (Shingan / 心眼)
@@ -146,8 +146,8 @@ The model **must never** raise `max_contracts`, bypass cash reserve, or skip App
 
 | Touchpoint | Behavior |
 |------------|----------|
-| Settings → **Prediction** | `enabled` (false), OpenAI `base_url`, token, model, max tokens, stop lines, temperature, timeout, reasoning |
-| Orchestration → **Prediction** prompt | System + execution templates; JSON-only bid/ask/stop/TP/risks for H∈{1,3,5} |
+| Configs → **Prediction** | `enabled` (false), OpenAI `base_url`, token, model, max tokens, stop lines, temperature, timeout, reasoning |
+| Configs → **Prediction** prompt | System + execution templates; JSON-only bid/ask/stop/TP/risks for H∈{1,3,5} |
 | Wheel cycle | When enabled: call forecast after tags; write `ai_calls` + `forecast_marks` + `decision_trails.steps.forecast` |
 | Risk / Approve / limits | Unchanged — shadow only in this prepare; no auto `limit_price` |
 

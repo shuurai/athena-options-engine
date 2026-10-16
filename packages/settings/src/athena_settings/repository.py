@@ -171,9 +171,9 @@ def _flat(value: object, prefix: str = "") -> dict[str, object]:
 def sync_standing_agents(
     conn: psycopg.Connection,
     *,
-    names: tuple[str, ...] = ("Narrator", "CSP"),
+    names: tuple[str, ...] = ("Narrator", "CSP", "ManageExplainer", "AdvisorExplainer"),
     author: str = "athena",
-    note: str = "week-dip tag + Narrator open gate",
+    note: str = "Narrator counsel + ManageExplainer + AdvisorExplainer",
     account_ids: list[str] | None = None,
 ) -> list[tuple[str, int]]:
     """Replace named agents with standing defaults on each active settings row.

@@ -389,6 +389,7 @@ def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: 
         )
         return []
     sentence = str((payload or {}).get("sentence") or "")
+    counsel = str((payload or {}).get("counsel") or "")
     if not bool((payload or {}).get("open")):
         write_decision(
             conn, account_id, symbol, "wheel", "quiet", "narrator_quiet",
@@ -396,6 +397,7 @@ def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: 
                 {
                     "reason": preview.reason,
                     "thinking": sentence,
+                    "counsel": counsel,
                     "items": [_step("Narrator", "quiet", sentence or "narrator_quiet")],
                 },
                 forecast,
@@ -416,12 +418,13 @@ def _run_wheel_symbol(conn, settings: SettingsPayload, account_id: str, symbol: 
                 {
                     "reason": preview.reason,
                     "thinking": sentence,
+                    "counsel": counsel,
                     "items": [_step(PREDICTION_NAME, "kept", "shadow forecast")],
                 },
                 forecast,
             ),
         )
-    return execute_opening(conn, settings, account_id, symbol, tags, strike, sentence)
+    return execute_opening(conn, settings, account_id, symbol, tags, strike, sentence, counsel)
 
 
 def _with_forecast(steps: dict, forecast: dict | None) -> dict:

@@ -72,6 +72,8 @@ def notify_draft(
     if not token:
         log.info("telegram token missing")
         return
+    if not control_url:
+        log.warning("telegram draft missing approve page url draft=%s", draft_id)
     text = _draft_text(
         draft_id, symbol, tactic, contracts, phase, reason, control_url, account_id,
         _facts(draft_id),
@@ -389,7 +391,7 @@ def _handle(client: TelegramClient, database_url: str, allowlist: set[str], upda
         client.call("sendMessage", {"chat_id": chat_id, "text": _settings(database_url, actor, arg)})
     elif command == "/help":
         client.call("sendMessage", {"chat_id": chat_id, "text": help_text()})
-    elif command in {"/stock", "/etf", "/hk", "/fx"}:
+    elif command in {"/stock", "/etf", "/hk", "/de", "/fx"}:
         client.call("sendMessage", {"chat_id": chat_id, "text": quote_text(database_url, command, arg)})
     else:
         client.call("sendMessage", {"chat_id": chat_id, "text": "Use /help to see the commands."})
@@ -404,6 +406,7 @@ def help_text() -> str:
         "/stock AAPL is a US stock. Use letters. A number such as 700 belongs on /hk.",
         "/etf SPY is a US ETF. It uses the same listing as a stock, and the reply says ETF.",
         "/hk 700 is a Hong Kong stock on SEHK, in HKD. 0700 is read as 700.",
+        "/de IFX is a German stock on Xetra (IBIS), in EUR. Set Universe Market to DE for the book.",
         "/fx EURUSD is a currency pair. EUR/USD is the same pair, on IDEALPRO.",
         "",
         "Drafts.",
@@ -434,6 +437,7 @@ def quote_text(database_url: str, command: str, arg: str) -> str:
             "stock": "Name a US stock. Example: /stock AAPL",
             "etf": "Name a US ETF. Example: /etf SPY",
             "hk": "Name a Hong Kong stock by its SEHK number. Example: /hk 700",
+            "de": "Name a German stock. Example: /de IFX",
             "fx": "Name a pair. Example: /fx EURUSD",
         }.get(kind, "Use /help to see the commands.")
     fields = quote_fields(kind, arg)
@@ -525,7 +529,7 @@ def _apply(database_url: str, allowlist: set[str], draft_id: str, decision: str,
     return f"Approved {draft_id}. Queued for the next Athena slot."
 
 
-def draft_list_messages(conn) -> list[tuple[str, dict]]:
+def draft_list_messages(conn, database_url: str = "") -> list[tuple[str, dict]]:
     """One text and keyboard per pending draft on the active accounts."""
     accounts = active_accounts()
     rows = conn.execute(
@@ -539,14 +543,17 @@ def draft_list_messages(conn) -> list[tuple[str, dict]]:
     ).fetchall()
     messages = []
     for draft_id, account_id, symbol, tactic, contracts in rows:
+        control_url = _open_link(database_url, draft_id) if database_url else _control_url_from_conn(conn, draft_id)
         text = f"{draft_id}  {account_id}  {symbol}  {tactic}  {contracts}"
-        messages.append((text, _markup(draft_id, "")))
+        if control_url:
+            text = f"{text}\nApprove page {control_url}"
+        messages.append((text, _markup(draft_id, control_url)))
     return messages
 
 
 def _send_draft_list(client: TelegramClient, database_url: str, chat_id: int) -> None:
     with connect(database_url) as conn:
-        messages = draft_list_messages(conn)
+        messages = draft_list_messages(conn, database_url)
     if not messages:
         client.call("sendMessage", {"chat_id": chat_id, "text": "No draft is waiting."})
         return
@@ -768,19 +775,23 @@ def _health(database_url: str) -> str:
 
 
 def _open_link(database_url: str, draft_id: str) -> str:
-    port = os.environ.get("ATHENA_CONTROL_PORT", "").strip()
-    if not port:
+    """Resolve Approve-page URL from a live control token. Public base alone is enough."""
+    if not database_url:
         return ""
     with connect(database_url) as conn:
-        row = conn.execute(
-            """
-            SELECT token FROM control_links
-            WHERE draft_id = %s AND used_at IS NULL AND expires_at > now()
-            ORDER BY expires_at DESC
-            LIMIT 1
-            """,
-            (draft_id,),
-        ).fetchone()
+        return _control_url_from_conn(conn, draft_id)
+
+
+def _control_url_from_conn(conn, draft_id: str) -> str:
+    row = conn.execute(
+        """
+        SELECT token FROM control_links
+        WHERE draft_id = %s AND used_at IS NULL AND expires_at > now()
+        ORDER BY expires_at DESC
+        LIMIT 1
+        """,
+        (draft_id,),
+    ).fetchone()
     if row is None:
         return ""
     return control_page_url(row[0])

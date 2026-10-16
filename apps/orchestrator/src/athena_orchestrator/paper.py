@@ -186,6 +186,9 @@ def _live_drafts(conn, settings, account: str) -> tuple[int, int]:
     ttl = settings.notify.draft_ttl_minutes
     if control_flag(settings, account, "trading", True):
         draft_ids = evaluate_watchlist(conn, settings, account)
+        if settings.advisor.enabled:
+            from athena_strategy.advisor import run_advisor
+            run_advisor(conn, settings, account)
         draft_ids.extend(manage_book(conn, settings, account))
         now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
         if slot_split_enabled():
@@ -209,6 +212,9 @@ def _replay_drafts(conn, settings, account: str, day) -> tuple[int, int]:
     draft_ids = []
     if control_flag(settings, account, "trading", True):
         draft_ids = evaluate_watchlist(conn, scoped, account)
+        if scoped.advisor.enabled:
+            from athena_strategy.advisor import run_advisor
+            run_advisor(conn, scoped, account, day)
         draft_ids.extend(manage_book(conn, scoped, account, day))
         draft_ids.extend(run_signaled(conn, scoped, account))
         draft_ids = apply_cycle_budget(conn, scoped, account, draft_ids)

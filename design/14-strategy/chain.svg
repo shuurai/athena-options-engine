@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 860" width="1040" height="860" data-generator="fireworks-tech-graph" data-schema-version="1" data-text-metrics="heuristic-v1" data-style-id="2" data-visual-theme="Dark Terminal" data-diagram-type="agent" data-motion-scene="" data-semantic-profile="generic" data-semantic-valid="true" data-quality-profile="showcase" data-max-bends-per-edge="2" data-max-total-bends="8" data-max-route-stretch="1.35" data-max-bridged-crossings="0" data-min-node-gap="40.0" data-min-container-gutter="20.0" data-min-label-clearance="4.0" data-min-segment-length="16.0">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 860" width="1280" height="860" data-generator="fireworks-tech-graph" data-schema-version="1" data-text-metrics="heuristic-v1" data-style-id="2" data-visual-theme="Dark Terminal" data-diagram-type="agent" data-motion-scene="" data-semantic-profile="generic" data-semantic-valid="true" data-quality-profile="showcase" data-max-bends-per-edge="2" data-max-total-bends="8" data-max-route-stretch="1.35" data-max-bridged-crossings="0" data-min-node-gap="40.0" data-min-container-gutter="20.0" data-min-label-clearance="4.0" data-min-segment-length="16.0">
   <defs>
     <marker id="arrowA" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
       <polygon points="0 0, 10 3.5, 0 7" fill="#a855f7"/>
@@ -53,9 +53,9 @@
     .metric-value { font-size: 9.5px; font-weight: 700; fill: #e2e8f0; }
     </style>
   </defs>
-  <rect data-graph-role="background" width="1040.0" height="860.0" fill="url(#terminalGradient)"/>
-  <text x="520.0" y="56" text-anchor="middle" class="title">Signaled entry</text>
-  <text x="520.0" y="82" text-anchor="middle" class="subtitle">One shared tag set. Tactics run side by side. Proposals join once.</text>
+  <rect data-graph-role="background" width="1280.0" height="860.0" fill="url(#terminalGradient)"/>
+  <text x="640.0" y="56" text-anchor="middle" class="title">How a cycle runs</text>
+  <text x="640.0" y="82" text-anchor="middle" class="subtitle">Tactics share one tag set. Advisor is a side path into Manage, then Approve.</text>
   <path id="loc-tag" data-graph-role="edge" data-edge-id="loc-tag" data-source="location" data-target="tag1" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 128,168 L 128,228" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
   <path id="news-tag" data-graph-role="edge" data-edge-id="news-tag" data-source="news" data-target="tag4" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 784,168 L 784,228" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
   <path id="tag-a" data-graph-role="edge" data-edge-id="tag-a" data-source="tag1" data-target="tag2" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 208,252 L 248,252" fill="none" stroke="#fb7185" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowE)"/>
@@ -75,6 +75,9 @@
   <path id="join-c" data-graph-role="edge" data-edge-id="join-c" data-source="prop4" data-target="prop3" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 704,492 L 608,492" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
   <path id="to-con" data-graph-role="edge" data-edge-id="to-con" data-source="prop3" data-target="consolidator" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 528,516 L 528,580" fill="none" stroke="#22c55e" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowB)"/>
   <path id="to-approve" data-graph-role="edge" data-edge-id="to-approve" data-source="consolidator" data-target="approve" data-edge-kind="flow" data-topic-id="" data-flow="control" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 528,636 L 528,700" fill="none" stroke="#a855f7" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowA)"/>
+  <path id="guide-advisor" data-graph-role="edge" data-edge-id="guide-advisor" data-source="guidance" data-target="advisor" data-edge-kind="flow" data-topic-id="" data-flow="data" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 1060,168 L 1060,340" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowF)"/>
+  <path id="advisor-manage" data-graph-role="edge" data-edge-id="advisor-manage" data-source="advisor" data-target="manage" data-edge-kind="flow" data-topic-id="" data-flow="write" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="0" data-route-stretch="1.0" data-bridges="" d="M 1060,404 L 1060,580" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowF)"/>
+  <path id="manage-approve" data-graph-role="edge" data-edge-id="manage-approve" data-source="manage" data-target="approve" data-edge-kind="flow" data-topic-id="" data-flow="control" data-motion-role="" data-motion-stage="" data-motion-order="" data-protocol="" data-via="" data-critical-path-id="" data-critical-hop="" data-critical-hops="" data-critical="false" data-bends="2" data-route-stretch="1.2" data-bridges="" d="M 1140,608 L 1200,608 L 1200,728 L 668,728" fill="none" stroke="#f59e0b" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowF)"/>
   <g id="node-location" data-graph-role="node" data-node-id="location" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="48,112,208,168">
   <rect x="48.0" y="112.0" width="160.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
   <text x="128.0" y="140.0" text-anchor="middle" class="node-title" font-size="18.0">Location</text>
@@ -143,6 +146,21 @@
   <text x="528.0" y="608.0" text-anchor="middle" class="node-title" font-size="18.0">Consolidator</text>
   <text x="528.0" y="630.0" text-anchor="middle" class="node-sub">thinking on</text>
   </g>
+  <g id="node-guidance" data-graph-role="node" data-node-id="guidance" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="980,112,1140,168">
+  <rect x="980.0" y="112.0" width="160.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="1060.0" y="140.0" text-anchor="middle" class="node-title" font-size="18.0">Guidance</text>
+  <text x="1060.0" y="162.0" text-anchor="middle" class="node-sub">Yahoo, Fed</text>
+  </g>
+  <g id="node-advisor" data-graph-role="node" data-node-id="advisor" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="980,340,1140,404">
+  <rect x="980.0" y="340.0" width="160.0" height="64.0" rx="10.0" fill="#111827" stroke="#f59e0b" stroke-width="1.8"/>
+  <text x="1060.0" y="372.0" text-anchor="middle" class="node-title" font-size="18.0">Advisor</text>
+  <text x="1060.0" y="394.0" text-anchor="middle" class="node-sub">or hold</text>
+  </g>
+  <g id="node-manage" data-graph-role="node" data-node-id="manage" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="980,580,1140,636">
+  <rect x="980.0" y="580.0" width="160.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
+  <text x="1060.0" y="608.0" text-anchor="middle" class="node-title" font-size="18.0">Manage</text>
+  <text x="1060.0" y="630.0" text-anchor="middle" class="node-sub">close or trim</text>
+  </g>
   <g id="node-approve" data-graph-role="node" data-node-id="approve" data-semantic-role="rect" data-motion-role="" data-motion-stage="" data-motion-order="" data-parent="" data-deployment-id="" data-topic-id="" data-span-id="" data-station-order="" data-status="" data-start-ms="" data-duration-ms="" data-parent-span="" data-graph-bounds="388,700,668,756">
   <rect x="388.0" y="700.0" width="280.0" height="56.0" rx="10.0" fill="#111827" stroke="#334155" stroke-width="1.8"/>
   <text x="528.0" y="728.0" text-anchor="middle" class="node-title" font-size="18.0">Approve</text>
@@ -172,13 +190,24 @@
   <g id="to-approve-label" data-graph-role="label" data-owner="to-approve" data-graph-bounds="469.24,654,525,674">
   <text x="497.12" y="668.0" text-anchor="middle" class="arrow-label">drafts</text>
   </g>
+  <g id="guide-advisor-label" data-graph-role="label" data-owner="guide-advisor" data-graph-bounds="1072,240,1128,260">
+  <text x="1100.0" y="254.0" text-anchor="middle" class="arrow-label">quotes</text>
+  </g>
+  <g id="advisor-manage-label" data-graph-role="label" data-owner="advisor-manage" data-graph-bounds="1072,480,1124,500">
+  <text x="1098.0" y="494.0" text-anchor="middle" class="arrow-label">signal</text>
+  </g>
+  <g id="manage-approve-label" data-graph-role="label" data-owner="manage-approve" data-graph-bounds="1164,660,1216,680">
+  <text x="1190.0" y="674.0" text-anchor="middle" class="arrow-label">joins</text>
+  </g>
   <g id="legend" data-graph-role="legend">
-    <rect id="legend-zone" data-graph-role="reserved" data-reserved-kind="legend" x="38" y="786" width="367.28" height="46" rx="10" fill="none" stroke="none"/>
+    <rect id="legend-zone" data-graph-role="reserved" data-reserved-kind="legend" x="38" y="786" width="520" height="46" rx="10" fill="none" stroke="none"/>
     <line data-graph-role="decoration" x1="48.0" y1="800.0" x2="78.0" y2="800.0" stroke="#fb7185" stroke-width="2.3" marker-end="url(#arrowE)"/>
     <text data-graph-role="decoration" x="88.0" y="804.0" class="legend">shared tags</text>
     <line data-graph-role="decoration" x1="189.92000000000002" y1="800.0" x2="219.92000000000002" y2="800.0" stroke="#22c55e" stroke-width="2.3" marker-end="url(#arrowB)"/>
     <text data-graph-role="decoration" x="229.92000000000002" y="804.0" class="legend">proposal</text>
     <line data-graph-role="decoration" x1="310.48" y1="800.0" x2="340.48" y2="800.0" stroke="#a855f7" stroke-width="2.3" marker-end="url(#arrowA)"/>
     <text data-graph-role="decoration" x="350.48" y="804.0" class="legend">guard</text>
+    <line data-graph-role="decoration" x1="420.0" y1="800.0" x2="450.0" y2="800.0" stroke="#f59e0b" stroke-width="2.3" marker-end="url(#arrowF)"/>
+    <text data-graph-role="decoration" x="460.0" y="804.0" class="legend">advisor</text>
   </g>
 </svg>

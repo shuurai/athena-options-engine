@@ -81,6 +81,7 @@ from athena_strategy.agents import (
 from athena_strategy.classifiers import clean_classifiers
 from athena_strategy.indicators import compute, realized_vol
 from athena_strategy.iv import estimated_iv, iv_rank
+from athena_strategy.draft_facts import format_draft_reason, moneyness
 from athena_strategy.manage import management_tactic
 from athena_strategy.legacy_tactics import choose_tactic
 from athena_strategy.phases import choose_phase, evaluate_symbol
@@ -639,18 +640,30 @@ class OptionsAndSlotsTest(unittest.TestCase):
         broker.note_history_gap("QCOM", 200)
         self.assertFalse(broker.history_quiet("QCOM"))
 
-    def test_stock_venue_maps_canada_and_defaults_us(self) -> None:
+    def test_stock_venue_maps_canada_germany_and_defaults_us(self) -> None:
         from athena_exec.broker import IbBroker, stock_contract, stock_venue
+        from athena_exec.slots import cash_open, symbol_market
 
         self.assertEqual(stock_venue("VNP"), ("SMART", "USD"))
         self.assertEqual(stock_venue("VNP", "ca"), ("SMART", "CAD"))
         self.assertEqual(stock_venue("1810"), ("SEHK", "HKD"))
+        self.assertEqual(stock_venue("IFX", "de"), ("SMART", "EUR"))
+        self.assertEqual(symbol_market("IFX", "de"), "de")
         ca = stock_contract("VNP", "ca")
         self.assertEqual(ca.currency, "CAD")
         self.assertEqual(ca.primaryExchange, "TSE")
         us = stock_contract("IFX")
         self.assertEqual(us.currency, "USD")
         self.assertEqual(us.primaryExchange, "")
+        de = stock_contract("IFX", "de")
+        self.assertEqual(de.currency, "EUR")
+        self.assertEqual(de.primaryExchange, "IBIS")
+        self.assertEqual(de.exchange, "SMART")
+        berlin = ZoneInfo("Europe/Berlin")
+        noon = datetime(2026, 10, 15, 12, 0, tzinfo=berlin)
+        night = datetime(2026, 10, 15, 20, 0, tzinfo=berlin)
+        self.assertTrue(cash_open("IFX", noon, "de"))
+        self.assertFalse(cash_open("IFX", night, "de"))
         broker = IbBroker()
         broker.set_markets({"IFX": "us", "VNP": "us"})
         broker.note_unknown_stock("IFX")
@@ -663,6 +676,9 @@ class OptionsAndSlotsTest(unittest.TestCase):
         broker.set_markets({"IFX": "us", "VNP": "ca"})
         self.assertTrue(broker.unknown_stock("IFX"))
         self.assertFalse(broker.unknown_stock("VNP"))
+        broker.set_markets({"IFX": "de", "VNP": "ca"})
+        self.assertFalse(broker.unknown_stock("IFX"))
+        self.assertFalse(broker.option_chain("IFX"))
 
     def test_history_162_and_head_day_parsing(self) -> None:
         from athena_exec.broker import _as_head_day, _history_162_kind
@@ -860,6 +876,72 @@ class PricePhaseTest(unittest.TestCase):
         self.assertTrue(conn.committed)
 
 
+class DraftFactsTest(unittest.TestCase):
+    def test_moneyness_band_and_sides(self) -> None:
+        self.assertEqual(moneyness(Decimal("100"), Decimal("100"), "P"), "ATM")
+        self.assertEqual(moneyness(Decimal("100.5"), Decimal("100"), "P"), "ATM")
+        self.assertEqual(moneyness(Decimal("98"), Decimal("100"), "P"), "ITM")
+        self.assertEqual(moneyness(Decimal("102"), Decimal("100"), "P"), "OTM")
+        self.assertEqual(moneyness(Decimal("102"), Decimal("100"), "C"), "ITM")
+        self.assertEqual(moneyness(Decimal("98"), Decimal("100"), "C"), "OTM")
+        self.assertIsNone(moneyness(None, Decimal("100"), "P"))
+
+    def test_format_draft_reason_adds_counsel(self) -> None:
+        self.assertEqual(format_draft_reason("Close now.", "Take shares"), "Close now.\n\nCounsel: Take shares")
+        self.assertEqual(format_draft_reason("Close now.", ""), "Close now.")
+
+
+class AdvisorRulesTest(unittest.TestCase):
+    def test_advisor_acts_thresholds(self) -> None:
+        from athena_settings.model import AdvisorSettings
+        from athena_strategy.manage import _advisor_acts
+
+        settings = AdvisorSettings()
+        self.assertFalse(_advisor_acts({"action": "hold", "confidence": 0.9}, type("S", (), {"advisor": settings})()))
+        self.assertTrue(_advisor_acts({"action": "trim", "confidence": 0.6}, type("S", (), {"advisor": settings})()))
+        self.assertFalse(_advisor_acts({"action": "close", "confidence": 0.6}, type("S", (), {"advisor": settings})()))
+        self.assertTrue(_advisor_acts({"action": "close", "confidence": 0.7}, type("S", (), {"advisor": settings})()))
+
+    def test_advisor_size_exits_or_halves(self) -> None:
+        from athena_strategy.manage import _advisor_quantity, _advisor_tactic
+
+        self.assertEqual(_advisor_tactic("take_profit"), "CLOSE")
+        self.assertEqual(_advisor_tactic("close"), "CLOSE")
+        self.assertEqual(_advisor_tactic("trim"), "TRIM")
+        self.assertEqual(_advisor_quantity("close", 100), 100)
+        self.assertEqual(_advisor_quantity("take_profit", 100), 100)
+        self.assertEqual(_advisor_quantity("trim", 100), 50)
+        self.assertEqual(_advisor_quantity("trim", 1), 1)
+
+    def test_advisor_lowers_profit_take_threshold(self) -> None:
+        from athena_settings.model import AdvisorSettings
+        from athena_strategy.manage import management_tactic
+
+        choice = management_tactic(
+            sec_type="OPT",
+            quantity=Decimal("-1"),
+            avg_price=Decimal("2"),
+            market_price=Decimal("1.2"),
+            expiry=date(2026, 12, 18),
+            today=TODAY,
+            roll_dte=21,
+            profit_take_pct=50,
+        )
+        self.assertIsNone(choice)
+        choice = management_tactic(
+            sec_type="OPT",
+            quantity=Decimal("-1"),
+            avg_price=Decimal("2"),
+            market_price=Decimal("1.2"),
+            expiry=date(2026, 12, 18),
+            today=TODAY,
+            roll_dte=21,
+            profit_take_pct=35,
+        )
+        self.assertIsNotNone(choice)
+        self.assertEqual(choice[0], "CLOSE")
+
+
 class ManageTest(unittest.TestCase):
     def test_a_short_dated_option_does_not_roll(self) -> None:
         self.assertIsNone(
@@ -885,9 +967,32 @@ class ManageTest(unittest.TestCase):
             today=TODAY,
             roll_dte=21,
             profit_take_pct=50,
+            strike=Decimal("150"),
+            right="P",
+            spot=Decimal("148"),
         )
         self.assertEqual(tactic, "CLOSE")
         self.assertIn("75%", reason)
+        self.assertIn("ITM", reason)
+        self.assertIn("assignment", reason.lower())
+
+    def test_otm_close_notes_assignment_unlikely(self) -> None:
+        tactic, reason = management_tactic(
+            sec_type="OPT",
+            quantity=Decimal("-1"),
+            avg_price=Decimal("2"),
+            market_price=Decimal("0.2"),
+            expiry=date(2026, 12, 18),
+            today=TODAY,
+            roll_dte=21,
+            profit_take_pct=50,
+            strike=Decimal("140"),
+            right="P",
+            spot=Decimal("150"),
+        )
+        self.assertEqual(tactic, "CLOSE")
+        self.assertIn("OTM", reason)
+        self.assertIn("unlikely", reason.lower())
 
     def test_a_long_stock_is_neither(self) -> None:
         self.assertIsNone(
@@ -1180,6 +1285,13 @@ class AgentsTest(unittest.TestCase):
         )
         self.assertEqual(status, "ok")
         self.assertTrue(payload["open"])
+        self.assertEqual(payload.get("counsel"), "")
+        payload, status, _stage = parse_response(
+            "Narrator",
+            '{"open":true,"sentence":"deep reason","counsel":"take assignment","strike":null}',
+        )
+        self.assertEqual(status, "ok")
+        self.assertEqual(payload["counsel"], "take assignment")
         payload, status, _stage = parse_response(
             "Narrator", '{"open":false,"sentence":"quiet","strike":null}'
         )
@@ -1187,6 +1299,27 @@ class AgentsTest(unittest.TestCase):
         self.assertFalse(payload["open"])
         _payload, status, stage = parse_response(
             "Narrator", '{"sentence":"missing open","strike":null}'
+        )
+        self.assertEqual((status, stage), ("invalid", "schema"))
+        payload, status, _stage = parse_response(
+            "ManageExplainer", '{"sentence":"close now","counsel":"or take shares"}'
+        )
+        self.assertEqual(status, "ok")
+        self.assertEqual(payload["counsel"], "or take shares")
+        _payload, status, stage = parse_response("ManageExplainer", '{"counsel":"only"}')
+        self.assertEqual((status, stage), ("invalid", "schema"))
+        payload, status, _stage = parse_response(
+            "AdvisorExplainer", '{"action":"take_profit","confidence":0.7,"reason":"risk high"}'
+        )
+        self.assertEqual(status, "ok")
+        self.assertEqual(payload["action"], "take_profit")
+        self.assertEqual(payload["confidence"], 0.7)
+        _payload, status, stage = parse_response(
+            "AdvisorExplainer", '{"action":"fly","confidence":0.5,"reason":"bad"}'
+        )
+        self.assertEqual((status, stage), ("invalid", "schema"))
+        _payload, status, stage = parse_response(
+            "AdvisorExplainer", '{"action":"trim","confidence":1.5,"reason":"bad"}'
         )
         self.assertEqual((status, stage), ("invalid", "schema"))
 
@@ -1780,8 +1913,16 @@ class ForecastPrepareTest(unittest.TestCase):
         chat.assert_called_once()
         self.assertTrue(callable(prediction_chat))
 
-    def test_settings_and_orchestration_expose_prediction(self) -> None:
-        from athena_orchestrator.pages import _prediction_prompt_card, _settings
+    def test_prediction_page_holds_connection_and_prompts(self) -> None:
+        from athena_orchestrator.console import NAV_GROUPS
+        from athena_orchestrator.pages import _parse_horizons, _prediction_page, _prediction_prompt_card, _settings
+
+        configs = dict(NAV_GROUPS)["Configs"]
+        self.assertIn(("/prediction", "Prediction"), configs)
+        self.assertLess(
+            configs.index(("/orchestration", "Orchestration")),
+            configs.index(("/prediction", "Prediction")),
+        )
 
         class _Conn:
             def execute(self, *_args, **_kwargs):
@@ -1791,6 +1932,27 @@ class ForecastPrepareTest(unittest.TestCase):
                 return (0,)
 
         settings = standard_payload()
+        with patch("athena_orchestrator.pages.load_active", return_value=settings):
+            page = _prediction_page(_Conn(), "ZZTEST", {})
+        self.assertIn("<h2>Model Configuration</h2>", page["body"])
+        self.assertIn("Prompt Configuration", page["body"])
+        self.assertIn('aria-label="About Prompt Configuration"', page["body"])
+        self.assertNotIn("Off unless Prediction is enabled", page["body"])
+        self.assertIn("<h2>Prediction logs</h2>", page["body"])
+        self.assertIn("No prediction calls yet.", page["body"])
+        self.assertIn('name="prediction_enabled"', page["body"])
+        self.assertIn('name="prediction_url"', page["body"])
+        self.assertIn('name="prediction_stop"', page["body"])
+        self.assertIn('name="prediction_horizon"', page["body"])
+        self.assertIn('value="1"', page["body"])
+        self.assertIn('value="3"', page["body"])
+        self.assertIn('value="5"', page["body"])
+        self.assertIn('action="/prediction"', page["body"])
+        self.assertIn(f'value="{PREDICTION_NAME}"', page["body"])
+        self.assertIn("Save prompts", page["body"])
+        self.assertEqual(_parse_horizons(["5", "1", "3", "1"]), [1, 3, 5])
+        with self.assertRaises(ValueError):
+            _parse_horizons([])
         with patch("athena_orchestrator.pages.load_active", return_value=settings), patch(
             "athena_orchestrator.pages.trading_mode", return_value="paper",
         ), patch(
@@ -1802,15 +1964,12 @@ class ForecastPrepareTest(unittest.TestCase):
         ), patch(
             "athena_orchestrator.pages._telegram_block", return_value="",
         ):
-            page = _settings(_Conn(), "ZZTEST", {})
-        self.assertIn("<h2>Prediction</h2>", page["body"])
-        self.assertIn('name="prediction_enabled"', page["body"])
-        self.assertIn('name="prediction_url"', page["body"])
-        self.assertIn('name="prediction_stop"', page["body"])
+            settings_page = _settings(_Conn(), "ZZTEST", {})
+        self.assertNotIn('name="prediction_enabled"', settings_page["body"])
         prompt = resolved_agents(settings)[PREDICTION_NAME]
         card = _prediction_prompt_card(prompt)
-        self.assertIn(f'value="{PREDICTION_NAME}"', card)
-        self.assertIn("Save prompts", card)
+        self.assertIn('action="/prediction"', card)
+        self.assertIn("Prompt Configuration", card)
 
 
 def _book_row(market, currency: str = "USD") -> dict:

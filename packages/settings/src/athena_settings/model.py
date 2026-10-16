@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 Privilege = Literal["all_orders", "opens_only", "auto_within_risk", "paper_only"]
-GlobalCurrency = Literal["HKD", "USD", "AUD", "CNY", "JPY", "CAD"]
+GlobalCurrency = Literal["HKD", "USD", "AUD", "CNY", "JPY", "CAD", "EUR"]
 RiskProfile = Literal["defensive", "standard", "income", "harvest", "aggressive", "test", "paper", "custom"]
 
 
@@ -149,6 +149,19 @@ class PredictionSettings(BaseModel):
     horizons: list[int] = Field(default_factory=lambda: [1, 3, 5])
 
 
+class AdvisorSettings(BaseModel):
+    """Portfolio-level take-profit / trim advisor. Advisory; drafts stay human-approved."""
+
+    enabled: bool = False
+    guidance_symbols: list[str] = Field(
+        default_factory=lambda: ["QQQ", "NVDA", "SOXX", "AVGO", "MRVL", "MU", "TSM"]
+    )
+    close_conf_threshold: float = 0.65
+    trim_conf_threshold: float = 0.55
+    profit_take_relief_pct: int = 15
+    max_conf: float = 0.95
+
+
 class AccountEntry(BaseModel):
     """A configured id. It is not the Gateway session until the environment lists it."""
 
@@ -176,7 +189,7 @@ class TacticFlags(BaseModel):
     intent: Literal["income", "both", "accumulate"] = "income"
     long: bool = False
     may_buy: bool | None = None
-    market: Literal["us", "hk", "ca"] | None = None
+    market: Literal["us", "hk", "ca", "de"] | None = None
 
     def options_on(self) -> bool:
         """A chain is useful only when one option tactic is still on."""
@@ -292,6 +305,7 @@ class SettingsPayload(BaseModel):
     ai: AISettings = Field(default_factory=AISettings)
     itick: ITickSettings = Field(default_factory=ITickSettings)
     prediction: PredictionSettings = Field(default_factory=PredictionSettings)
+    advisor: AdvisorSettings = Field(default_factory=AdvisorSettings)
     notify: NotifySettings = Field(default_factory=NotifySettings)
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)

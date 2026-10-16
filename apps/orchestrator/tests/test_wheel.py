@@ -228,6 +228,8 @@ class WheelDbTest(unittest.TestCase):
         self.conn.execute("DELETE FROM option_choices WHERE symbol = %s", (SYMBOL,))
         self.conn.execute("DELETE FROM market_bars WHERE symbol = %s", (SYMBOL,))
         self.conn.execute("DELETE FROM rv_marks WHERE symbol = %s", (SYMBOL,))
+        self.conn.execute("DELETE FROM advisor_signals WHERE account_id = %s", (ACCOUNT,))
+        self.conn.execute("DELETE FROM symbol_facts WHERE symbol = %s", (SYMBOL,))
         self.conn.commit()
 
     def _bars(self, closes: list[Decimal]) -> Decimal:
@@ -933,6 +935,9 @@ class WheelDbTest(unittest.TestCase):
             self.assertIn("WEEK_DIP", saved.agents["Narrator"].system)
             self.assertIn("WEEK_DIP", saved.agents["CSP"].system)
             self.assertIn('"open":true', saved.agents["Narrator"].system)
+            self.assertIn("counsel", saved.agents["Narrator"].system)
+            self.assertIn("ManageExplainer", saved.agents)
+            self.assertIn("CLOSE draft", saved.agents["ManageExplainer"].system)
         finally:
             self.conn.execute("DELETE FROM settings_versions WHERE account_id = %s", ("UTESTWDIP",))
             self.conn.execute("DELETE FROM settings_audits WHERE account_id = %s", ("UTESTWDIP",))
@@ -1148,6 +1153,80 @@ class WheelDbTest(unittest.TestCase):
             (ACCOUNT,),
         ).fetchone()
         self.assertEqual(tactic[0], "CLOSE")
+
+    def test_advisor_take_profit_lowers_threshold_and_stages_close(self) -> None:
+        from psycopg.types.json import Jsonb
+
+        self._choices(Decimal("100"), "P", ("0.90",))
+        self.conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, expiry,
+                contract_right, strike, market_price, simulated
+            )
+            VALUES (%s, %s, -1, 2, 'OPT', %s, 'P', 90, 1.2, false)
+            """,
+            (ACCOUNT, SYMBOL, date.today() + timedelta(days=40)),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO advisor_signals (account_id, symbol, day, action, confidence, reason, payload)
+            VALUES (%s, %s, %s, 'take_profit', 0.7, 'guidance weak', %s)
+            """,
+            (ACCOUNT, SYMBOL, date.today(), Jsonb({})),
+        )
+        self.conn.commit()
+        settings = self._settings()
+        settings = settings.model_copy(
+            update={"advisor": settings.advisor.model_copy(update={"enabled": True, "trim_conf_threshold": 0.6})}
+        )
+        ids = manage_book(self.conn, settings, ACCOUNT)
+        self.assertTrue(ids)
+        row = self.conn.execute(
+            "SELECT tactic, phase, reason, contracts FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(row[0], "CLOSE")
+        self.assertEqual(row[1], "ADVISOR")
+        self.assertIn("Advisor:", row[2])
+        self.assertIn("Premium captured 40%", row[2])
+        self.assertEqual(row[3], 1)
+
+    def test_advisor_close_stages_stock_trim(self) -> None:
+        from psycopg.types.json import Jsonb
+
+        self.conn.execute(
+            """
+            INSERT INTO positions (
+                account_id, symbol, quantity, avg_price, sec_type, expiry,
+                contract_right, strike, market_price, simulated
+            )
+            VALUES (%s, %s, 100, 50, 'STK', NULL, '', NULL, 55, false)
+            """,
+            (ACCOUNT, SYMBOL),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO advisor_signals (account_id, symbol, day, action, confidence, reason, payload)
+            VALUES (%s, %s, %s, 'trim', 0.7, 'near high', %s)
+            """,
+            (ACCOUNT, SYMBOL, date.today(), Jsonb({})),
+        )
+        self.conn.commit()
+        settings = self._settings()
+        settings = settings.model_copy(
+            update={"advisor": settings.advisor.model_copy(update={"enabled": True, "trim_conf_threshold": 0.6})}
+        )
+        ids = manage_book(self.conn, settings, ACCOUNT)
+        self.assertTrue(ids)
+        row = self.conn.execute(
+            "SELECT tactic, phase, reason, contracts FROM drafts WHERE account_id = %s",
+            (ACCOUNT,),
+        ).fetchone()
+        self.assertEqual(row[0], "TRIM")
+        self.assertEqual(row[1], "ADVISOR")
+        self.assertIn("Advisor:", row[2])
+        self.assertEqual(row[3], 50)
 
     def test_fixture_june_dip_buys_when_may_buy_is_on(self) -> None:
         self.fixture_june_dip()
@@ -1661,7 +1740,7 @@ class WheelDbTest(unittest.TestCase):
 
     def test_the_reading_card_holds_the_volatility_family(self) -> None:
         body = _risk(self.conn, ACCOUNT, {})["body"]
-        card = body.split('id="volatility-reading"', 1)[1].split("<h2>Limits</h2>", 1)[0]
+        card = body.split('id="volatility-reading"', 1)[1].split("<h2>Limits", 1)[0]
         for name in (
             "min_rv", "ivr_min_samples", "rv_window", "rv_high_pctl", "rv_low_pctl",
             "chain_band_pct", "strangle_delta_target",
@@ -1669,7 +1748,7 @@ class WheelDbTest(unittest.TestCase):
         ):
             self.assertIn(f'name="{name}"', card)
         self.assertNotIn('name="otm_floor_pct"', card)
-        limits = body.split("<h2>Limits</h2>", 1)[1].split("<h2>Approval privilege", 1)[0]
+        limits = body.split("<h2>Limits", 1)[1].split("<h2>Approval privilege", 1)[0]
         for name in (
             "otm_floor_pct", "otm_ceiling_pct", "rv_band_high_pct", "rv_band_mid_pct", "wing_z",
             "max_spread_pct",
@@ -1702,14 +1781,14 @@ class WheelDbTest(unittest.TestCase):
         self.assertNotIn('name="chain_band_pct"', strategy)
         self.assertIn('class="form-grid three"', strategy)
         self.assertLess(body.index('id="strategy-card"'), body.index('id="volatility-reading"'))
-        self.assertLess(body.index('id="volatility-reading"'), body.index("<h2>Limits</h2>"))
-        self.assertLess(body.index("<h2>Limits</h2>"), body.index("Approval privilege"))
+        self.assertLess(body.index('id="volatility-reading"'), body.index("<h2>Limits"))
+        self.assertLess(body.index("<h2>Limits"), body.index("Approval privilege"))
         self.assertIn('class="card risk-span-5" id="strategy-card"', body)
         self.assertIn('class="card risk-span-2" id="volatility-reading"', body)
-        self.assertIn('class="card risk-span-2"><h2>Limits</h2>', body)
+        self.assertIn('class="card risk-span-2"><h2>Limits', body)
         self.assertIn('class="risk-stack risk-span-1"', body)
         self.assertIn('<h2>Approval privilege', body)
-        limits = body.split("<h2>Limits</h2>", 1)[1].split("Approval privilege", 1)[0]
+        limits = body.split("<h2>Limits", 1)[1].split("Approval privilege", 1)[0]
         self.assertNotIn('name="strict_conflict"', limits)
         right = body.split('class="risk-stack risk-span-1"', 1)[1]
         self.assertLess(right.index("Approval privilege"), right.index("Strict conflict"))

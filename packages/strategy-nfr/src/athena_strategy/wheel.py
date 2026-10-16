@@ -821,9 +821,13 @@ def execute_opening(
     tags: set[str] | None = None,
     narrator_strike: Decimal | None = None,
     sentence: str = "",
+    counsel: str = "",
 ) -> list[str]:
     """Write one opening ticket, or a trail when the day stays quiet."""
+    from athena_strategy.draft_facts import format_draft_reason
+
     opening = decide_opening(conn, settings, account_id, symbol, tags, narrator_strike)
+    draft_reason = format_draft_reason(sentence, counsel) if sentence or counsel else ""
     phase = _phase(conn, account_id, symbol)
     if opening.outcome == "drafted" and opening.overruled and _share_legs(opening) and not _short_leg(opening):
         _removed_put(conn, account_id, symbol, opening, "dropped", "narrator_overruled")
@@ -858,7 +862,7 @@ def execute_opening(
     for index, leg in enumerate(opening.legs):
         staged = stage_draft(
             conn, settings, symbol, leg.tactic, leg.contracts,
-            sentence or opening.reason, phase, account_id,
+            draft_reason or opening.reason, phase, account_id,
             instrument=leg.instrument, limit_price=leg.limit_price, expiry=leg.expiry,
             put_strike=leg.put_strike, call_strike=leg.call_strike,
             put_limit=leg.put_limit, call_limit=leg.call_limit,

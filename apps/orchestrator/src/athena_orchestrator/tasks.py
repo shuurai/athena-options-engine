@@ -158,7 +158,7 @@ def begin_fill(conn, database_url: str, account: str, actor: str, symbol: str, m
         payload = SettingsPayload.model_validate(current.model_dump())
         payload.watchlist.append(symbol)
         kind = market.strip().lower()
-        if kind not in {"us", "hk", "ca"}:
+        if kind not in {"us", "hk", "ca", "de"}:
             kind = symbol_market(symbol)
         flags = payload.tactic_flags.get(symbol, TacticFlags())
         payload.tactic_flags[symbol] = flags.model_copy(update={"market": kind})

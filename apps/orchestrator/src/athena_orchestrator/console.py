@@ -59,6 +59,7 @@ NAV_GROUPS = (
             ("/positions", "Positions"),
             ("/orders", "Orders"),
             ("/book", "Book"),
+            ("/portfolio-analysis", "Portfolio Analysis"),
         ),
     ),
     (
@@ -67,6 +68,7 @@ NAV_GROUPS = (
             ("/accounts", "Accounts"),
             ("/simulation", "Simulation"),
             ("/orchestration", "Orchestration"),
+            ("/prediction", "Prediction"),
             ("/risk", "Risk & Strategy"),
             ("/volatility", "Volatility"),
             ("/settings", "Settings"),
@@ -178,15 +180,38 @@ html, body.console { height: 100%; overflow: hidden; }
   grid-template-rows: minmax(0, 1fr);
 }
 .stage > form.grid.fill > .card { min-height: 0; overflow: auto; }
+.stage > .settings-cols,
 form.fill > .settings-cols {
   flex: 1 1 auto; min-height: 0; overflow: hidden;
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;
 }
+.settings-cols.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.settings-cols.analysis { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+.settings-cols.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.horizon-add { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.horizon-add .input { flex: 1 1 auto; min-width: 0; }
+.horizon-add .btn { flex: none; }
+.pred-log-empty { margin: 0; color: var(--site-text-3); font-size: 12.5px; }
+.pred-log-list { margin: 0; padding: 0; list-style: none; }
 .settings-col { min-height: 0; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
 .settings-col > .card { flex: none; height: auto; overflow: visible; }
 .settings-col > .card > .scroll-y { overflow: visible; }
-.settings-col > .card.fill { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.settings-col > .card.fill,
+.settings-col > form.card.fill {
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
+}
 .settings-col > .card.fill > .scroll-y { overflow: auto; }
+.settings-col > form.card.agent.fill {
+  display: flex; flex-direction: column;
+}
+.settings-col > form.card.agent.fill > .body {
+  flex: 1 1 auto; min-height: 0; overflow: auto;
+}
+.settings-col > form.fill {
+  flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+.settings-col > form.fill > .card.fill { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.settings-col > form.fill > .card.fill > .scroll-y { overflow: auto; }
 .card.danger { border-color: #7f1d1d; background: #2a1212; }
 .card.danger h2 { color: #fca5a5; }
 .btn.danger { background: #7f1d1d; color: #fff; border-color: #7f1d1d; }
@@ -1877,8 +1902,8 @@ _CLIENT_JS = r"""
     const node = event.target.closest && event.target.closest("select.intent");
     if (node) node.dataset.prev = node.value;
   });
-  const settingsForm = document.getElementById("settings-form");
-  if (settingsForm) {
+  function bindAutosaveForm(settingsForm) {
+    if (!settingsForm) return;
     let saving = false;
     let again = false;
     function saveSettings() {
@@ -2110,7 +2135,66 @@ _CLIENT_JS = r"""
         if (!event.target.closest(".sim-find")) closeMenu();
       });
     }
+    const horizonPicks = settingsForm.querySelector("#horizon-picks");
+    const horizonInput = settingsForm.querySelector("#horizon-add");
+    const horizonAddBtn = settingsForm.querySelector("#horizon-add-btn");
+    if (horizonPicks && horizonInput) {
+      function horizonValues() {
+        return Array.from(horizonPicks.querySelectorAll("input[name=prediction_horizon]")).map((input) => input.value);
+      }
+      function paintHorizonEmpty() {
+        let note = horizonPicks.querySelector(".sim-empty");
+        if (horizonValues().length) {
+          if (note) note.remove();
+          return;
+        }
+        if (!note) {
+          note = document.createElement("p");
+          note.className = "sim-empty";
+          note.textContent = "Add at least one horizon.";
+          horizonPicks.appendChild(note);
+        }
+      }
+      function addHorizon(raw) {
+        const n = parseInt(String(raw).trim(), 10);
+        if (!Number.isFinite(n) || n < 1 || n > 60) return;
+        if (horizonValues().indexOf(String(n)) !== -1) return;
+        const chip = document.createElement("span");
+        chip.className = "sim-pick";
+        chip.innerHTML = "<b></b><button class=\"sim-x\" type=\"button\"><svg viewBox=\"0 0 12 12\" aria-hidden=\"true\"><path d=\"M3 3l6 6M9 3L3 9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/></svg></button><input type=\"hidden\" name=\"prediction_horizon\">";
+        chip.querySelector("b").textContent = String(n);
+        chip.querySelector("button").setAttribute("aria-label", "Remove " + n);
+        chip.querySelector("input").value = String(n);
+        const note = horizonPicks.querySelector(".sim-empty");
+        if (note) note.remove();
+        const chips = Array.from(horizonPicks.querySelectorAll(".sim-pick"));
+        chips.push(chip);
+        chips.sort((a, b) => Number(a.querySelector("input").value) - Number(b.querySelector("input").value));
+        horizonPicks.replaceChildren();
+        chips.forEach((item) => horizonPicks.appendChild(item));
+        horizonInput.value = "";
+        saveSettings();
+      }
+      horizonPicks.addEventListener("click", (event) => {
+        const button = event.target.closest(".sim-x");
+        if (!button) return;
+        const chip = button.closest(".sim-pick");
+        if (chip) chip.remove();
+        paintHorizonEmpty();
+        saveSettings();
+      });
+      horizonInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        addHorizon(horizonInput.value);
+      });
+      if (horizonAddBtn) {
+        horizonAddBtn.addEventListener("click", () => addHorizon(horizonInput.value));
+      }
+    }
   }
+  bindAutosaveForm(document.getElementById("settings-form"));
+  bindAutosaveForm(document.getElementById("prediction-form"));
   const riskForm = document.getElementById("risk-form");
   if (riskForm) {
     let saving = false;

@@ -10,6 +10,9 @@ AGENT_ORDER = (
     "Purchase",
     "Call",
     "Consolidator",
+    "Narrator",
+    "ManageExplainer",
+    "AdvisorExplainer",
 )
 
 # Purchase runs before Call. Call has to see that proposal.
@@ -35,10 +38,10 @@ AGENT_ROLES = {
     "Call": "One covered call, or quiet. Used at the upper rail or the long-range high, and only when shares are already held.",
     "Consolidator": "Thinking on. Chooses the cash-secured put, covered call, or share price, and may sequence them.",
     "Trade": "Suggests a limit and a stop for one manual stock order. The cycle does not call it.",
-    "Prediction": (
-        "Advisory short-horizon forecast. Emits bid/ask, stop, take-profit, and risks for H=1/3/5. "
-        "Off unless Prediction is enabled on Settings. Never sizes or Approves."
-    ),
+    "Prediction": "Advisory short-horizon forecast. Emits bid/ask, stop, take-profit, and risks.",
+    "Narrator": "Open gate for the code ticket. Explains why, may counsel Approve or Reject, may pick a listed strike.",
+    "ManageExplainer": "Explains a CLOSE draft and may counsel (assignment OK / prefer close). Does not change the draft.",
+    "AdvisorExplainer": "Reads position + guidance + macro facts and returns hold / take_profit / trim / close with confidence and reason.",
 }
 
 
@@ -268,8 +271,12 @@ def _standing_agents() -> dict[str, AgentPrompt]:
                 "You do not choose the tactic. You may name one strike from the list. "
                 "If you name any other strike, that leg is dropped.\n"
                 "You may not add a leg, change the size, or clear a hard refusal already applied.\n"
-                'Reply with JSON only: {"open":true,"sentence":"","strike":null} '
-                'or {"open":false,"sentence":"","strike":null}'
+                "When open is true, sentence must be 3 to 5 sentences: tags and price context, "
+                "why this ticket versus quiet, and for options moneyness or assignment when known. "
+                "counsel is optional advice for the human (e.g. take assignment / prefer to stay quiet) "
+                "and must not change the draft itself.\n"
+                'Reply with JSON only: {"open":true,"sentence":"","counsel":"","strike":null} '
+                'or {"open":false,"sentence":"","counsel":"","strike":null}'
             ),
             execution=(
                 "Symbol: {{symbol}}\nTicket: {{ticket}}\nTags: {{tags}}\n"
@@ -284,6 +291,41 @@ def _standing_agents() -> dict[str, AgentPrompt]:
                 "Cash reserve pct: {{cash_reserve}}\n"
                 "Contract cap: {{contract_cap}}\n"
                 "Position cap: {{position_cap}}"
+            ),
+        ),
+        "ManageExplainer": AgentPrompt(
+            system=(
+                "Code already staged a CLOSE draft for a short option that captured enough premium.\n"
+                "Explain the situation in 3 to 5 sentences using the facts. Cover premium captured, "
+                "spot versus strike / moneyness, assignment outlook, and the tradeoff of closing "
+                "versus taking assignment.\n"
+                "counsel may advise the human (assignment OK at this level / closing may be unnecessary / "
+                "prefer to close). You cannot change tactic, size, strike, or draft status.\n"
+                'Reply with JSON only: {"sentence":"","counsel":""}'
+            ),
+            execution=(
+                "Symbol: {{symbol}}\nDraft: {{draft_id}}\nMoneyness: {{moneyness}}\n"
+                "Facts:\n{{facts}}"
+            ),
+        ),
+        "AdvisorExplainer": AgentPrompt(
+            system=(
+                "You are the Orchestrator Advisor. Code gives you one held position plus market guidance facts.\n"
+                "Decide if now is a good time to BUY / ADD. If it is not, that is a take-profit or trim signal.\n"
+                "Choose action:\n"
+                "- hold: no change\n"
+                "- take_profit: close the full position when confidence is high and risk is elevated\n"
+                "- trim: reduce exposure when risk is elevated but thesis is intact\n"
+                "- close: exit fully when the risk/reward is clearly poor\n"
+                "Weigh: price near 52w high or range high, forecast dir_conf and take_profit, upcoming earnings / "
+                "macro events, news wash, guidance basket weakness (QQQ / semis), and position PnL.\n"
+                "Return confidence 0-1 and a short reason. You do not place orders; you only advise.\n"
+                'Reply with JSON only: {"action":"hold","confidence":0.0,"reason":""}'
+            ),
+            execution=(
+                "Symbol: {{symbol}}\nPosition: {{position}}\n"
+                "Forecast: {{forecast}}\nGuidance: {{guidance}}\n"
+                "Events: {{events}}\nFacts:\n{{facts}}"
             ),
         ),
     }

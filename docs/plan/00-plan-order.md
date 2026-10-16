@@ -51,8 +51,17 @@ G3 是前置约束，不是加分项：任何一步若使 G3 退化，该步不�
 | **7** | 启用、配置与验收 | 3.1、3.10（Long 配置不可达）、3.11（文档漂移） | 6 | — | [07-enablement-acceptance.md](07-enablement-acceptance.md) |
 | **8** | 组合诊断与跨标的风险预算 | **新增**：无跨标的配给、无集中度约束、I2 仅 ticket 级 | 2、4、5 | **已落地（2026-10-11）** | [08-portfolio-diagnostics.md](08-portfolio-diagnostics.md) |
 | **9** | Risk control 界面（D4a / D39） | 3.4 的**可见性**（反相长期存活因界面不显示它） | 4、7 | — | [09-risk-control-ui.md](09-risk-control-ui.md) |
+| **11** | Draft reasoning（explain + counsel） | **新增**：草案 Reason 过薄；CLOSE 无 LLM；缺 ATM/ITM/OTM | 6（Narrator / manage） | **不在关键路径**。**已落地（2026-10-15）** | [11-draft-reasoning-counsel.md](11-draft-reasoning-counsel.md) |
+| **12** | Germany equity（IFX） | **新增**：欧股未路由；IFX 被当成 US SMART/USD | IB 合约 / Universe | **不在关键路径**。**已落地（2026-10-16）**。仅股票，无欧期权 | [12-germany-equity-ifx.md](12-germany-equity-ifx.md) |
+| **13** | Portfolio advisor | **新增**：持仓该不该止盈；草案仍等人批 | 6（manage） | **不在关键路径**。**已落地（2026-10-16）** | [13-portfolio-advisor.md](13-portfolio-advisor.md) |
 
 **关键路径**：1 → 4 → 5 → 6 → 7 → 9。步 2 与步 3 可与 4 并行推进，但**必须在步 6 之前全部完成**——步 6 会第一次真正打开"合法开仓"，2 与 3 是它的入场券。
+
+**侧轨（步 11）**：在轮动与 Narrator 落地之后，加深**全部** pending 草案的 Reason（OPEN 走更深 Narrator；CLOSE 走 ManageExplainer），允许 counsel 供人工 Reject，但**不**改 tactic / size / strike（D11）。详见 [11](11-draft-reasoning-counsel.md)。
+
+**侧轨（步 12）**：Universe Market `de` → SMART/EUR/IBIS（验收名 IFX）。仅股票报价与 BUY；无 EUREX 期权。详见 [12](12-germany-equity-ifx.md)。
+
+**侧轨（步 13）**：Advisor 读持仓与指导篮子（Yahoo 报价 + 已存 Fed / 财报日期），写出 `advisor_signals`。Manage 据此为股票和空头期权起草 CLOSE 或 TRIM。草案仍 pending。详见 [13](13-portfolio-advisor.md)。
 
 **另一条日历门轨道（不阻塞、但越早越好）**：**1 → 4b① 采集**。
 
@@ -320,6 +329,10 @@ graph TD
 | [07-enablement-acceptance.md](07-enablement-acceptance.md) | slot 语义、Long 可达、`paper` 档、D36 换轴。**已落地（2026-10-11）**，见该册 §0。多日影子对照仍是操作步骤 |
 | [08-portfolio-diagnostics.md](08-portfolio-diagnostics.md) | cycle 级配给 I4、因子桶上限 I5、指派暴露 I6、只读 `/book`。**已落地（2026-10-11）**。EF/CML/切点不进核心逻辑 |
 | [09-risk-control-ui.md](09-risk-control-ui.md) | **D4a 反相证据页**（`sanity` 列）、**`band_gap` 证据列**、`Volatility reading` 卡片（D39）。`paper` 档与十项身份判定已在步 7 落地 |
+| [10-implementation-gaps.md](10-implementation-gaps.md) | 落地后缺口复核（已关闭） |
+| [11-draft-reasoning-counsel.md](11-draft-reasoning-counsel.md) | **D40–D44**：全部 pending 草案 Reason 加深（explain + counsel）；ManageExplainer；ATM/ITM/OTM。**D45**：Telegram Approve-page URL 回归。**已落地（2026-10-15）** |
+| [12-germany-equity-ifx.md](12-germany-equity-ifx.md) | **D46–D50**：Germany / Xetra 股票（`market=de`，IBIS/EUR）；IFX。无欧期权。**已落地（2026-10-16）** |
+| [13-portfolio-advisor.md](13-portfolio-advisor.md) | **D51–D57**：组合顾问。股票与空头期权的 CLOSE / TRIM 草案；Yahoo + Fed / 财报。**已落地（2026-10-16）** |
 
 ---
 

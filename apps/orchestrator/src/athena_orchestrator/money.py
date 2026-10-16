@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from athena_settings import load_active
 
-CURRENCIES = ("HKD", "USD", "AUD", "CNY", "JPY", "CAD")
+CURRENCIES = ("HKD", "USD", "AUD", "CNY", "JPY", "CAD", "EUR")
 DASH = "—"
 
 
