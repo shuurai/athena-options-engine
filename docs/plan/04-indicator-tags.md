@@ -352,7 +352,7 @@ pricing.daily_bars ──► indicators.compute ──► Indicators ──┬�
 | **D4b**（独立排期，**已裁定拆两段**） | 真 IV 的获取与排期 | 每 cycle 采 ATM 链 mid → `chain_marks` → 解 BS 得 σ；排期 (a) 整步延后 (b) 只提前采集 (c) 采集+消费一起提前 | **✅ 已裁定 (b)**：**4b① 采集**挂步 1 之后立即启动（静默期即刻计时，只写自己的表、无下游读取方）；**4b② 消费**留步 5 之后 | **4b① 已落地。** 迁移 `035`。实盘 slot 追加 ATM mid，缺一边则跳过。`estimated_iv()` 仍为 `None`。**4b② 未做** |
 | **D16** | 数值字段的承载 | (a) `symbol_phases.indicators jsonb`（加列）(b) 只进 prompt、不留库 | **(a)** | **已落地 (a)。** 迁移 `029` |
 | **D17** | `HIGH_IV`/`LOW_IV` 退场 | (a) 保留别名映射 (b) 直接删除 | **(a)** | **已落地 (a)。** 注册表标 `legacy_price_proxy`，不再产生。历史字面量仍可分组 |
-| **D18** | `REGIME_RISK_OFF` 的指数与缺数据行为 | 指数选 `SPY` 或 `QQQ`；缺指数数据时 fail-open 还是 fail-closed | **`SPY`；缺数据 → fail-open 但记 `regime_unknown`** | **已落地。** 指数为 `SPY`。没有 bar 时 `regime_unknown`，不因此停掉该标的 |
+| **D18** | `REGIME_RISK_OFF` 的指数与缺数据行为 | 指数选 `SPY` 或 `QQQ`；缺指数数据时 fail-open 还是 fail-closed | **`SPY`；缺数据 → fail-open 但记 `regime_unknown`** | **✅ 追认（2026-11-03）。** 指数为 `SPY`；没有 bar 时 `regime_unknown`，不因此停掉该标的。**但实测 `SPY` 在 `market_bars` 为 0 行 ⇒ 该规则从未触发，兜底路径就是唯一路径。欠账：补拉 SPY 日线（一次、只存一处，与 [08](08-portfolio-diagnostics.md) 的 CML 锚点共用）** |
 
 > **与步 8 共用一个缺口**：watchlist 里**没有任何宽基指数**（实测 `SPY/QQQ/IVV/VOO/VTI/IWM/DIA` 在 `market_bars` 中各 0 行）。因此本步的 `REGIME_RISK_OFF` 会常年返回 `regime_unknown`。该指数序列应**只拉一次、只存一处**，同时供本步与 [08-portfolio-diagnostics.md](08-portfolio-diagnostics.md) 的 CML 锚点使用 —— 不要各自引一个。
 

@@ -1,7 +1,7 @@
 # 步 7 — 启用、配置与验收
 
 **主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：已落地（2026-10-11）
-**依赖**：步 6 ｜ **阻塞**：无。活账户仍是 `test`。多日影子对照是操作步骤，不是代码改动
+**依赖**：步 6 ｜ **阻塞**：无。活配置（2026-11-03）：三户 `custom`、paper 户 `paper`、`ZZTEST` `standard`。多日影子对照是操作步骤，不是代码改动
 
 ## 0. 落地结论
 
@@ -24,14 +24,14 @@
 | 缺省买股仍是旧行为 | 旧行为按**当时代码**：`long` 且意图不是 `income`，所以 `both` 也能买。不是原稿写的「必须 `accumulate`」 |
 | `ATHENA_MAY_BUY=off` | 即使该标的写了 `may_buy`，也回到上面的旧判断 |
 | 身份判定比十项 | `max_symbol, cash, halt, contracts, min_rv, min_dte, position, orders, margin, blackout`。把 `paper` 的每日单数从 6 改成 50，档名变为 `custom` |
-| 换轴旋钮先放在现有风控表 | 标签是 Min RV percentile new short。不称 implied vol。与 `rv_high_pctl` 同卡仍是步 9 |
+| 换轴旋钮先放在现有风控表 | 标签是 Min RV percentile new short。不称 implied vol。**同卡已落地**：它在 `Volatility reading` 卡内（`/risk` 页） |
 
 **仍是操作步骤，不是未做的代码**
 
 - 多日影子对照没有在 `PAPER1` 上跑。夹具都在 `ZZTEST`。`paper` 档只在 `ZZTEST` 上保存过，保存后已把该账户的活动行恢复。
 - 成本对照是一次调用数：观察写 Location 与 News，完整一轮再写 Narrator。没有多日 `ai_calls` 行数对比。
 - 没有 `ATHENA_PRICE_SINGLE_SOURCE`。回滚测的是现有六个开关一起关掉后仍写一条审计。不是原稿的七个开关逐一对照改造前。
-- 旧字段名在模型、风控、提示词、界面标签里已消失。迁移 `040` 与本套计划文档仍写出旧名，用来完成改名。Volatility reading 卡仍是步 9。
+- 旧字段名在模型、风控、提示词、界面标签里已消失。迁移 `040` 与本套计划文档仍写出旧名，用来完成改名。**`Volatility reading` 卡已落地**（`/risk` 页，`pages.py:2548` / `:2868`）。
 
 ---
 
@@ -131,28 +131,38 @@ if slot_state(now, settings.ib) == "athena":
 
 **为什么不是"改配置"**：`intent` 目前同时承担两个语义 —— "这是收益型还是累积型标的"与"允不允许买股"。前者是策略意图，后者是权限。把权限挂在意图上，就出现"要买股必须先声明自己是累积型"的耦合。改配置能解一时，改语义才不再复发。
 
-**改动**：
+**改动**（下方为 **as-built**，2026-11-03 对齐 `settings/model.py:179-196` 与 `wheel.py:336-341`；与本节初稿的差异见后）：
 
 ```python
 class TacticFlags(BaseModel):
     csp: bool = True
     cc: bool = True
     strangle: bool = True
-    intent: Literal["income", "accumulate"] = "income"
+    intent: Literal["income", "both", "accumulate"] = "income"   # 三个取值，非两个
     long: bool = False
-    may_buy: bool | None = None          # None = 旧行为（向后兼容）
+    may_buy: bool | None = None          # None = 回落到 legacy 判断
 
-    @property
-    def buy_allowed(self) -> bool:
-        if self.may_buy is not None:
-            return self.may_buy
-        return self.long and self.intent == "accumulate"     # 旧 payload 行为不变
+# wheel.py
+def may_buy(flags: TacticFlags) -> bool:
+    legacy = bool(flags.long) and flags.intent != "income"       # 注意：不是 == "accumulate"
+    if not may_buy_enabled() or flags.may_buy is None:
+        return legacy
+    return bool(flags.may_buy)
 ```
 
-- `_drafts` 的门改为 `if tactic == "BUY" and not flags.buy_allowed:`，原因文本相应改为 `may_buy is off`。
+- `drafts.py:154-157`：`tactic == "BUY"` 时改为调 `wheel.may_buy(flags)`，不再直读 `intent`。
 - `Purchase` 提示词把"Propose only when Long is on, intent is Accumulate"改为"Propose only when `may_buy` is on"；`{{long}}` 与 `{{intent}}` 继续传，作为上下文。
-- **向后兼容是硬要求**：`may_buy` 缺省为 `None` 时**逐字复现旧行为**。这样本步的迁移是"改一个 JSON 字段"，不是"改逻辑"。
-- **最小可达配置**（用于 E1 验收）：对想要 Long 的标的显式写 `{"may_buy": true}`；其余标的**不动**，继续不可买。
+- **最小可达配置**（用于 E1 验收）：对想要 Long 的标的显式写 `{"may_buy": true}`；其余标的**不动**。
+
+> **⚠ 对初稿"逐字复现旧行为"的更正**：初稿写 `may_buy is None` 时回落到 `intent == "accumulate"`，落地版回落到 **`intent != "income"`**。两者只在 `intent == "both"` 上不同：
+>
+> | `intent` | 旧口径（`== accumulate`） | 落地口径（`!= income`） | 差异 |
+> | --- | --- | --- | --- |
+> | `income` | 不可买 | 不可买 | 无 |
+> | `accumulate` | 可买 | 可买 | 无 |
+> | `both` | **不可买** | **可买**（若 `long=True` 且 `may_buy` 未设） | **放宽** |
+>
+> 所以准确的说法是"`income` 与 `accumulate` 逐字复现，`both` 被放宽"，而不是全量向后兼容。**实测该放宽未落到任何标的**：活配置 34 个标的中有 18 个是 `intent=both`，而这 18 个**全部**带显式 `may_buy=true` ⇒ 走的是显式分支，legacy 分支根本没被触发。若将来把某个 `both` 标的的 `may_buy` 清成 `null`，它会立刻变成可买 —— 这是唯一需要留意的路径。
 
 ### 3.2 E2 — 观察与许可解耦（D8）
 
@@ -299,10 +309,10 @@ fixture_intc_high():
 
 **你要做的三件事**（按顺序）：
 
-1. **裁定 D1–D39**。未裁定的项不阻塞其余步，只阻塞它归属的那一步。
-   - **本步已落地**：D8 (a)、D9 (b)、D26 (b)、D28、D36 (a)。D27 只落地了干跑开关。见 §0。
-   - **已随更早的步落地**：D4a、D4b 的采集段、D37 (c)、D38 (b)。D39 与 Volatility reading 卡仍是步 9。
-   - **其余待决**：D29–D35。
+1. **裁定 D1–D39**。**2026-11-03 起已全部裁定完毕**（前三轮 9 条 ＋ 第四轮追认 31 条），决策层面零待决，只剩实施欠账。
+   - **本步已落地**：D8 (a)、D9 (b)、D26 (b)、D28、D36 (a)。D27 只落地了干跑开关。
+   - **已随更早的步落地**：D4a、D4b 的采集段、D37 (c)、D38 (b)、D39（`Volatility reading` 卡在 `/risk`）。
+   - **已裁定但未做**：D35（单开 `Portfolio budget` 卡）、4b②（真 IV 消费）。清单见主计划 §6 末。
 2. **选定验收档位**（D26）并确认 `paper` 档数字（含 D36 的字段改名）。数字已按 §3.3 放进 `paper` 档。活账户没有切过去。
 3. **批准灰度顺序**：步 1 → **4b①（采集，与步 2/3 并行即可）** → 步 3 → 步 2 → 步 4 → 步 5 → 步 6 → 步 7 → 步 9（与主计划依赖图一致；步 2 与步 3 可互换，但都必须在步 6 之前；**4b② 与步 8 不在关键路径**）。
 
@@ -328,11 +338,11 @@ SELECT * FROM symbol_phases WHERE state = 'NAKED_CALL';
 | # | 待决 | 选项 | 推荐 | 落地 |
 | --- | --- | --- | --- | --- |
 | **D8** | 开仓时段语义 | (a) 观察全天、草案仍限 Athena slot（3.2）(b) 完全放开时段 | **(a)** | **已落地 (a)。** 观察与草案拆开。`ATHENA_SLOT_SPLIT=off` 回到仅 Athena slot 全文 |
-| **D9** | Long 可达方式 | (a) 逐标的设 `intent=accumulate` (b) 新增 `may_buy` 与 intent 正交（3.1） | **(b)** | **已落地 (b)，缺省与原稿不同。** 缺省是 `long` 且意图不是 `income`。显式 `may_buy` 覆盖。收入型默认仍不买 |
-| **D26** | 验收使用的风控档 | (a) 继续用 `test` (b) 新增 `paper` 档（3.3 的数字）(c) 直接用 `standard` | **(b)** | **已落地 (b)。** 档可选。十项已在 `ZZTEST` 上保存并恢复。活账户仍是 `test` |
+| **D9** | Long 可达方式 | (a) 逐标的设 `intent=accumulate` (b) 新增 `may_buy` 与 intent 正交（3.1） | **(b)** | **✅ 裁定并落地 (b)**（2026-11-03 追认）。缺省是 `long` 且意图不是 `income`（含 `both` ⇒ 相对旧口径放宽，见 §3.1 更正表）。显式 `may_buy` 覆盖。活配置 **25/34 标的 BUY 可达**，18 个 `both` 全部带显式 `may_buy=true`，故放宽未生效于实盘 |
+| **D26** | 验收使用的风控档 | (a) 继续用 `test` (b) 新增 `paper` 档（3.3 的数字）(c) 直接用 `standard` | **(b)** | **已落地 (b)。** 档可选。十项已在 `ZZTEST` 上保存并恢复。**活配置现状（2026-11-03 实测）**：三个 IBKR 账户为 `custom`，`paper` 账户（`DUR253115`）为 `paper`，`ZZTEST` 为 `standard` —— **没有账户跑 `test` 或 `harvest`** |
 | **D27** | 验收工装 | (a) 只用合成 fixture (b) 只用 live shadow (c) 两者（fixture 先行） | **(c)** | **夹具已落地。** 多日影子对照仍是操作步骤 |
 | **D28** | `observe_slots` 的取值域 | `always` 定义为 HKT 07:00–24:00 / 与 Athena slot 相同 / 24×7 | **HKT 07:00–24:00 且沿用周末 idle** | **已落地。** `always` 是工作日 07:00 至午夜。周末是 idle |
-| **D36** | `min_iv_rank_new_short` 在 D4a 期间怎么办 | (a) 换轴到 `rv_pctl` 并改名 (b) 保留现状只改文档 (c) 临时置 0 | **✅ 已裁定 (a)** | **已落地 (a)，同卡未做。** 字段是 `min_rv_pctl_new_short`，读 `rv_pctl`，`paper` 档为 40。旋钮在现有风控表。Volatility reading 卡仍是步 9 |
+| **D36** | `min_iv_rank_new_short` 在 D4a 期间怎么办 | (a) 换轴到 `rv_pctl` 并改名 (b) 保留现状只改文档 (c) 临时置 0 | **✅ 已裁定 (a)** | **已落地 (a)，同卡亦已落地。** 字段是 `min_rv_pctl_new_short`，读 `rv_pctl`，`paper` 档为 40。**`Volatility reading` 卡已在 `/risk` 页**（`pages.py:2548` / `:2868`），该旋钮就在卡内 |
 | **D37** | 行权价带的口径 | (a) 固定 10% (b) 固定调小 (c) 按 `σ_ref × 0.5 × √T` 缩放 (d) 纯 delta 无护栏 | **✅ 已裁定 (c)** | **已随步 5 落地。** 不在本步 |
 | **D38** | `iv_rv_multiple` 的取值与它算什么 | (a) 写死 (b) 进 Settings 三档 1.05/1.35/1.80 标"假设" (c) 全取 1.0 | **✅ 已裁定 (b)** | **已随步 5 落地。** 不在本步 |
 

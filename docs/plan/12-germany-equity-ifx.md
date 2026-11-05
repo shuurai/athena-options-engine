@@ -1,7 +1,7 @@
 # 12 — Germany equity (IFX) — stocks only
 
 **主计划**：[00-plan-order.md](00-plan-order.md)
-**状态**：**Implemented**（2026-10-16）。Side track. Not on the original signal critical path.
+**状态**：**Implemented**（2026-10-16），**D46–D50 已于 2026-11-05 追认**（五项全部按现行，无附动作）。Side track. Not on the original signal critical path.
 **依赖**：IB Germany equity market data; Universe Market `de` on the name
 
 > **性质**：提案与验收口径。提案先入 `docs/plan`，再实现。
@@ -19,6 +19,8 @@
 | **D50** | Options | Option chain / ask / mid for `de` underlyings return empty / skip. |
 
 Ops prerequisite: IB **European (Germany) equity** Level I (or delayed entitlement). Routing alone cannot invent a quote.
+
+**核定作业（2026-11-05，追认时的代码核对）**：`broker.py:1050` 确为 `Stock(code, "SMART", "EUR", primaryExchange="IBIS")` —— 不写 `primaryExchange` 时，SMART 在 EUR 名下可能解到其他欧洲交易所并返回别的价，所以这个 primary 不是装饰。`slots.py:35-40` 对 `de` 取 `Europe/Berlin` 工作日 09:00–17:30，**DST 由时区自动偏移**。边界已明确：Xetra 17:30–17:35 的**收盘集合竞价不在可交易窗口内**。`market=de` 对任意 ticker 生效，不止 IFX。
 
 ---
 

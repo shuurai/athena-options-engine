@@ -61,7 +61,7 @@ G3 是前置约束，不是加分项：任何一步若使 G3 退化，该步不�
 
 **侧轨（步 12）**：Universe Market `de` → SMART/EUR/IBIS（验收名 IFX）。仅股票报价与 BUY；无 EUREX 期权。详见 [12](12-germany-equity-ifx.md)。
 
-**侧轨（步 13）**：Advisor 读持仓与指导篮子（Yahoo 报价 + 已存 Fed / 财报日期），写出 `advisor_signals`。Manage 据此为股票和空头期权起草 CLOSE 或 TRIM。草案仍 pending。详见 [13](13-portfolio-advisor.md)。
+**侧轨（步 13）**：Advisor 读持仓与指导篮子（宇宙 IB 报价 + Yahoo 标题 + 已存 Fed / 财报日期），写出 `advisor_signals`。Manage 据此为股票和空头期权起草 CLOSE 或 TRIM。草案仍 pending。详见 [13](13-portfolio-advisor.md)。
 
 **另一条日历门轨道（不阻塞、但越早越好）**：**1 → 4b① 采集**。
 
@@ -154,7 +154,7 @@ graph TD
 
 ### 步 7 — 启用、配置与验收
 
-**落地（2026-10-11）**：观察与草案已拆开。`may_buy` 与意图分开。`fixture_june_dip` 与 `fixture_intc_high` 已有。五态各有一条夹具。`paper` 档已在 `ZZTEST` 上保存并恢复，活账户仍是 `test`。现有六个开关关掉后仍写审计。多日影子对照是操作步骤。Volatility reading 卡仍是步 9。详见 [07](07-enablement-acceptance.md) §0。
+**落地（2026-10-11）**：观察与草案已拆开。`may_buy` 与意图分开。`fixture_june_dip` 与 `fixture_intc_high` 已有。五态各有一条夹具。`paper` 档已在 `ZZTEST` 上保存并恢复。**活配置（2026-11-03 实测）**：三个 IBKR 账户为 `custom`，`paper` 账户（`DUR253115`）为 `paper`，`ZZTEST` 为 `standard`。现有六个开关关掉后仍写审计。多日影子对照是操作步骤。**`Volatility reading` 卡已落地**（`/risk` 页，`pages.py:2548` / `:2868`）。详见 [07](07-enablement-acceptance.md) §0。
 
 ### 步 4b — 真 IV：采集与消费（非关键路径，新增）
 
@@ -190,12 +190,12 @@ graph TD
 | D3 | **历史长度目标** | ≥252 交易日 / ≥300 交易日 / 视 vendor 上限 | **≥252 交易日**；不到就**改 tag 名**（`HIGH_52W` → `HIGH_RANGE`），不假装 | 1 |
 | **D4a** | **本步是否引入 IV 口径** | (a) `RV × 倍数` (b) 接 IB 链 IV (c) 跨式近似反推 **(d) 本步不引入，只去伪 + 留接口** | **✅ 裁定：(d)**。实测：(c) 因**分子冻结**退化为**正线性缩放**，`iv_rank` 逐位不变；`option_choices` 无 bid/ask/mid/IV 列，(b) 物理上取不到 | 4 |
 | **D4b** | **真 IV 的获取路线与排期** | 每 cycle 采 ATM 链 mid → `chain_marks` → 解 BS 得 σ；排期(a) 整步延后 (b) **只提前采集** (c) 采集+消费一起提前 | **✅ 裁定：只提前采集（b）** —— 采集挂步 1 之后（静默期即刻计时），消费留步 5 之后 | 4b① / 4b② |
-| D5 | **合法短仓组合集** | 是否允许同标的同时存在 short put 与 short call | **允许**（这是轮动常态）；但禁止双空 call 与无覆盖 call | 2 |
+| D5 | **合法短仓组合集** | 是否允许同标的同时存在 short put 与 short call | **✅ 裁定并落地：允许**。轮动常态（short put ＋ 持股 ＋ short call）放行；仍拒重复空 put、strangle 叠仓、以及超出持股覆盖的空 call。`strict_conflict` 可一键收回，默认 `False` | 2 |
 | D6 | **CC 持股粒度** | contracts ≤ `floor(shares/100)`；不满 100 股时 | **拒绝并给出明确原因文本**，不静默放过 | 2 |
 | D7 | **ticket 实体化方式** | (a) 新表 `tickets` + `drafts.ticket_id` (b) 仅用同批次 id 分组 | **✅ 裁定并落地：(a)**。表在 `038_tickets.sql` | 6 |
 | D8 | **开仓时段语义** | (a) 扫描全天、开仓许可仍限 Athena slot（可配置）(b) 完全放开时段 | **✅ 裁定并落地：(a)**。工作日 07:00 至午夜观察，草案仍限 Athena slot | 7 |
 | D9 | **Long 可达方式** | (a) 逐标的设 `intent=accumulate` (b) 新增 `may_buy` 与 intent 正交 | **✅ 裁定并落地：(b)**。缺省是 Long 且意图不是 Income，不是「必须 accumulate」 | 7 |
-| **D36** | **`min_iv_rank_new_short` 在 D4a 期间怎么办** | (a) 改指向 `rv_pctl` 并重命名 (b) 保留现状、改名说明为"价格位置过滤" (c) 临时置 0 | **✅ 裁定并落地：(a)**。字段已改名，读 `rv_pctl`。`paper` 档为 40。与 `rv_high_pctl` 同卡仍是步 9 | 7 / 9 |
+| **D36** | **`min_iv_rank_new_short` 在 D4a 期间怎么办** | (a) 改指向 `rv_pctl` 并重命名 (b) 保留现状、改名说明为"价格位置过滤" (c) 临时置 0 | **✅ 裁定并落地：(a)**。字段已改名，读 `rv_pctl`。`paper` 档为 40。**与 `rv_high_pctl` 同卡已落地**（`Volatility reading`，`/risk` 页） | 7 / 9 |
 | **D37** | **行权价带的口径** | (a) 固定 `strangle_otm_pct = 10` (b) 固定调小（如 5）(c) **按 `σ_ref × 0.5 × √T` 缩放、以 delta 目标选档** (d) 纯 delta、无护栏 | **✅ 裁定：(c)** —— `strangle_otm_pct` 更名 `chain_band_pct`（发现带宽 25），选择由 `screener.candidates` 按目标 delta 做，护栏 `[3%, 20%]` | 5 |
 | **D38** | `iv_rv_multiple` 的取值与它算什么 | (a) 写死代码 (b) **进 Settings，按 `RV20` 三档默认 1.05 / 1.35 / 1.80，标注"假设非测量"** (c) 全取 1.0 | **✅ 裁定：(b)** | 5 |
 | **D39** | **行权价带的字段放在哪张卡片** | (a) 单开"Strangle band"卡片 (b) 并入 `Volatility reading` (c) 放回原 `strangle_otm_pct` 的位置 | **✅ 裁定：(b)** —— 与 `rv_window` / `rv_high_pctl` / `rv_low_pctl` 同卡 | 9 |
@@ -221,7 +221,12 @@ graph TD
 | 轮次 | 裁定 | 落地步 |
 | --- | --- | --- |
 | 一 | **D26**（`paper` 档按 07 册建议值）、**D4a**（本步不引入 IV，只去伪 + 留接口） | 7（D26 已落地，活账户未切换）／4（D4a 已落地） |
-| 二 | **D4a/D4b 拆分**（确认）、**D36 (a)**（换轴改名）、**D37 (c)**（按波动率缩放的 delta 目标）、**D38 (b)**（进 Settings 标"假设"）、**D39 (b)**（并入 `Volatility reading`）、**D4b (b)**（只提前采集） | D4a 已落地。D37 / D38 已随步 5 落地。D36 的换轴已在步 7 落地，同卡仍是步 9。D39 仍未落地。4b① 采集已落地，4b② 未做 |
+| 二 | **D4a/D4b 拆分**（确认）、**D36 (a)**（换轴改名）、**D37 (c)**（按波动率缩放的 delta 目标）、**D38 (b)**（进 Settings 标"假设"）、**D39 (b)**（并入 `Volatility reading`）、**D4b (b)**（只提前采集） | D4a 已落地。D37 / D38 已随步 5 落地。D36 的换轴已在步 7 落地。**D39 已落地**：`Volatility reading` 卡在 `/risk` 页（`pages.py:2548` 定义、`:2868` 挂载），`chain_band_pct` / `strangle_delta_target` 与 `rv_*` 同卡。4b① 采集已落地，4b② 未做 |
+| 三（2026-11-03，**追认**） | **D5**（允许 short put ＋ short call 并存）、**D9**（确认 `BUY` ＋ `OPEN_CSP` 必须可达） | **两条都已落地，本轮是补裁定、不改行为**。D5 见 [02](02-safety-invariants.md) §3.3 代码对照；D9 见 [07](07-enablement-acceptance.md) §3.1 |
+| 四（2026-11-03，**追认 31 条**） | **D1、D2、D3、D6、D7、D8、D10–D25、D27–D35** —— 即「40 个决策节点 − 前三轮已裁定的 9 条（`D4a`/`D4b`/`D5`/`D9`/`D26`/`D36`/`D37`/`D38`/`D39`）」 | **26 条纯追认现行实现，5 条附修正动作**：`D1` 表述改为「close 可取最新、high/low 锁日线」、`D15` 追认 63 但把常量挪进 Settings、`D18` 追认语义并补拉 SPY 日线、`D33` 追认分工但位置元组改具名字典、`D35` 单开 `Portfolio budget` 卡。**决策层面至此零待决**；剩余是实施欠账，见 §6 末 |
+| 五（2026-11-05，**追认旁支 18 条**） | **D40–D45**（[11](11-draft-reasoning-counsel.md) 草案推理深度）、**D46–D50**（[12](12-germany-equity-ifx.md) 德国 IFX 股票）、**D51–D57**（[13](13-portfolio-advisor.md) 组合顾问） | **15 条按现行追认，3 条附修正**：`D42` fact-pack 回退文本要标注「本地生成」；`D52` 篮子由 6/7 半导体换成 `QQQ/SPY/IWM/TLT/GLD/SOXX/NVDA`；`D54` 追认语义但删掉从未被读取的 `profit_take_relief_pct`。至此 **D1–D57 全部 58 个节点均有裁定** |
+
+> **"追认"的意思要写清**：第三轮不是新决策，而是把**已经上线并在运行**的两条行为正式补进裁定表。核实依据是代码与活配置，不是这两句话本身 —— 见 §6 末的核实结论。
 
 **步 1–4 已落地的决策**（2026-10-11，按代码，不单按推荐）：
 
@@ -250,7 +255,56 @@ graph TD
 
 **步 7 已落地的决策**（2026-10-11）：D8 (a)、D9 (b)、D26 (b)、D28、D36 (a)。D27 只落地了干跑开关。D9 的缺省是 Long 且意图不是 Income。活账户没有切到 `paper`。
 
-**其余待决**（D33–D35）。D29–D32 已随步 8 落地。D5 与步 6 已落地，不再悬空。
+**决策层面零待决**。D1–D39（40 个节点，`D4` 拆两段）已全部裁定：前三轮 9 条，第四轮追认 31 条。D29–D32 已随步 8 落地。D5 与步 6 已落地。**剩下的不是决策，是实施欠账**（见 §6 末）。
+
+> **旁支 18 条已于 2026-11-05 一并追认**（`D40–D57`，见第一张已裁定表的第五轮）。**D1–D57 共 58 个节点全部有裁定**，不再有任何一条处于"自述落地、未经拍板"的状态。其中 3 条附了修正动作（`D42` / `D52` / `D54`），已并入 §6 末的实施欠账表。
+
+### D5 / D9 追认的核实结论（2026-11-03，读代码与活配置快照）
+
+| 项 | 核实方式 | 结论 |
+| --- | --- | --- |
+| D5 组合是否真被放行 | `drafts.py:197` — `strict_conflict=False` 时跳过一刀切 | ✅ 放行。活配置 `risk.strict_conflict = False`，所以「short put ＋ 持股 ＋ short call」现在是可表达的 |
+| D5 的拦截边界是否与矩阵一致 | `drafts.py:219-225` `_conflict_reason`、`:199-202` `_cover_reason`、`:243-273` `_held_call_contracts` | ✅ 一致。重复空 put、strangle 叠仓、无覆盖空 call 均被拒；**双开 CC 是靠覆盖度挡住**（持仓 ＋ 在挂 ＋ 未决草案三者求和），不是靠冲突表 |
+| D9 `BUY` 是否可达 | `wheel.py:336` `may_buy()`；活配置 34 标的 | ✅ **25/34 可达**（显式 `may_buy=true`）。`intent=both` 的 18 个**全部**带显式 `may_buy=true`，所以「缺省放宽到 `both`」这条在实盘**没有落到任何标的**上 |
+| D9 的 `BUY` ＋ `OPEN_CSP` 同票据 | 07 册 G1 夹具 | ✅ `may_buy` 打开时同一 ticket 产 `BUY`（`leg_index=0`）＋ `OPEN_CSP`（`leg_index=1`） |
+
+**顺带核对的活配置取值**（不是 D5/D9 的问题，但会误导读者拿旧裁定值对账）：活配置**按账户各一份**，三个 IBKR 账户**都不是** `harvest`，而是 `custom`。取值逐户不同，方向一致地**比 `paper` 稿更保守**：
+
+| 账户 | `profile` | `max_position_per_symbol` | `min_dte_new` | `min_rv_pctl_new_short` | `otm_floor_pct` | `strangle_delta_target` |
+| --- | --- | --- | --- | --- | --- | --- |
+| Primary `U3311187` | `custom` | 80000 | 30 | 50 | 5 | 0.28 |
+| Relaxed `U3726383` | `custom` | 80000 | 30 | 60 | 8 | 0.16 |
+| Defensive `U9390859` | `custom` | 80000 | 30 | 45 | 4 | 0.30 |
+| paper `DUR253115` | `paper` | 20000 | 21 | 40 | 3 | 0.28 |
+| `ZZTEST` | `standard` | **0** | 7 | 50 | 3 | 0.28 |
+
+`min_rv_pctl_new_short = 40` 与 `otm_floor_pct = 3` 是 **`paper` 档的基准**，不是三个活账户的现行值 —— 三个活账户都把 RV 门与最小距离收紧（最紧的是 Relaxed：60 / 8 / δ 0.16），方向与「Relaxed 是长期低维护、低风险」相符。这属上线后的调参，**不改变已裁定的语义**。
+
+> **`max_position_per_symbol = 0` 的正确读法**（此处更正先前的误判）：它**不是**未解除的缺陷。`drafts.py:585` 的 docstring 写明「One when the money cap is off」，`pages.py:2805` 的界面帮助写明「Zero turns this off」—— 「关掉钱上限 ⇒ 一次开一张」是**写进语义**的行为。`drafts.py:723-726`（标价缺失时不再要求 mark）与 `:1627`（`_amend_cap` 回落到 `max_contracts_per_symbol`）都按同一口径分支，三处一致。三个 IBKR 账户现为 **80000** 名义金额上限（簿记币种，含 FX），`paper` 为 20000，故实盘仓位计算**是活的**。
+>
+> 取 0 的只有 `ZZTEST`（`standard` 种子档）；而 `model.py:18` 的字段默认值本身就是 `= 0` —— 含义是**任何新建账户若不显式设值，会落在「一张永远」**。历史快照里 `U9390859` 曾有 131 个版本跑 `harvest` 且取 0，2026-10-15 03:19 切到 `custom` / 80000 后解除。要防的是**种子默认值**，不是运行时逻辑；这条应在建户流程里填正数，而不是改 `open_quantity`。
+
+### 实施欠账（第 4、5 轮追认之后，2026-11-05）
+
+决策已全部清零（D1–D57，58 个节点）。以下是**要动手做的事**，按依赖排序。1–3 来自第五轮的三条修正，4–6 来自第四轮，7–9 是既有欠账。
+
+| # | 待做 | 依据 | 性质 | 阻塞谁 |
+| --- | --- | --- | --- | --- |
+| 1 | fact-pack 回退文本要**标注来源**（本地生成），让读者能区分模型输出与代码拼装 | D42 | 只改 `draft_facts` / 文案拼装层，不动逻辑 | 无 |
+| 2 | 删掉 `profit_take_relief_pct`：`model.py:161` 字段、`pages.py:2931` UI 行、`:2963` 保存分支 | D54 | 删除 ＋ 迁移（字段下线）；**策略层本来就没读过它，删了不改行为** | 无 |
+| 3 | 篮子换成 `QQQ, SPY, IWM, TLT, GLD, SOXX, NVDA` | D52 | 改 `model.py:157` 的 `default_factory` | 附带解掉第 6 条的一半 |
+| 4 | `_MIN_BARS` 由代码常量（`agents._MIN_BARS = 63`）挪进 Settings | D15 | 加字段 ＋ 迁移；行为不变 | 无 |
+| 5 | `PROFILES` 的位置元组改具名字典（保留 `GRADE_KNOBS` 分工） | D33 | 纯重构，**断言 `matched_profile` 结果不变** | 无 |
+| 6 | 补拉 SPY 日线，一次、只存一处 | D18 | 数据任务；**第 3 条做完后 SPY 自动进 universe，本条退化为"确认它真被拉到"** | 步 4 的 `REGIME_RISK_OFF` 目前**不可能触发** |
+| 7 | 单开 `Portfolio budget` 卡，搬 `max_bucket` / `max_assign` / `min_cash_after_assign` / `assign_delta` 出 Limits | D35 | 页面结构调整；`Limits` 卡现已有 19 个字段 | 无 |
+| 8 | 4b② 真 IV 消费（`chain_marks` → 解 BS 得 σ → 替换 `estimated_iv()`） | D4b | 步 5 之后的独立排期 | D30 的 (a) 路线、D20 的 `iv` 列都等它 |
+| 9 | 建户流程里显式填正数 `max_position_per_symbol` | 种子默认 `model.py:18` | 流程约定，不改代码 | 新账户否则落「一张永远」 |
+
+> **两条要先说清的严重性**：
+>
+> **第 6 条**：`SPY` 在 `market_bars` 里是 **0 行**。D18 追认的「缺数据 fail-open 并记 `regime_unknown`」不是兜底路径，而是**唯一路径** —— 这个 regime 层从上线起就没工作过。第 3 条换篮子会让 SPY 进 universe，但「进 universe」不等于「被拉到 bar」，所以第 6 条仍要确认。
+>
+> **第 2 条**：`profit_take_relief_pct` 不只是"没生效"，它的 UI 帮助文案还**明确宣称**它会从止盈阈值里扣点、且不低于 20。一个写着会做事、实际不做事、还解释了怎么做的旋钮，比没有这个旋钮更危险 —— 这正是 D34 推翻「假选项」时用的同一条理由。
 
 ---
 
@@ -309,7 +363,7 @@ graph TD
 | 回滚需要连带回滚 | 若某步同时改了 schema 与逻辑 | 每步一次迁移、一次逻辑变更，**可单独回滚**；迁移一律向后兼容（加列/加枚举，不删列） |
 | 验收靠"看起来对" | 没有可执行判据 | 每步分册的「验收标准」必须是可运行的命令或 SQL |
 | 未知 tag 静默携带 | 新增指标后，未注册的 tag 会被带入审计与 prompt | 步 4 的 tag 注册表要求未知 tag 记 warning 并留痕 |
-| 决策悬空 | 决策点未拍板导致 spec 分叉 | 第 6 节的 **D1–D39** 逐条裁定后，才进入对应步的开发。**步 1–7 的已裁定项已随代码落地**（D1–D3、D5–D12 中已列各项、D8、D9、D16–D18、D23–D26、D28、D36、D37、D38；D15 取了 63 而非 252）。**4b① 采集已落地，4b② 未做。** **已裁定但未落地**：D39（Volatility reading 卡）。D27 的夹具已落地，多日影子对照仍是操作步骤。其余待决 |
+| 决策悬空 | 决策点未拍板导致 spec 分叉 | 第 6 节的 **D1–D39** 逐条裁定后，才进入对应步的开发。**步 1–7 的已裁定项已随代码落地**（D1–D3、D5–D12 中已列各项、D8、D9、D16–D18、D23–D26、D28、D36、D37、D38；D15 取了 63 而非 252）。**4b① 采集已落地，4b② 未做。** **D39 已落地**（`/risk` 页 `Volatility reading` 卡，`pages.py:2548` 定义、`:2868` 挂载）。D27 的夹具已落地，多日影子对照仍是操作步骤。其余待决 |
 | **日历门被工时思维掩盖** | 步 4b① 的 20 个交易日静默期既不能加班压缩、也不能回填，一旦排到关键路径末端，`IV_RICH` 就会在整套改造完成后才开始计时 | 把它从关键路径拉出来挂到步 1 之后（本册 §3 的"日历门轨道"）；采集段**无下游读取方**，因此提前启动零风险 |
 | **反相被"假修复"掩盖** | 最危险的失败模式：有人用一个恰好也是 `∝1/S` 的公式（如跨式近似）宣称修好了反相，而 `iv_rank` 逐位不变 | 步 4 的 A2（`phases.py` grep 零命中）、A3（**缩放不变性**检验）；步 9 的 A7③（套跨式近似后 `sanity` **仍须为 ⚠**）；以及步 9 §3.4 第 6 条禁止假旋钮 |
 | **"假设"被当成"测量"** | 步 5 的 `iv_rv_multiple` 是操作者知识，一旦被下游（prompt / `IV_RICH` / 界面）当作 IV，整条 D4a 的诚实性就没了 | 04 册 §3.1.6 三条硬约束（不得称 IV、不得用于 `IV_RICH`、必须在 Settings 标注 assumption）；05 册 D37/D38 与 A15；09 册 A12 |
@@ -330,9 +384,9 @@ graph TD
 | [08-portfolio-diagnostics.md](08-portfolio-diagnostics.md) | cycle 级配给 I4、因子桶上限 I5、指派暴露 I6、只读 `/book`。**已落地（2026-10-11）**。EF/CML/切点不进核心逻辑 |
 | [09-risk-control-ui.md](09-risk-control-ui.md) | **D4a 反相证据页**（`sanity` 列）、**`band_gap` 证据列**、`Volatility reading` 卡片（D39）。`paper` 档与十项身份判定已在步 7 落地 |
 | [10-implementation-gaps.md](10-implementation-gaps.md) | 落地后缺口复核（已关闭） |
-| [11-draft-reasoning-counsel.md](11-draft-reasoning-counsel.md) | **D40–D44**：全部 pending 草案 Reason 加深（explain + counsel）；ManageExplainer；ATM/ITM/OTM。**D45**：Telegram Approve-page URL 回归。**已落地（2026-10-15）** |
-| [12-germany-equity-ifx.md](12-germany-equity-ifx.md) | **D46–D50**：Germany / Xetra 股票（`market=de`，IBIS/EUR）；IFX。无欧期权。**已落地（2026-10-16）** |
-| [13-portfolio-advisor.md](13-portfolio-advisor.md) | **D51–D57**：组合顾问。股票与空头期权的 CLOSE / TRIM 草案；Yahoo + Fed / 财报。**已落地（2026-10-16）** |
+| [11-draft-reasoning-counsel.md](11-draft-reasoning-counsel.md) | **D40–D44**：全部 pending 草案 Reason 加深（explain + counsel）；ManageExplainer；ATM/ITM/OTM。**D45**：Telegram Approve-page URL 回归。**已落地（2026-10-15）、已追认（2026-11-05，D42 附修正）** |
+| [12-germany-equity-ifx.md](12-germany-equity-ifx.md) | **D46–D50**：Germany / Xetra 股票（`market=de`，IBIS/EUR）；IFX。无欧期权。**已落地（2026-10-16）、已追认（2026-11-05，无附修正）** |
+| [13-portfolio-advisor.md](13-portfolio-advisor.md) | **D51–D57**：组合顾问。股票与空头期权的 CLOSE / TRIM 草案；IB 报价 + Yahoo 标题 + Fed / 财报。**已落地（2026-10-16）、已追认（2026-11-05，D52 换篮子、D54 删假旋钮）** |
 
 ---
 

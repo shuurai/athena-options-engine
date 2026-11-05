@@ -123,7 +123,7 @@ T      | seed   | 15 | 2026-10-08 16:00:00 | 2026-10-09 17:00:00 |              
 
 | # | 待决 | 选项 | 推荐 | 落地 |
 | --- | --- | --- | --- | --- |
-| **D1** | 日线唯一真源 | (a) 仅 `ib-daily` (b) `ib-daily + ib-delayed` 取最新 | **(a)** | **已落地，介于 (a)(b) 之间。** 一日一行。同日 `ib-delayed` 可更新 close；high/low 留 `ib-daily`。不是 (b) 的整行取最新。`pricing.daily_bars` |
+| **D1** | 日线唯一真源 | (a) 仅 `ib-daily` (b) `ib-daily + ib-delayed` 取最新 | **(a)** | **✅ 追认现行为（2026-11-03）。** 一日一行；同日 `ib-delayed` **只可更新 close**，`open / high / low` 归 `ib-daily`。这是刻意设计 —— OHLC 里只有 close 需要盘中修正，high/low 用盘中价会污染 RV 与 tag。**不属 (b) 的整行取最新**。`pricing.daily_bars` |
 | **D2** | `seed` bar 处置 | (a) 物理删除并禁止再写 (b) 保留但读路径排除 | **(a)** | **已落地 (a)。** 迁移 `027` 删除 `seed` 与 `pool-sync`。活库这两类 source 为 0 |
 | **D3** | 历史长度目标 | ≥252 交易日 / ≥300 / vendor 上限 | **≥252**，不足则改名 tag | **已落地。** 不足 252 个 `ib-daily` 日记 `history_short`，tag 改为 `HIGH_RANGE` / `LOW_RANGE`。活库 31 个标的里 4 个不足并已标记 |
 

@@ -152,6 +152,19 @@ short_call  := 存在 OPT 持仓 right='C' 且 quantity<0，或挂单 SELL call
 
 > **刻意保留的限制**：strangle 必须"独占"同标的的期权腿。理由是它本身已含两条腿，与之叠加会超出当前的风险口径；若将来要放开，需先扩展 I2 的 margin 模型。
 
+**代码对照（2026-11-03 复核 `packages/strategy-nfr/src/athena_strategy/drafts.py`，矩阵与实现一致）**：
+
+| 矩阵中的规则 | 实现位置 | 说明 |
+| --- | --- | --- |
+| `strict_conflict` 一键收回 | `drafts.py:197` `_opening_block` | `settings.risk.strict_conflict` 为真时才回到「有短仓就全拒」；默认 `False`（`settings/model.py:25`）⇒ **默认放行组合** |
+| `OPEN_CC` 必须受 I1 | `drafts.py:199-202` → `_cover_reason` | 无股/不足则返回 `I1: cc needs N covered shares, held M` |
+| `duplicate short put` | `drafts.py:221-222` | `tactic == "OPEN_CSP" and short_put` |
+| `option leg already open`（strangle 独占） | `drafts.py:223-224` | `tactic == "OPEN_STRANGLE" and any_leg` |
+| `duplicate short call（超出覆盖）` | **`_cover_reason` 间接实现**，非显式检查 | `_conflict_reason` 里 `short_call` 被解构成 `_short_call` 后**未使用**；双开 CC 之所以被拒，是因为 `_held_call_contracts`（`drafts.py:243-273`）把**持仓空 call ＋ `submitted`/`queued` 的 SELL call ＋ `pending` 的 `OPEN_CC` 草案**三者求和，`remaining = shares//mult − used` 因而不会超额。⇒ 结论等价，但**机制是覆盖度而非冲突表** |
+| 覆盖度统计含在挂单与未决草案 | 同上 | 这是比原稿更严的一处：即使两张 CC 草案同轮生成，也不会双双通过覆盖检查 |
+
+> **由此产生的一条残余风险（非本步范围）**：覆盖度是**开仓时点**的判断。若持仓股数在开仓之后减少（卖出、指派、拆股），已存在的 short call 会**变成未覆盖**，而上述任何检查都不会在事后重跑。这属生命周期问题，归步 6 的状态机；步 2 只负责"开出来时是合法的"。
+
 ### 3.4 对既有"已验收"记录的影响（必须显式处理）
 
 tracker `P4-18` 的验收文本是："Fixture `ZZCF` already had a short option. A new CSP was stored as blocked." —— 在新规则下，这句话**只在既有空头是 short put 时成立**；若既有空头是 short call（例如一张 CC），新的 CSP 将**变为允许**（这正是轮动）。
@@ -174,7 +187,7 @@ _drafts (agents.py)
 
 | # | 待决 | 选项 | 推荐 | 落地 |
 | --- | --- | --- | --- | --- |
-| **D5** | 是否允许同标的同时存在 short put 与 short call | 允许 / 禁止 | **允许** | **已落地：允许。** `strict_conflict` 打开时恢复「有短仓就全拒」 |
+| **D5** | 是否允许同标的同时存在 short put 与 short call | 允许 / 禁止 | **允许** | **✅ 裁定并落地：允许**（2026-11-03 追认）。`strict_conflict` 打开时恢复「有短仓就全拒」。实际放行/拦截的边界见 §3.3 下方注 |
 | **D6** | 持股不满 100 股时的 CC | 拒绝并给原因 / 静默跳过 / 允许 odd-lot | **拒绝并给明确原因** | **已落地。** 原因形如 `I1: cc needs N covered shares, held M` |
 | **D12** | ticket 内空头腿的保证金估计式 | (a) `strike × multiplier × contracts × margin_rate`，`margin_rate` 进 Settings（默认 20%）(b) 近似为 `symbol_pct_nav` 上限的一部分 (c) 暂不估，留空跳过 | **(a)** | **已落地 (a)。** `RiskLimits.margin_rate` 默认 20，审计带估计值与上限 |
 

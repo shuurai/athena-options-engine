@@ -1,7 +1,7 @@
 # 11 — Draft reasoning depth (explain + counsel)
 
 **主计划**：[00-plan-order.md](00-plan-order.md) ｜ **规格对照**：[../athena/03-strategy-news-frontrun.md](../athena/03-strategy-news-frontrun.md)（Narrator / D11）
-**状态**：**Implemented**（2026-10-15）。Not on the original signal critical path (steps 1–9). Side track after the wheel + Narrator land. Includes **D45** Telegram Approve-page URL regression.
+**状态**：**Implemented**（2026-10-15），**D40–D45 已于 2026-11-05 追认**。Not on the original signal critical path (steps 1–9). Side track after the wheel + Narrator land. Includes **D45** Telegram Approve-page URL regression.
 **依赖**：步 6 Narrator open gate；`manage_book` CLOSE；D11（LLM 不得改 tactic / size / strike）；control link + tunnel env
 
 > **性质**：提案与验收口径。确认后再动代码。提案先入 `docs/plan`，再实现。
@@ -19,6 +19,10 @@
 | **D44** | Assignment narrative | Spot / strike / DTE / right only. Do **not** reuse cycle-budget `bs_delta` / `assign_delta` for Reason text. |
 
 Approve / Reject / Amend stay human. Code still decides the ticket.
+
+**裁定状态（2026-11-05，追认）**：D40 / D41 / D43 / D44 四项**按现行追认**，无附动作。**D42 附修正动作**：fact-pack 回退文本必须**标注来源**（本地生成）—— 目前的回退散文与模型输出读起来没有区别，你无法判断当时模型是不是挂了。这是假透明，与 D34 推翻的"假旋钮"同类。
+
+**D45 的回归修复已核实**：`public_url.py:8` 已支持 `ATHENA_PUBLIC_BASE_URL` → localhost 回退；`telegram.py:548-552` 的 `/drafts` 列表消息**已真解析 URL**（原为硬编码 `""`）；`telegram.py:76` 在缺链接时写警告日志；`test_telegram.py:74-87` 三条单测覆盖 public / localhost / 全空。残留行为（已追认）：链接拿不到时消息照发、只在日志告警，消息体不提示"链接不可用"。
 
 ---
 

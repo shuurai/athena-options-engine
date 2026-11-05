@@ -95,6 +95,9 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-14 | Polish Settings tokens Notify and Prediction | [C-20261014-42](logs/2026-10-14.md#c-20261014-42) |
 | 2026-10-14 | Mark the console version 1.0.2 | [C-20261014-43](logs/2026-10-14.md#c-20261014-43) |
 | 2026-10-16 | Mark fills from IB executions and keep each order status | [C-20261016-1](logs/2026-10-16.md#c-20261016-1) |
+| 2026-11-03 | 追认 D5 与 D9 并核对落地实现 | [C-20261103-1](logs/2026-11-03.md#c-20261103-1) |
+| 2026-11-03 | 追认剩余 31 条决策并列出实施欠账 | [C-20261103-2](logs/2026-11-03.md#c-20261103-2) |
+| 2026-11-05 | 追认旁支 18 条决策并修正三处 | [C-20261105-1](logs/2026-11-05.md#c-20261105-1) |
 
 ## Notes
 
