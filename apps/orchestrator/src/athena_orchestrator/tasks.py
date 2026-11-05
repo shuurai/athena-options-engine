@@ -403,6 +403,7 @@ def _run_trade(
         with _IB_LOCK:
             if not broker.connect(host, port, client_id("probe"), False):
                 raise RuntimeError("IB Gateway did not connect.")
+            perm_id = None
             try:
                 if order_type == "MKT":
                     ib_order_id = broker.place_market(account, symbol, side, quantity, tif)
@@ -412,11 +413,17 @@ def _run_trade(
                     )
                 else:
                     ib_order_id = broker.place_limit(account, symbol, side, quantity, limit_price, tif)
+                finder = getattr(broker, "placed_perm", None)
+                if callable(finder):
+                    found = finder(ib_order_id)
+                    if isinstance(found, int):
+                        perm_id = found
             finally:
                 broker.disconnect()
         with connect(database_url) as conn:
             _store_manual_order(
-                conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id, tif,
+                conn, account, actor, symbol, side, quantity, order_type,
+                limit_price, stop_price, ib_order_id, tif, perm_id,
             )
         _finish(task_id, "done", f"IB order {ib_order_id}.", f"{side} {symbol}")
     except Exception as exc:
@@ -426,7 +433,8 @@ def _run_trade(
 
 
 def _store_manual_order(
-    conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id, tif: str = "GTC",
+    conn, account, actor, symbol, side, quantity, order_type, limit_price, stop_price, ib_order_id,
+    tif: str = "GTC", perm_id: int | None = None,
 ) -> None:
     draft_id = "draft_" + secrets.token_hex(3)
     order_id = "ord_" + secrets.token_hex(3)
@@ -458,12 +466,18 @@ def _store_manual_order(
         """
         INSERT INTO orders (
             id, draft_id, account_id, symbol, tactic, action, contracts, limit_price,
-            status, ib_order_id, multiplier, order_type, stop_price
+            status, ib_order_id, multiplier, order_type, stop_price, perm_id, ib_status, updated_at
         )
-        VALUES (%s, %s, %s, %s, 'MANUAL', %s, %s, %s, 'submitted', %s, '1', %s, %s)
+        VALUES (%s, %s, %s, %s, 'MANUAL', %s, %s, %s, 'submitted', %s, '1', %s, %s, %s, 'Submitted', now())
         """,
-        (order_id, draft_id, account, symbol, side, quantity, limit_price, ib_order_id, order_type, stop_price),
+        (
+            order_id, draft_id, account, symbol, side, quantity, limit_price,
+            ib_order_id, order_type, stop_price, perm_id,
+        ),
     )
+    from athena_exec.order_watch import note_order_event
+
+    note_order_event(conn, order_id, account, "Submitted", "submitted", None, None, limit_price)
     conn.commit()
     from athena_exec.order_watch import publish
 

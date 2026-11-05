@@ -913,6 +913,13 @@ class AdvisorRulesTest(unittest.TestCase):
         self.assertEqual(_advisor_quantity("trim", 100), 50)
         self.assertEqual(_advisor_quantity("trim", 1), 1)
 
+    def test_guidance_price_uses_the_ib_print(self) -> None:
+        from athena_strategy.advisor import _quote_line
+
+        self.assertIsNone(_quote_line("QQQ", None, Decimal("100")))
+        self.assertEqual(_quote_line("QQQ", Decimal("110"), Decimal("100")), "QQQ 110 (+10.0%)")
+        self.assertEqual(_quote_line("QQQ", Decimal("110"), None), "QQQ 110")
+
     def test_advisor_lowers_profit_take_threshold(self) -> None:
         from athena_settings.model import AdvisorSettings
         from athena_strategy.manage import management_tactic

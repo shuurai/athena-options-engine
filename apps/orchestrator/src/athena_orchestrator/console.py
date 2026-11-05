@@ -50,16 +50,16 @@ NAV_GROUPS = (
         "Core logic",
         (
             ("/", "Cockpit"),
+            ("/portfolio-analysis", "Portfolio Analysis"),
             ("/drafts", "Drafts"),
             ("/phase", "NFR board"),
-            ("/audit", "Audit"),
+            ("/audit", "Decisions"),
             ("/news", "News"),
             ("/universe", "Universe"),
-            ("/history", "History"),
+            ("/history", "Trade History"),
             ("/positions", "Positions"),
             ("/orders", "Orders"),
-            ("/book", "Book"),
-            ("/portfolio-analysis", "Portfolio Analysis"),
+            ("/book", "Heatmap"),
         ),
     ),
     (
@@ -201,6 +201,15 @@ form.fill > .settings-cols {
   flex: 1 1 auto; min-height: 0; overflow: hidden;
 }
 .settings-col > .card.fill > .scroll-y { overflow: auto; }
+.stage:has(#settings-form) { overflow: auto; }
+#settings-form.fill { min-height: min-content; overflow: visible; }
+#settings-form > .settings-cols {
+  flex: none; min-height: min-content; overflow: visible; align-items: start;
+}
+#settings-form .settings-col { overflow: visible; min-height: auto; }
+#settings-form .card,
+#settings-form .card > .scroll-y { overflow: visible; height: auto; flex: none; min-height: auto; }
+#settings-form .sim-picks { max-height: none; overflow: visible; }
 .settings-col > form.card.agent.fill {
   display: flex; flex-direction: column;
 }
@@ -362,7 +371,8 @@ tr.pool-busy button, tr.pool-busy select, tr.pool-busy input { pointer-events: n
 .pnl-pos { color: var(--ath-up); font-family: var(--font-mono); }
 .pnl-neg { color: var(--ath-down); font-family: var(--font-mono); }
 tr[data-cmd="history-row"],
-tr[data-cmd="decision-row"] { cursor: pointer; }
+tr[data-cmd="decision-row"],
+tr[data-cmd="order-row"] { cursor: pointer; }
 .hist-detail { color: var(--site-text-3); max-width: 28rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card h2 button.more { background: none; border: 0; padding: 0; font: inherit; }
 .nav .mark { background: none; width: 26px; height: 26px; color: inherit; font-size: inherit; }
@@ -2766,6 +2776,27 @@ _CLIENT_JS = r"""
       modal(btn.getAttribute("data-symbol") || "Position", wrap, [close]);
       return;
     }
+    if (cmd === "order-row") {
+      const wrap = document.createElement("div");
+      wrap.className = "trail";
+      let events = [];
+      try { events = JSON.parse(btn.getAttribute("data-events") || "[]"); } catch (err) { events = []; }
+      if (!events.length) {
+        const empty = document.createElement("p");
+        empty.textContent = "No status changes yet.";
+        wrap.appendChild(empty);
+      }
+      events.forEach((item) => {
+        const line = document.createElement("div");
+        const name = item.ib || item.status || "";
+        const qty = item.filled == null || item.filled === "" ? "" : " filled " + item.filled;
+        const avg = item.avg == null || item.avg === "" ? "" : " @ " + item.avg;
+        line.textContent = [item.time || "", name, qty, avg].join(" ").replace(/\s+/g, " ").trim();
+        wrap.appendChild(line);
+      });
+      panel((btn.getAttribute("data-symbol") || "Order") + " status", wrap, false);
+      return;
+    }
     if (cmd === "history-row" || cmd === "decision-row") {
       let row = {};
       try { row = JSON.parse(btn.getAttribute("data-json") || "{}"); } catch (err) { row = {}; }
@@ -2802,7 +2833,7 @@ _CLIENT_JS = r"""
       close.type = "button";
       close.textContent = "Close";
       close.addEventListener("click", closeAll);
-      modal(row.title || (cmd === "decision-row" ? "Decision" : "History"), wrap, [close]);
+      modal(row.title || (cmd === "decision-row" ? "Decision" : "Trade History"), wrap, [close]);
       return;
     }
     if (cmd === "privilege") {

@@ -18,6 +18,7 @@ These are the live rules for price, safety, audit, indicators, and the strike me
 - After the drafts, the cycle budget walks closes and rolls, then `dip_long`, then `high_cc`, then the rest. A band is kept or blocked together. Caps are bucket 35, assignment 40, cash after assignment 10.
 - `/book` plots `RV20` against premium yield. It does not draw a market line. Positions are grouped by intent.
 - Athena windows are HK cash 09:30–12:00 and 13:00–16:00, plus US regular 21:30–04:00 HKT. Mobile is 19:00–21:30. Friday's US session stays open until Saturday 04:00. Monday before 04:00 stays closed. Lunch stays idle. Drafts use the Athena window. Observe default is weekdays from 07:00.
+- The portfolio advisor is off until Settings enables it. Guidance price is the universe IB print. Yahoo supplies a headline only. `take_profit` and `close` exit the full size. `trim` sells half, at least one. Drafts stay pending. See [13-portfolio-advisor.md](13-portfolio-advisor.md).
 
 A row is `in_progress` before the code changes. The matching check in the test tracker starts as `pending`.  
 **Next:** Tailscale and the Vercel host stay deferred.

@@ -159,7 +159,8 @@ Recommended remote access: Tailscale (or similar) so Vercel/bots call a private 
 | `positions` | Snapshots from IB sync |
 | `settings_versions` | Audited config |
 | `approvals` | Who approved what |
-| `news_events` | Structured news |
+| `news_events` | Structured news. Yahoo titles are headlines, not prices |
+| `advisor_signals` | One advisor verdict per account, symbol, and day. Manage may stage a pending CLOSE or TRIM from it |
 
 ## Integration with fanit
 

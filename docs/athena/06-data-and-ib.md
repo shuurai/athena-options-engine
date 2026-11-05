@@ -5,6 +5,7 @@
 | Need | Primary | Secondary |
 |------|---------|-----------|
 | Draft reference price | Newest `ib-delayed` close, else the daily close | Not a rail input |
+| Advisor guidance price | Same universe IB print (`quote_pair`) | Yahoo is a headline only. See [13-portfolio-advisor.md](13-portfolio-advisor.md) |
 | Bars for tags (RSI, rails, realized vol) | **IB daily**, one row per calendar day | Same-day `ib-delayed` may update that day’s close only |
 | Long historical pulls | **IB** (in Athena slots), target 252 sessions | Short history is marked, not padded |
 | Options chain asks | IB, every expiry inside the DTE band | Cached `option_choices` |
@@ -31,7 +32,7 @@ Until profitable enough for extra IB market data subscriptions: lean on iTick fo
 
 Not a separate SaaS product named iTicksDB in-repo — a **local** Postgres/Timescale (name in code: `store`) fed by iTick + IB.
 
-Core tables: `market_bars`, `option_choices`, `option_plans`, `chain_marks`, `rv_marks`, `iv_marks`, `symbol_phases` (tags, `indicators`, wheel snapshot), `tickets`, `decision_trails`, `ai_calls`, positions, drafts, news_events, settings_versions, approvals, orders/fills.
+Core tables: `market_bars`, `option_choices`, `option_plans`, `chain_marks`, `rv_marks`, `iv_marks`, `symbol_phases` (tags, `indicators`, wheel snapshot), `tickets`, `decision_trails`, `ai_calls`, positions, drafts, `advisor_signals`, news_events, settings_versions, approvals, orders/fills, `order_events`.
 
 Retention sketch: ticks short; bars long; chain snapshots append-only; audit forever. `chain_marks` cannot be backfilled.
 
@@ -85,7 +86,7 @@ Behaviors:
 ### Sync jobs (Athena slots)
 
 1. Positions + cash + margin → `positions` snapshot  
-2. Open orders → reconcile vs Athena draft/order state  
+2. Open orders → reconcile vs Athena draft/order state. Executions, not the open-order list, mark an order Filled. Each status and quantity change is kept on `order_events`.  
 3. Detect Mobile ad-hoc fills → ingest as `external_fill`, alert, update phase/risk  
 4. Optional hist backfill for watchlist  
 5. Options chain refresh for tagged symbols  

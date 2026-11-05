@@ -512,18 +512,19 @@ class WorkflowTest(unittest.TestCase):
         broker = Mock()
         broker.connect.return_value = False
         with patch("athena_orchestrator.tasks.IbBroker", return_value=broker):
-            _run_trade("zz-trade-off", os.environ["DATABASE_URL"], ACCOUNT, "tester", SYMBOL, "BUY", 15, "LMT", Decimal("11.2"), None)
+            _run_trade("zz-trade-off", os.environ["DATABASE_URL"], ACCOUNT, "tester", SYMBOL, "BUY", 15, "LMT", Decimal("11.2"), None, "GTC")
         quiet = self.conn.execute("SELECT count(*) FROM drafts WHERE account_id = %s", (ACCOUNT,)).fetchone()
         self.assertEqual(quiet[0], 0)
         broker.connect.return_value = True
         broker.place_limit.return_value = 77
+        broker.placed_perm.return_value = 88077
         with patch("athena_orchestrator.tasks.IbBroker", return_value=broker):
-            _run_trade("zz-trade", os.environ["DATABASE_URL"], ACCOUNT, "tester", SYMBOL, "BUY", 15, "LMT", Decimal("11.2"), None)
-        broker.place_limit.assert_called_once_with(ACCOUNT, SYMBOL, "BUY", 15, Decimal("11.2"))
+            _run_trade("zz-trade", os.environ["DATABASE_URL"], ACCOUNT, "tester", SYMBOL, "BUY", 15, "LMT", Decimal("11.2"), None, "GTC")
+        broker.place_limit.assert_called_once_with(ACCOUNT, SYMBOL, "BUY", 15, Decimal("11.2"), "GTC")
         broker.place_market.assert_not_called()
         row = self.conn.execute(
             """
-            SELECT d.tactic, d.status, o.action, o.contracts, o.status, o.ib_order_id, o.order_type, o.multiplier, a.decision
+            SELECT d.tactic, d.status, o.action, o.contracts, o.status, o.ib_order_id, o.order_type, o.multiplier, a.decision, o.perm_id
             FROM drafts d
             JOIN orders o ON o.draft_id = d.id
             JOIN approvals a ON a.draft_id = d.id
@@ -531,7 +532,7 @@ class WorkflowTest(unittest.TestCase):
             """,
             (ACCOUNT,),
         ).fetchone()
-        self.assertEqual(row, ("MANUAL", "approved", "BUY", 15, "submitted", 77, "LMT", "1", "approve"))
+        self.assertEqual(row, ("MANUAL", "approved", "BUY", 15, "submitted", 77, "LMT", "1", "approve", 88077))
 
     def test_auto_set_price_reads_todays_bar_and_news(self) -> None:
         from datetime import datetime
@@ -796,6 +797,69 @@ class WorkflowTest(unittest.TestCase):
             "SELECT tactic, perm_id FROM orders WHERE id = 'ord_zzkeep'"
         ).fetchone()
         self.assertEqual(kept, ("MANUAL", 88003))
+
+    def test_an_execution_fills_by_perm_id_and_keeps_each_change(self) -> None:
+        from types import SimpleNamespace
+
+        from athena_exec.order_watch import apply_execution, sync_ib_order
+        from athena_orchestrator.pages import _orders_page
+
+        self.conn.execute(
+            """
+            INSERT INTO drafts (
+                id, symbol, tactic, contracts, status, reason, phase, account_id, instrument, simulated
+            )
+            VALUES ('draft_zzfill', %s, 'MANUAL', 4, 'approved', 'seed', '', %s, 'STK', false)
+            """,
+            (SYMBOL, ACCOUNT),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO orders (
+                id, draft_id, account_id, symbol, tactic, action, contracts, status,
+                ib_order_id, ib_status, perm_id
+            )
+            VALUES ('ord_zzfill', 'draft_zzfill', %s, %s, 'MANUAL', 'BUY', 4, 'submitted', 78, 'Submitted', 88010)
+            """,
+            (ACCOUNT, SYMBOL),
+        )
+        self.conn.commit()
+
+        def fill(order_id, perm, account, cum):
+            return SimpleNamespace(
+                execution=SimpleNamespace(
+                    orderId=order_id, permId=perm, acctNumber=account, cumQty=cum, avgPrice="9.5", price="9.5", shares=cum,
+                ),
+                contract=SimpleNamespace(symbol=SYMBOL, secType="STK"),
+            )
+
+        self.assertEqual(apply_execution(self.conn, fill(0, 88010, "", 1)), ACCOUNT)
+        partial = self.conn.execute(
+            "SELECT status, ib_status, filled_qty FROM orders WHERE id = 'ord_zzfill'"
+        ).fetchone()
+        self.assertEqual(partial, ("submitted", "Submitted", Decimal("1")))
+        self.assertIsNone(apply_execution(self.conn, fill(0, 88010, "", 1)))
+        self.assertIsNone(sync_ib_order(self.conn, _ib_trade(0, 99999, "ZZNEW", "BUY", 1, "Filled", "1")))
+        missing = self.conn.execute(
+            "SELECT count(*) FROM orders WHERE perm_id = 99999"
+        ).fetchone()
+        self.assertEqual(missing[0], 0)
+        self.assertEqual(apply_execution(self.conn, fill(0, 88010, ACCOUNT, 4)), ACCOUNT)
+        done = self.conn.execute(
+            "SELECT status, ib_status, filled_qty, remaining_qty FROM orders WHERE id = 'ord_zzfill'"
+        ).fetchone()
+        self.assertEqual(done, ("filled", "Filled", Decimal("4"), Decimal("0")))
+        events = self.conn.execute(
+            "SELECT ib_status, status, filled_qty FROM order_events WHERE order_id = 'ord_zzfill' ORDER BY id"
+        ).fetchall()
+        self.assertEqual(
+            events,
+            [("Submitted", "submitted", Decimal("1")), ("Filled", "filled", Decimal("4"))],
+        )
+        page = _orders_page(self.conn, ACCOUNT, {"status": ["filled"]})
+        self.assertIn("FILLED", page["body"])
+        self.assertIn("data-cmd=\"order-row\"", page["body"])
+        self.assertIn("Filled", page["body"])
 
     def test_mock_send_order_stays_a_pending_draft(self) -> None:
         from athena_strategy.mock import prepare_mock_orders

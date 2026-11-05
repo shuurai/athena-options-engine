@@ -11,6 +11,8 @@ Two detection goals:
 
 Both become structured `news_events` for the tag engine + DSH sentiment assist.
 
+The portfolio advisor does not take a price from Yahoo. The price is the universe IB print. Yahoo contributes a headline: the newest stored `yahoo` row, or one RSS title when that row is missing. See [13-portfolio-advisor.md](13-portfolio-advisor.md).
+
 ## Event object (target schema)
 
 ```json

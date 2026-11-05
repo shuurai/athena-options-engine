@@ -1037,7 +1037,7 @@ def _history(conn, account: str, query: dict) -> dict:
         f'{_feed("/history", nxt, more, _history_table(body_rows), "history-feed")}</div></div>'
     )
     return _html(
-        "History",
+        "Trade History",
         "Fills, approvals, and blocked drafts for this account. Open a row for size, cash, fees, and the trail.",
         body,
         _history_chips(everything),
@@ -1075,14 +1075,14 @@ def _book_page(conn, account: str, query: dict) -> dict:
     from athena_strategy.indicators import compute, load_bars
 
     if not account:
-        return _html("Book", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
+        return _html("Heatmap", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
     settings = load_active(conn, account)
     from athena_orchestrator.pulse import note_view, watch_symbols
 
     note_view(watch_symbols(conn, account), account)
     load_bars(conn, settings.strategy.regime_index, settings.strategy.regime_lookback)
     if not panel_enabled():
-        return _html("Book", "Charts are off.", '<div class="card"><p>Charts are off.</p></div>', [("info", "panel off")])
+        return _html("Heatmap", "Charts are off.", '<div class="card"><p>Charts are off.</p></div>', [("info", "panel off")])
     points, book_point = _book_points(conn, settings, account, compute, load_bars)
     buckets = _book_buckets(conn, account, settings)
     assignment = _book_assignment(conn, account, settings)
@@ -1104,7 +1104,7 @@ def _book_page(conn, account: str, query: dict) -> dict:
         "</div>"
     )
     return _html(
-        "Book",
+        "Heatmap",
         "Realized risk and signed premium.",
         body,
         [("info", "read only")],
@@ -2068,7 +2068,7 @@ def _orders_page(conn, account: str, query: dict) -> dict:
     chips = [("info", f"{count} orders" if count else "none")]
     return _html(
         "Orders",
-        "Orders on this account, including ones placed in IB. A status change replaces the row on screen.",
+        "Orders on this account, including ones placed in IB. A status change replaces the row. Open a row for each change.",
         body,
         chips,
         _REFRESH,
@@ -2090,6 +2090,7 @@ def order_event(conn, order_id: str) -> dict | None:
     if row is None:
         return None
     item = _order_item(row)
+    _attach_order_events(conn, [item])
     return {
         "id": item["id"],
         "account": item["account"],
@@ -2135,6 +2136,7 @@ def _order_window(conn, account: str, status: str, offset: int) -> tuple[list[di
     ).fetchall()
     more = len(found) > _PAGE
     page = [_order_item(row) for row in found[:_PAGE]]
+    _attach_order_events(conn, page)
     return page, more, offset + len(page)
 
 
@@ -2178,7 +2180,35 @@ def _order_item(row) -> dict:
         "tactic": tactic or "",
         "kind": "opt" if option else "stk",
         "mult": mult,
+        "events": [],
     }
+
+
+def _attach_order_events(conn, rows: list[dict]) -> None:
+    ids = [row["id"] for row in rows if row.get("id")]
+    if not ids:
+        return
+    found = conn.execute(
+        """
+        SELECT order_id, created_at, ib_status, status, filled_qty, avg_fill
+        FROM order_events
+        WHERE order_id = ANY(%s)
+        ORDER BY id
+        """,
+        (ids,),
+    ).fetchall()
+    grouped: dict[str, list[dict]] = {}
+    for order_id, created, ib_status, status, filled, average in found:
+        when = "" if created is None else created.astimezone(HKT).strftime("%m-%d %H:%M:%S")
+        grouped.setdefault(order_id, []).append({
+            "time": when,
+            "ib": ib_status or "",
+            "status": status or "",
+            "filled": None if filled is None else format(Decimal(filled), "f"),
+            "avg": None if average is None else format(Decimal(average), "f"),
+        })
+    for row in rows:
+        row["events"] = grouped.get(row["id"], [])
 
 
 def order_bucket(status: str, ib_status: str) -> str:
@@ -2240,8 +2270,10 @@ def _order_tr(conn, row: dict) -> str:
     gap, gap_tone = _order_gap(row["limit"], last)
     cost = _order_cost(row["qty"], row["limit"], last, row.get("mult"))
     limit_attr = "" if row["limit"] is None else format(Decimal(row["limit"]), "f")
+    events = escape(json.dumps(row.get("events") or []), quote=True)
     return (
-        f'<tr data-order="{escape(row["id"], quote=True)}"'
+        f'<tr class="hit" data-cmd="order-row" data-events="{events}"'
+        f' data-order="{escape(row["id"], quote=True)}"'
         f' data-symbol="{escape(row["symbol"], quote=True)}"'
         f' data-kind="{escape(row.get("kind") or "stk", quote=True)}"'
         f' data-qty="{escape(format(Decimal(row["qty"]), "f"), quote=True)}"'
@@ -2889,7 +2921,7 @@ def _advisor_card(current) -> str:
     adv = current.advisor
     symbols = ", ".join(adv.guidance_symbols)
     return (
-        '<div class="card fill"><h2>Advisor</h2><div class="scroll-y">'
+        '<div class="card"><h2>Advisor</h2><div class="scroll-y">'
         '<p class="card-lead">Take-profit and trim signals for the book. Drafts stay pending until you Approve.</p>'
         f"{_switch('Enabled', 'advisor_enabled', adv.enabled, 'When on, each cycle writes an advisor signal for every held symbol.')}"
         f"{_field('Guidance symbols', 'Comma-separated symbols the advisor reads as market guidance.', f'<input class=\"input\" name=\"guidance_symbols\" value=\"{escape(symbols)}\" placeholder=\"QQQ, NVDA, SOXX\">')}"
@@ -2959,7 +2991,7 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Cycle minutes', 'cycle_minutes', current.cycle_minutes, 'Minutes between cycles. A wait already running keeps its clock. The next wait uses this.')}"
         f"{_limit('Concurrent subscriptions', 'concurrent_subscriptions', current.ib.concurrent_subscriptions, 'How many IB quotes may be open at once. Further quotes wait.')}"
         '<p class="slot-note">Host, port, and client id stay on the logged-in Gateway. Slot windows are on the cockpit.</p></div></div>'
-        '<div class="card fill"><h2>AI</h2><div class="scroll-y">'
+        '<div class="card"><h2>AI</h2><div class="scroll-y">'
         f"{_field('Provider', 'DSH runs the local binary. The others call that provider.', f'<select class=\"input\" name=\"ai_provider\">{_ai_provider_options(current.ai.provider)}</select>')}"
         f"{_field('Model', 'The model sent with each AI call. The list follows the provider.', f'<select class=\"input\" name=\"model\">{_model_options(current)}</select>')}"
         f'<script type="application/json" id="ai-models">{json.dumps({key: list(names) for key, names in MODELS.items()})}</script>'
@@ -2971,23 +3003,24 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         "</div></div></div></div>"
         '<div class="settings-col">'
         f"{_sim_card(conn, current)}"
-        '<div class="card fill"><h2>Market data</h2><div class="scroll-y">'
+        '<div class="card"><h2>Market data</h2><div class="scroll-y">'
         '<p class="card-lead">iTick for live quotes. IB is used for history and orders inside Athena slots.</p>'
         f"{_field('iTick URL', 'Base URL for live quotes.', f'<input class=\"input\" name=\"itick_url\" required value=\"{escape(current.itick.base_url)}\">')}"
         f'<div class="settings-field">{_masked_secret("itick_key", itick_key(current), "iTick API token")}</div>'
         '<button class="btn" type="submit" name="action" value="clear-itick" data-explicit>Clear token</button>'
         f"{_row('Watchlist', _tag(str(len(current.watchlist))), 'How many symbols the universe is watching.')}</div></div>"
         f"{_advisor_card(current)}"
-        '<div class="card fill"><h2>Notify</h2><div class="scroll-y">'
+        "</div>"
+        '<div class="settings-col">'
+        '<div class="card"><h2>Notify</h2><div class="scroll-y">'
         f"{_limit('Draft TTL minutes', 'draft_ttl', current.notify.draft_ttl_minutes, 'How long a pending draft and its control link stay open.')}"
         f"{_telegram_block(current, token_ready)}"
         f"{_row('Bot token', _tag('SET', 'green') if token_ready else _tag('EMPTY'), 'Whether a Telegram bot token is stored or inherited.')}"
         f"{_field('Bot username', 'Telegram bot name without the @. Used to build the link.', f'<input class=\"input\" name=\"bot_username\" value=\"{escape(bot_username(current))}\" placeholder=\"athena_hk_bot\">')}"
         f"{_field('Bot token', 'Leave blank to keep the current bot token. Clear bot token removes it.', '<input class=\"input\" name=\"bot_token\" type=\"password\" autocomplete=\"off\" placeholder=\"Leave blank to keep\">')}"
-        '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div></div>'
-        '<div class="settings-col">'
+        '<button class="btn" type="submit" name="action" value="clear-bot" data-explicit>Clear bot token</button></div></div>'
         f"{_developer_card(current)}"
-        '<div class="card fill"><h2>News</h2><div class="scroll-y">'
+        '<div class="card"><h2>News</h2><div class="scroll-y">'
         f"{_switch('Yahoo', 'yahoo', news.yahoo, 'Pull Yahoo headlines for the watchlist.')}"
         f"{_switch('Finviz', 'finviz', news.finviz, 'Pull Finviz headlines for the watchlist.')}"
         f"{_switch('Fed calendar', 'fed_calendar', news.fed_calendar, 'Watch the Fed calendar for nearby events.')}"
@@ -3879,7 +3912,7 @@ def _audit(conn, account: str, query: dict) -> dict:
         f"{_feed('/audit', nxt, more, table)}</div>"
     )
     return _html(
-        "Audit",
+        "Decisions",
         "Model calls and the decision trail for this account. Open a row for the reply or the reasons. This page does not approve orders.",
         body,
         chips,

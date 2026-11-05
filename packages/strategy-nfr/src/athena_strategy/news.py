@@ -363,6 +363,11 @@ def _finviz_stamp(text: str, previous: datetime | None, now: datetime) -> dateti
     return parsed.replace(tzinfo=ET)
 
 
+def yahoo_headlines(symbol: str, limit: int = 2) -> list[str]:
+    """Recent Yahoo titles. Price stays on the IB print."""
+    return [title for _when, title, _url in _yahoo(symbol)[:limit] if title]
+
+
 def yahoo_symbol(symbol: str) -> str:
     """Hong Kong numeric codes use the Yahoo .HK ticker."""
     if symbol.isdigit():

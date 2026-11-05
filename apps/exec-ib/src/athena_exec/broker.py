@@ -245,7 +245,17 @@ class IbBroker:
         if status in {"Cancelled", "Inactive", "ApiCancelled"} or not trade.order.orderId:
             detail = "; ".join(entry.message for entry in trade.log if entry.message)
             raise RuntimeError(f"IB did not accept the order status={status or 'none'} {detail}".strip())
+        self._placed = trade
         return int(trade.order.orderId)
+
+    def placed_perm(self, ib_order_id: int) -> int | None:
+        """Permanent id from the order just accepted. None when IB did not send one."""
+        trade = getattr(self, "_placed", None)
+        order = getattr(trade, "order", None)
+        if order is None or int(getattr(order, "orderId", 0) or 0) != int(ib_order_id):
+            return None
+        perm = int(getattr(order, "permId", 0) or 0)
+        return perm or None
 
     def last_price(self, symbol: str) -> Decimal | None:
         """Delayed last or close. Live HK quotes are not subscribed on this account."""
@@ -438,6 +448,7 @@ class IbBroker:
         if status in {"Cancelled", "Inactive", "ApiCancelled"} or not trade.order.orderId:
             detail = "; ".join(entry.message for entry in trade.log if entry.message)
             raise RuntimeError(f"IB did not accept the order status={status or 'none'} {detail}".strip())
+        self._placed = trade
         return int(trade.order.orderId)
 
     def option_chain(self, symbol: str):
@@ -779,25 +790,37 @@ class IbBroker:
         return Decimal(values[0].value)
 
     def fills(self) -> list[tuple]:
+        """Executions IB has for this login. The request loads fills that already happened."""
         if self._ib is None:
             return []
+        try:
+            from ib_insync import ExecutionFilter
+
+            self._ib.reqExecutions(ExecutionFilter())
+        except Exception as exc:
+            log.info("executions: %s", exc.__class__.__name__)
         rows: list[tuple] = []
         for fill in self._ib.fills():
             report = getattr(fill, "commissionReport", None)
             commission = _fill_commission(report)
             currency = str(getattr(report, "currency", "") or "") if report is not None else ""
+            execution = fill.execution
+            perm = int(getattr(execution, "permId", 0) or 0)
+            cum = getattr(execution, "cumQty", None)
             rows.append(
                 (
-                    int(fill.execution.orderId),
-                    fill.execution.acctNumber,
+                    int(execution.orderId),
+                    execution.acctNumber,
                     fill.contract.symbol,
-                    Decimal(str(fill.execution.shares)),
-                    Decimal(str(fill.execution.price)),
-                    str(fill.execution.execId or ""),
-                    str(fill.execution.side or ""),
+                    Decimal(str(execution.shares)),
+                    Decimal(str(execution.price)),
+                    str(execution.execId or ""),
+                    str(execution.side or ""),
                     str(fill.contract.secType or "STK"),
                     commission,
                     currency,
+                    perm or None,
+                    None if cum in (None, "") else Decimal(str(cum)),
                 )
             )
         return rows

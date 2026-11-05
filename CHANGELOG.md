@@ -94,6 +94,7 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-10-14 | Cache cycle progress across restarts | [C-20261014-41](logs/2026-10-14.md#c-20261014-41) |
 | 2026-10-14 | Polish Settings tokens Notify and Prediction | [C-20261014-42](logs/2026-10-14.md#c-20261014-42) |
 | 2026-10-14 | Mark the console version 1.0.2 | [C-20261014-43](logs/2026-10-14.md#c-20261014-43) |
+| 2026-10-16 | Mark fills from IB executions and keep each order status | [C-20261016-1](logs/2026-10-16.md#c-20261016-1) |
 
 ## Notes
 

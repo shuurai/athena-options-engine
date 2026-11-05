@@ -1,7 +1,7 @@
 # Athena Options Engine — Proposal Index
 
 **Status:** Paper and live use the same order path. `paper` trades `ATHENA_IB_PAPER_ACCOUNT_ID`. `live` trades each id in `ATHENA_IB_ACCOUNT_IDS`. Each account keeps its own book.  
-**Last updated:** 2026-10-12  
+**Last updated:** 2026-10-16  
 **Supersedes for implementation intent:** [../athena_options_engine_prd.md](../athena_options_engine_prd.md) (historical input)  
 **Next:** One small approved live order once Gateway and `ATHENA_IB_ACCOUNT_ID` are set. Task list: [10-implementation-tracker.md](10-implementation-tracker.md). Roadmap: [09-roadmap.md](09-roadmap.md).
 
@@ -53,6 +53,7 @@ Develop on Mac. Run on a dedicated Windows trading box. Not cloud-primary. Local
 | [10-implementation-tracker.md](10-implementation-tracker.md) | Task checklist with status and exit proof |
 | [11-test-tracking.md](11-test-tracking.md) | What was proven, and which checks are still pending |
 | [12-short-horizon-forecast-rnd.md](12-short-horizon-forecast-rnd.md) | R&D: ML short-horizon bid/ask / stop / TP (advisory) |
+| [13-portfolio-advisor.md](13-portfolio-advisor.md) | Portfolio advisor: IB guidance prices, Yahoo headlines, CLOSE / TRIM drafts |
 
 ---
 

@@ -88,7 +88,8 @@ def _guidance_snapshot(conn: psycopg.Connection, settings: SettingsPayload, acco
     avg = total / count if count else None
     label = "weak" if avg is not None and avg < 0.45 else ("neutral" if avg is not None and avg < 0.6 else "strong" if avg is not None else "unknown")
     symbols = [s.upper() for s in adv.guidance_symbols]
-    notes.extend(_yahoo_quotes(symbols))
+    notes.extend(_ib_quotes(conn, symbols))
+    notes.extend(_yahoo_notes(conn, symbols))
     notes.extend(_calendar_lines(conn, symbols, day))
     return {
         "symbols": symbols,
@@ -338,36 +339,53 @@ def _take_profit(payload: dict) -> str | None:
     return None
 
 
-def _yahoo_quotes(symbols: list[str]) -> list[str]:
-    """Last Yahoo price for each guidance symbol. A miss is skipped."""
-    import json
-    from urllib.error import HTTPError, URLError
-    from urllib.request import Request, urlopen
+def _quote_line(symbol: str, last: Decimal | None, previous: Decimal | None) -> str | None:
+    """Same print the universe row shows. No price means the IB update has not landed."""
+    if last is None:
+        return None
+    if previous is not None and previous > 0:
+        change = (last - previous) / previous * Decimal(100)
+        return f"{symbol} {last} ({change:+.1f}%)"
+    return f"{symbol} {last}"
 
-    from athena_strategy.news import yahoo_symbol
-    from athena_strategy.pool import parse_chart
+
+def _ib_quotes(conn, symbols: list[str]) -> list[str]:
+    """Guidance prices from the universe IB print, not a Yahoo chart."""
+    from athena_marketdata.pricing import quote_pair
 
     lines: list[str] = []
     for symbol in symbols:
-        ticker = yahoo_symbol(symbol)
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=5d"
-        try:
-            request = Request(url, headers={"User-Agent": "Athena/1.0"})
-            with urlopen(request, timeout=4) as response:
-                body = json.loads(response.read().decode())
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, OSError):
-            log.info("yahoo quote skipped symbol=%s", symbol)
-            continue
-        parsed = parse_chart(body)
-        price = parsed.get("price")
-        prev = parsed.get("prev")
-        if price is None:
-            continue
-        if prev is not None and prev > 0:
-            change = (price - prev) / prev * Decimal(100)
-            lines.append(f"{symbol} yahoo {price} ({change:+.1f}%)")
-        else:
-            lines.append(f"{symbol} yahoo {price}")
+        last, previous = quote_pair(conn, symbol)
+        line = _quote_line(symbol, last, previous)
+        if line:
+            lines.append(line)
+    return lines
+
+
+def _yahoo_notes(conn, symbols: list[str]) -> list[str]:
+    """Headlines Yahoo has and IB does not. A name with no stored row is fetched once."""
+    if not symbols:
+        return []
+    rows = conn.execute(
+        """
+        SELECT DISTINCT ON (symbol) symbol, title
+        FROM news_events
+        WHERE symbol = ANY(%s) AND source = 'yahoo' AND dismissed = false
+        ORDER BY symbol, ts DESC
+        """,
+        (symbols,),
+    ).fetchall()
+    lines = [f"{symbol} yahoo: {title}" for symbol, title in rows if title]
+    have = {symbol for symbol, _title in rows}
+    missing = [symbol for symbol in symbols if symbol not in have]
+    if not missing:
+        return lines
+    from athena_strategy.news import yahoo_headlines
+
+    for symbol in missing:
+        titles = yahoo_headlines(symbol, limit=1)
+        if titles:
+            lines.append(f"{symbol} yahoo: {titles[0]}")
     return lines
 
 

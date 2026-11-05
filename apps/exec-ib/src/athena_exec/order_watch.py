@@ -88,6 +88,9 @@ def apply_live_order(conn, ib_order_id: int, status: str, filled, remaining, avg
         and _same(average, avg_now)
     ):
         return None
+    kept_filled = filled_now if filled_qty is None else filled_qty
+    kept_remaining = remaining_now if remaining_qty is None else remaining_qty
+    kept_average = avg_now if average is None else average
     conn.execute(
         """
         UPDATE orders
@@ -101,6 +104,7 @@ def apply_live_order(conn, ib_order_id: int, status: str, filled, remaining, avg
         """,
         (live, live, filled_qty, remaining_qty, average, nxt, order_id),
     )
+    note_order_event(conn, order_id, account_id, stored_live, nxt, kept_filled, kept_remaining, kept_average)
     conn.commit()
     publish(account_id, order_id)
     return account_id
@@ -111,40 +115,30 @@ def sync_ib_order(conn, trade) -> str | None:
     view = _order_view(trade)
     if view is None:
         return None
-    row = _find_order(conn, view)
-    if row is None:
-        return _insert_ib_order(conn, view)
-    order_id, account_id, current, live_now, filled_now, remaining_now, avg_now, perm_now = row
-    live = view["status"]
-    nxt = _next_status(current, live)
-    stored_live = live or (live_now or "")
-    perm_id = view["perm_id"] or perm_now
-    if (
-        nxt == current
-        and stored_live == (live_now or "")
-        and _same(view["filled"], filled_now)
-        and _same(view["remaining"], remaining_now)
-        and _same(view["average"], avg_now)
-        and _same(perm_id, perm_now)
-    ):
+    return _apply_view(conn, view)
+
+
+def apply_execution(conn, fill) -> str | None:
+    """Apply one IB execution. A fill with no matching order is left for the session ledger."""
+    view = _execution_view(fill)
+    if view is None:
         return None
+    return _apply_view(conn, view)
+
+
+def note_order_event(conn, order_id, account_id, ib_status, status, filled, remaining, average) -> None:
+    """Append one status or quantity change. The caller commits."""
+    if not order_id or not account_id:
+        return
     conn.execute(
         """
-        UPDATE orders
-        SET ib_status = CASE WHEN %s = '' THEN ib_status ELSE %s END,
-            filled_qty = COALESCE(%s, filled_qty),
-            remaining_qty = COALESCE(%s, remaining_qty),
-            avg_fill = COALESCE(%s, avg_fill),
-            status = %s,
-            perm_id = COALESCE(%s, perm_id),
-            updated_at = now()
-        WHERE id = %s
+        INSERT INTO order_events (
+            order_id, account_id, ib_status, status, filled_qty, remaining_qty, avg_fill
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (live, live, view["filled"], view["remaining"], view["average"], nxt, perm_id, order_id),
+        (order_id, account_id, ib_status or "", status or "", filled, remaining, average),
     )
-    conn.commit()
-    publish(account_id, order_id)
-    return account_id
 
 
 def start_order_watch(database_url: str) -> None:
@@ -191,24 +185,30 @@ def _listen(broker, database_url: str) -> None:
     def on_status(trade) -> None:
         _sync(database_url, trade)
 
-    def on_fill(trade, _fill) -> None:
+    def on_fill(trade, fill) -> None:
         _sync(database_url, trade)
+        _sync_execution(database_url, fill)
 
     ib.orderStatusEvent += on_status
     ib.execDetailsEvent += on_fill
-    last_completed = 0.0
+    last_pull = 0.0
     while broker.connected():
         trades: list = []
         try:
             trades.extend(ib.reqAllOpenOrders() or [])
         except Exception as exc:
             log.info("open orders: %s", exc)
-        if time.time() - last_completed >= 30:
+        if time.time() - last_pull >= 30:
             try:
                 trades.extend(ib.reqCompletedOrders(False) or [])
             except Exception as exc:
                 log.info("completed orders: %s", exc)
-            last_completed = time.time()
+            try:
+                for fill in _request_executions(ib):
+                    _sync_execution(database_url, fill)
+            except Exception as exc:
+                log.info("executions: %s", exc)
+            last_pull = time.time()
         seen: set = set()
         for trade in trades:
             key = _trade_key(trade)
@@ -219,12 +219,26 @@ def _listen(broker, database_url: str) -> None:
         ib.sleep(2)
 
 
+def _request_executions(ib) -> list:
+    from ib_insync import ExecutionFilter
+
+    return list(ib.reqExecutions(ExecutionFilter()) or [])
+
+
 def _sync(database_url: str, trade) -> None:
     try:
         with connect(database_url) as conn:
             sync_ib_order(conn, trade)
     except Exception as exc:
         log.info("order watch write error=%s", exc.__class__.__name__)
+
+
+def _sync_execution(database_url: str, fill) -> None:
+    try:
+        with connect(database_url) as conn:
+            apply_execution(conn, fill)
+    except Exception as exc:
+        log.info("order watch fill error=%s", exc.__class__.__name__)
 
 
 def _order_view(trade) -> dict | None:
@@ -239,9 +253,11 @@ def _order_view(trade) -> dict | None:
     order_id = int(getattr(order, "orderId", 0) or 0)
     perm_id = int(getattr(order, "permId", 0) or 0)
     shares = _shares(getattr(order, "totalQuantity", None))
-    if not account or not symbol or action not in {"BUY", "SELL"} or shares is None:
+    if action and action not in {"BUY", "SELL"}:
         return None
     if not order_id and not perm_id:
+        return None
+    if not account and not perm_id and not order_id:
         return None
     sec_type = str(getattr(contract, "secType", "") or "STK").upper()
     order_type = str(getattr(order, "orderType", "") or "LMT").upper()
@@ -271,34 +287,134 @@ def _order_view(trade) -> dict | None:
     }
 
 
+_ORDER_COLUMNS = """
+    id, account_id, status, ib_status, filled_qty, remaining_qty, avg_fill, perm_id, contracts
+"""
+
+
+def _apply_view(conn, view: dict) -> str | None:
+    row = _find_order(conn, view)
+    if row is None:
+        if view.get("from_execution"):
+            return None
+        if not view["account"] or not view["ib_order_id"] or view["shares"] is None:
+            return None
+        if view["action"] not in {"BUY", "SELL"}:
+            return None
+        return _insert_ib_order(conn, view)
+    order_id, account_id, current, live_now, filled_now, remaining_now, avg_now, perm_now, contracts = row
+    size = view["shares"] if view.get("shares") is not None else contracts
+    filled = view["filled"]
+    if (
+        current == "filled"
+        and filled is not None
+        and filled_now is not None
+        and Decimal(filled) < Decimal(filled_now)
+    ):
+        return None
+    remaining = view["remaining"]
+    if remaining is None and filled is not None and size is not None:
+        remaining = max(Decimal(0), Decimal(size) - Decimal(filled))
+    live = _live_status(view["status"], filled, size)
+    nxt = _next_status(current, live)
+    stored_live = live or (live_now or "")
+    perm_id = view["perm_id"] or perm_now
+    if (
+        nxt == current
+        and stored_live == (live_now or "")
+        and _same(filled, filled_now)
+        and _same(remaining, remaining_now)
+        and _same(view["average"], avg_now)
+        and _same(perm_id, perm_now)
+    ):
+        return None
+    kept_filled = filled_now if filled is None else filled
+    kept_remaining = remaining_now if remaining is None else remaining
+    kept_average = avg_now if view["average"] is None else view["average"]
+    conn.execute(
+        """
+        UPDATE orders
+        SET ib_status = CASE WHEN %s = '' THEN ib_status ELSE %s END,
+            filled_qty = COALESCE(%s, filled_qty),
+            remaining_qty = COALESCE(%s, remaining_qty),
+            avg_fill = COALESCE(%s, avg_fill),
+            status = %s,
+            perm_id = COALESCE(%s, perm_id),
+            updated_at = now()
+        WHERE id = %s
+        """,
+        (live, live, filled, remaining, view["average"], nxt, perm_id, order_id),
+    )
+    note_order_event(conn, order_id, account_id, stored_live, nxt, kept_filled, kept_remaining, kept_average)
+    conn.commit()
+    publish(account_id, order_id)
+    return account_id
+
+
+def _execution_view(fill) -> dict | None:
+    execution = getattr(fill, "execution", None)
+    if execution is None:
+        return None
+    perm_id = int(getattr(execution, "permId", 0) or 0)
+    order_id = int(getattr(execution, "orderId", 0) or 0)
+    if not perm_id and not order_id:
+        return None
+    contract = getattr(fill, "contract", None)
+    symbol = str(getattr(contract, "symbol", "") or "").strip().upper() if contract is not None else ""
+    cum = _number(getattr(execution, "cumQty", None))
+    if cum is None:
+        cum = _number(getattr(execution, "shares", None))
+    average = _price(getattr(execution, "avgPrice", None)) or _price(getattr(execution, "price", None))
+    return {
+        "account": str(getattr(execution, "acctNumber", "") or "").strip(),
+        "symbol": symbol,
+        "action": "",
+        "shares": None,
+        "ib_order_id": order_id or None,
+        "perm_id": perm_id or None,
+        "status": "",
+        "filled": cum,
+        "remaining": None,
+        "average": average,
+        "from_execution": True,
+    }
+
+
 def _find_order(conn, view: dict):
-    perm_id = view["perm_id"]
+    perm_id = view.get("perm_id")
+    account = (view.get("account") or "").strip()
+    symbol = (view.get("symbol") or "").strip()
     if perm_id:
         found = conn.execute(
-            """
-            SELECT id, account_id, status, ib_status, filled_qty, remaining_qty, avg_fill, perm_id
+            f"""
+            SELECT {_ORDER_COLUMNS}
             FROM orders
-            WHERE account_id = %s AND perm_id = %s
+            WHERE perm_id = %s AND (%s = '' OR account_id = %s)
+            ORDER BY CASE WHEN status IN ('filled', 'cancelled', 'blocked') THEN 1 ELSE 0 END,
+                     created_at DESC, id DESC
+            LIMIT 1
             """,
-            (view["account"], perm_id),
+            (perm_id, account, account),
         ).fetchone()
         if found is not None:
             return found
-    if not view["ib_order_id"]:
+    if not view.get("ib_order_id"):
         return None
-    incoming_done = view["status"] == "Filled" or view["status"] in _CANCELLED
+    incoming_done = view.get("status") == "Filled" or view.get("status") in _CANCELLED or view.get("from_execution")
     rows = conn.execute(
-        """
-        SELECT id, account_id, status, ib_status, filled_qty, remaining_qty, avg_fill, perm_id
+        f"""
+        SELECT {_ORDER_COLUMNS}
         FROM orders
-        WHERE account_id = %s AND ib_order_id = %s AND symbol = %s
+        WHERE ib_order_id = %s
+          AND (%s = '' OR account_id = %s)
+          AND (%s = '' OR symbol = %s)
         ORDER BY created_at DESC, id DESC
         """,
-        (view["account"], view["ib_order_id"], view["symbol"]),
+        (view["ib_order_id"], account, account, symbol, symbol),
     ).fetchall()
     for row in rows:
         row_perm = row[7]
-        if perm_id and row_perm and int(row_perm) != perm_id:
+        if perm_id and row_perm and int(row_perm) != int(perm_id):
             continue
         if row[2] in {"filled", "cancelled", "blocked"} and not incoming_done:
             continue
@@ -340,11 +456,24 @@ def _insert_ib_order(conn, view: dict) -> str:
         """,
         (
             order_id, draft_id, view["account"], view["symbol"], view["action"], view["shares"], view["limit"],
-            _next_status("submitted", view["status"]), view["ib_order_id"], view["multiplier"],
+            _next_status("submitted", _live_status(view["status"], view["filled"], view["shares"])),
+            view["ib_order_id"], view["multiplier"],
             view["order_type"], view["stop"],
             view["expiry"], view["strike"], view["right"], view["trading_class"], view["exchange"],
-            view["status"], view["filled"], view["remaining"], view["average"], view["perm_id"],
+            _live_status(view["status"], view["filled"], view["shares"]) or view["status"],
+            view["filled"], view["remaining"], view["average"], view["perm_id"],
         ),
+    )
+    opened = _live_status(view["status"], view["filled"], view["shares"]) or view["status"]
+    note_order_event(
+        conn,
+        order_id,
+        view["account"],
+        opened,
+        _next_status("submitted", opened),
+        view["filled"],
+        view["remaining"],
+        view["average"],
     )
     conn.commit()
     publish(view["account"], order_id)
@@ -376,6 +505,20 @@ def _expiry(text: str | None) -> date | None:
     if len(raw) >= 8 and raw[:8].isdigit():
         return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
     return None
+
+
+def _live_status(live: str, filled, size) -> str:
+    """A complete quantity is a fill even when IB still says the order is working."""
+    text = (live or "").strip()
+    if text == "Filled" or text in _CANCELLED:
+        return text
+    if filled is None or size is None:
+        return text
+    done = Decimal(filled)
+    whole = Decimal(size)
+    if done > 0 and whole > 0 and done >= whole:
+        return "Filled"
+    return text
 
 
 def _next_status(current: str, live: str) -> str:

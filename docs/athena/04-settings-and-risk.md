@@ -130,6 +130,21 @@ OpenAI-protocol advisory forecast. **Off by default.** See [12-short-horizon-for
 
 Connection knobs and prompts live on the **Prediction** page under Configs. Output is stored on `forecast_marks` and `decision_trails.steps.forecast`. It does not size drafts or skip Approve.
 
+### 2c. Portfolio advisor
+
+Off until Enabled is on. The card is in the middle Settings column, after Market data. Notify is in the third column. Full rules: [13-portfolio-advisor.md](13-portfolio-advisor.md).
+
+| Key | Default | Role |
+|-----|---------|------|
+| `advisor.enabled` | false | Write one signal per held name and allow CLOSE / TRIM drafts |
+| `advisor.guidance_symbols` | QQQ, NVDA, SOXX, AVGO, MRVL, MU, TSM | Basket. Price is the universe IB print |
+| `advisor.close_conf_threshold` | 0.65 | `close` acts at or above this |
+| `advisor.trim_conf_threshold` | 0.55 | `trim` and `take_profit` act at or above this |
+| `advisor.max_conf` | 0.95 | Confidence cap |
+| `advisor.profit_take_relief_pct` | 15 | Stored and shown. Not applied. The acting signal stages the draft itself |
+
+`take_profit` and `close` exit the full size. `trim` sells half, at least one. Drafts stay pending. Prompts for `AdvisorExplainer`, `Narrator`, and `ManageExplainer` are on Orchestration.
+
 ### 3. Preference / UX
 
 | Key | Role |

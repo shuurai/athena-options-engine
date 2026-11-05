@@ -10,6 +10,8 @@ Code picks the open. `wheel.decide_opening` is the only opening decision. It rea
 
 The wheel is the only opening path. `ATHENA_STATE_MACHINE` cannot turn it off.
 
+The portfolio advisor is a side path on names already held. It does not open. When it is on, an acting signal can stage a pending CLOSE or TRIM. Specification: [13-portfolio-advisor.md](13-portfolio-advisor.md).
+
 Refine this cycle for 5–10 years. Improvisation = Settings versions + rule comments, not new strategy packages.
 
 ## Thesis (plain language)

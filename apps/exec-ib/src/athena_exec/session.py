@@ -558,6 +558,9 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
                 )
             else:
                 ib_order_id = broker.place_limit(account, symbol, action, contracts, limit_price)
+            finder = getattr(broker, "placed_perm", None)
+            found = finder(ib_order_id) if callable(finder) else None
+            perm_id = found if isinstance(found, int) else None
         except RuntimeError as exc:
             conn.execute(
                 "UPDATE orders SET status = 'blocked', block_reason = %s WHERE id = %s",
@@ -570,11 +573,15 @@ def _submit_queued(conn, broker, slot: str, account: str) -> None:
         conn.execute(
             """
             UPDATE orders
-            SET status = 'submitted', ib_order_id = %s, account_id = %s
+            SET status = 'submitted', ib_status = 'Submitted', ib_order_id = %s,
+                account_id = %s, perm_id = COALESCE(%s, perm_id), updated_at = now()
             WHERE id = %s
             """,
-            (ib_order_id, account, order_id),
+            (ib_order_id, account, perm_id, order_id),
         )
+        from athena_exec.order_watch import note_order_event
+
+        note_order_event(conn, order_id, account, "Submitted", "submitted", None, None, None)
         conn.commit()
         _publish_order(account, order_id)
         log.info("order submitted id=%s ib=%s", order_id, ib_order_id)
@@ -605,7 +612,17 @@ def _sync_order_status(conn, broker, account: str) -> list[tuple]:
             log.info("order unseen id=%s ib=%s", order_id, ib_order_id)
             continue
         if live == "Filled":
-            conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
+            conn.execute(
+                """
+                UPDATE orders
+                SET status = 'filled', ib_status = 'Filled', updated_at = now()
+                WHERE id = %s
+                """,
+                (order_id,),
+            )
+            from athena_exec.order_watch import note_order_event
+
+            note_order_event(conn, order_id, account, "Filled", "filled", filled_qty, 0, avg_fill)
             option = expiry is not None or strike is not None or bool(contract_right)
             qty = filled_qty if filled_qty is not None else contracts
             shares = None if qty is None else abs(int(qty))
@@ -617,7 +634,17 @@ def _sync_order_status(conn, broker, account: str) -> list[tuple]:
             changed.append(order_id)
             log.info("order filled id=%s ib=%s", order_id, ib_order_id)
         elif live in {"Cancelled", "ApiCancelled", "Inactive"}:
-            conn.execute("UPDATE orders SET status = 'cancelled' WHERE id = %s", (order_id,))
+            conn.execute(
+                """
+                UPDATE orders
+                SET status = 'cancelled', ib_status = %s, updated_at = now()
+                WHERE id = %s
+                """,
+                (live, order_id),
+            )
+            from athena_exec.order_watch import note_order_event
+
+            note_order_event(conn, order_id, account, live, "cancelled", filled_qty, None, avg_fill)
             changed.append(order_id)
             log.info("order cancelled id=%s ib=%s status=%s", order_id, ib_order_id, live)
         else:
@@ -638,6 +665,8 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
         sec_type = item[7] if len(item) > 7 and item[7] else "STK"
         commission = item[8] if len(item) > 8 else None
         commission_ccy = str(item[9] or "") if len(item) > 9 else ""
+        perm_id = item[10] if len(item) > 10 else None
+        cum = item[11] if len(item) > 11 else None
         if fill_account and fill_account != account:
             continue
         if conn.execute(
@@ -645,14 +674,27 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
             (account, exec_id),
         ).fetchone():
             continue
-        row = conn.execute(
-            """
-            SELECT id, draft_id, tactic, contracts, action, multiplier
-            FROM orders
-            WHERE ib_order_id = %s AND account_id = %s AND status = 'submitted'
-            """,
-            (ib_order_id, account),
-        ).fetchone()
+        row = None
+        if perm_id:
+            row = conn.execute(
+                """
+                SELECT id, draft_id, tactic, contracts, action, multiplier, status
+                FROM orders
+                WHERE account_id = %s AND perm_id = %s
+                """,
+                (account, int(perm_id)),
+            ).fetchone()
+        if row is None and ib_order_id:
+            row = conn.execute(
+                """
+                SELECT id, draft_id, tactic, contracts, action, multiplier, status
+                FROM orders
+                WHERE ib_order_id = %s AND account_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (ib_order_id, account),
+            ).fetchone()
         if row is None:
             signed = -quantity if side == "SLD" else quantity
             book_side = "SELL" if side == "SLD" else "BUY"
@@ -682,11 +724,13 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
             ))
             log.info("external fill symbol=%s price=%s", symbol, price)
             continue
-        order_id, draft_id, tactic, contracts, action, multiplier = row
+        order_id, draft_id, tactic, contracts, action, multiplier, order_status = row
         shares = abs(int(quantity)) if quantity is not None else (
             None if contracts is None else abs(int(contracts))
         )
         mult = multiplier or ("100" if (sec_type or "").upper() == "OPT" else "1")
+        done = _fill_complete(cum if cum is not None else quantity, contracts)
+        filled_qty = cum if cum is not None else quantity
         conn.execute(
             """
             INSERT INTO fills (
@@ -697,22 +741,56 @@ def _apply_fills(conn, account: str, fills: list[tuple]) -> list[tuple]:
             """,
             (draft_id, symbol, tactic, contracts, price, account, exec_id, action or "", sec_type, commission, commission_ccy),
         )
-        conn.execute(
-            """
-            INSERT INTO positions (account_id, symbol, quantity, avg_price, sec_type)
-            VALUES (%s, %s, %s, %s, 'STK')
-            """,
-            (account, symbol, quantity, price),
-        )
-        conn.execute("UPDATE orders SET status = 'filled' WHERE id = %s", (order_id,))
+        if order_status != "filled":
+            conn.execute(
+                """
+                INSERT INTO positions (account_id, symbol, quantity, avg_price, sec_type)
+                VALUES (%s, %s, %s, %s, 'STK')
+                """,
+                (account, symbol, quantity, price),
+            )
+            from athena_exec.order_watch import note_order_event
+
+            if done:
+                conn.execute(
+                    """
+                    UPDATE orders
+                    SET status = 'filled', ib_status = 'Filled',
+                        filled_qty = COALESCE(%s, filled_qty),
+                        remaining_qty = 0, avg_fill = COALESCE(%s, avg_fill), updated_at = now()
+                    WHERE id = %s
+                    """,
+                    (filled_qty, price, order_id),
+                )
+                note_order_event(conn, order_id, account, "Filled", "filled", filled_qty, 0, price)
+                noticed.append((
+                    account, symbol, tactic, action, draft_id, price, shares,
+                    mult, commission, commission_ccy, sec_type or "STK",
+                ))
+            else:
+                conn.execute(
+                    """
+                    UPDATE orders
+                    SET filled_qty = COALESCE(%s, filled_qty),
+                        avg_fill = COALESCE(%s, avg_fill), updated_at = now()
+                    WHERE id = %s
+                    """,
+                    (filled_qty, price, order_id),
+                )
+                note_order_event(conn, order_id, account, "", order_status, filled_qty, None, price)
+            _publish_order(account, order_id)
+            log.info("fill order=%s symbol=%s price=%s full=%s", order_id, symbol, price, done)
         conn.commit()
-        _publish_order(account, order_id)
-        noticed.append((
-            account, symbol, tactic, action, draft_id, price, shares,
-            mult, commission, commission_ccy, sec_type or "STK",
-        ))
-        log.info("fill order=%s symbol=%s price=%s", order_id, symbol, price)
     return noticed
+
+
+def _fill_complete(filled, contracts) -> bool:
+    if filled is None or contracts is None:
+        return True
+    try:
+        return Decimal(filled) >= Decimal(contracts) and Decimal(contracts) > 0
+    except Exception:
+        return True
 
 
 def _position_key(symbol: str, sec_type: str, expiry, right: str, strike) -> tuple:
