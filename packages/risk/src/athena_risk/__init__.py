@@ -6,6 +6,18 @@ from decimal import Decimal
 
 from athena_settings.model import RiskLimits
 
+# Guardian conformance grading (booklet 14, R1). Pure, read-only, no I/O.
+from athena_risk.guardian import (  # noqa: E402
+    AccountMarks,
+    GuardianPosition,
+    GuardianReport,
+    GuardianRules,
+    PositionGrade,
+    Tier,
+    grade,
+    render_report,
+)
+
 _POSITION_SLACK = Decimal("1.1")
 UNCLASSIFIED_BUCKET = "UNCLASSIFIED"
 
