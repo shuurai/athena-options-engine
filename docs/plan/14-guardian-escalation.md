@@ -1,7 +1,7 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21**（D58–D65 八条 ＋ D66 单条补裁定，全取推荐，无偏离）。Side track. Not on the signal critical path (steps 1–9).
-**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3–R6 待办。** Every rule below is a **ratified** decision node; rulings recorded in §7. Implementation contracts: §8 (R1) / §11 (R2); delivery records: §9 (R1) / §12 (R2).
+**状态**：**Ratified 2026-11-21**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离）。Side track. Not on the signal critical path (steps 1–9).
+**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3–R6 待办；R7 已裁定（D67–D73， Planning 阶段结束，实现仍待 R3/R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八轮）. Implementation contracts: §8 (R1) / §11 (R2); delivery records: §9 (R1) / §12 (R2); R7 contract + ratification: §13.
 
 > **Origin (operator, 2026-11-21)**: during work/exam crunch weeks, execution function is consumed by work and the portfolio goes into autopilot — and autopilot only does one thing: nothing. Last week a black-swan-scale move took the book from fine to near-liquidation. The quantitative layer (per-position scoring) already works. What is missing is a layer that (a) compares every live position — including accidental ones — against the rule book, (b) tells the operator the one thing to do, at a fixed time, and (c) refuses to be ignored when it matters.
 
@@ -90,14 +90,15 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **R4** | Telegram escalation | Nag loop: tier ≥ 危险 & unacked → resend every 5 min with inline Resolve button (reuses `_handle_callback`). Dead-man: if a scheduled run fails, that failure itself becomes a 危险 alert | R3 | Force a red state in paper; confirm 5-min cadence; ack from phone stops it; kill the orchestrator, get the "guardian is down" message |
 | **R5** | Trigger lines | Operator-defined lines (`NVDA < 118`, `VIX > 38`, `MRVL > 145` …) as a first-class alert source feeding the same store and escalation path. This is option **C** from the earlier conversation, folded in. **D66：R5 是唯一的价格型触发线来源**，R1/R2 不设持仓级 `stop_line` | R4 | Set a line in Settings; cross it in paper; alert fires within one poll interval |
 | **R6** | Dedicated host | Always-on machine running orchestrator + exec-ib + IB Gateway under a watchdog (launchd/systemd auto-restart), with a heartbeat: if no heartbeat for 10 min during US hours, Telegram fires | R4 | Unplug test: kill the box, get the heartbeat alert; reboot, everything self-recovers without a shell |
+| **R7** | Midday regime label + close bias (**✅ 已裁定 D67–D73**) | **Run C** at 12:30 ET; joint matrix (stocks × 10Y yield × gold × VIX level × volume + news tags) → closed `label` vocabulary + qualitative `close_bias` (**not** a price forecast); append-only `regime_labels` with replayable `evidence`; fed into the existing `Indicators` / `agents.py` context as **read-only annotation, no gating**. 4.5 of 5 inputs have no producer today ⇒ missing input records `unknown` **with an inline reason**, never invented. Seven rulings D67–D73, see §13 | R3 + R4 (and separated from R5's static trigger lines) | Every fired rule leaves `evidence`; label reproducible from stored inputs; 5 worked cases calibrate the matrix |
 
-**Sequencing logic**: R1→R2→R3→R4 is the spine (each needs the previous). R5 needs R4's escalation path. R6 is infrastructure and can run in parallel with R3–R5 — but note that **R4 on an unreliable machine is a false sense of safety**, so R6 should not trail far behind.
+**Sequencing logic**: R1→R2→R3→R4 is the spine (each needs the previous). R5 needs R4's escalation path. R6 is infrastructure and can run in parallel with R3–R5 — but note that **R4 on an unreliable machine is a false sense of safety**, so R6 should not trail far behind. **R7 is numbered after R6 but depends on R3 (ET-anchored scheduler) + R4 (delivery), so it cannot jump the spine; it must also be separated semantically from R5's static trigger lines (§13.7).**
 
 ---
 
 ## 5. Decisions — 全部已裁定（2026-11-21）
 
-**九条全取推荐，零偏离。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮。
+**十六条全取推荐，零偏离。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6。
 
 | # | Decision | Options | 裁定 | 依据 |
 |---|---|---|---|---|
@@ -110,6 +111,13 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **D64** | Host for R6 | (a) dedicated Mac mini at home (b) existing Windows box with auto-login (c) cloud VPS | **✅ (a) dedicated Mac mini** | IB Gateway 同机、无 RDP 脆弱性、断电后 launchd 自恢复、不与 ComfyUI/5090 抢资源。代价：一台机器 ＋ 独立 Gateway client id（`C-20261013-34` 已有此模式）。否决 (c)：IB 2FA ＋ 住宅 IP 期待让 VPS 登录脆弱 |
 | **D65** | Heartbeat rule | (a) 10-min missed heartbeat during US hours → Telegram (b) only at scheduled runs (c) 5-min missed beat | **✅ (a) 10-min → Telegram** | 定时跑挂掉本身也变成危险告警。否决 (b)：22:40 死亡直到次日盘前都不可见，恰是你最需要它的时段；否决 (c)：短网络抖动会造出假「down」并训练你忽略 |
 | **D66** | Stop line 的处置（R1 交付后补裁定） | (a) 删除 `stop_line` / `trim_line`，改为镜像顾问 `pending_action` (b) 保留到 R5 再喂 (c) 现在就建 `positions.stop_price` ＋ Settings 旋钮 ＋ 迁移 | **✅ (a) 删除并镜像顾问；价格线只归 R5** | 库里三个 `stop` 全是假朋友（LLM 停止词 / STP LMT 委托属性 / 已被顾问消费的预测价），`profit_take_pct` 也不是价格线。第三条产线会与 `advisor_signals → drafts` 形成两套 ack、与 D22 `avg_price` 基准冲突，并重复 D54 刚删掉的「假旋钮」。否决 (b)：R2 告警表要背一条永不触发的死分支；否决 (c)：重复 R5、多一个生产者与迁移 |
+| **D67** | 午间 Regime Label 的权限（R7 Q1） | (a) 只读注解、绝不改既有门控 (b) gate：🔴/🟠 抑制 `wheel.py` 新开仓 (c) 直接给动作指令 | **✅ (a) 只读注解** | 12:30 ET 判定 `liquidity_squeeze` 红时，顾问仍有一条 pending NVDA CSP 草案等批准 —— 标签只入库、只展示，顾问／轮动／草案一切照旧，仍由操作者自己点批准。保住 §1「no orders / no tactic changes」与 D66 的单 ack 路径。否决 (b)(c)：改既有行为或另造第二套决策面 |
+| **D68** | 4.5 个输入无生产者怎么处理（R7 Q2） | (a) 降級 `unknown`、不臆造 (b) 新增轻量行情源 (c) 操作者手工粘贴 → LLM 分类 | **✅ (a) 降級 `unknown`**；操作者加注「要告诉 user 为什么 VIX 缺」⇒ 拆为 **D73** | 「VIX 34（早高 40 回落）、10Y 4.94%↓、金跌」这行里库内全无生产者；照抄会变成永远靠猜的标签。缺维度记 `unknown`、标签降 `insufficient_data`，只用真有的延迟 tick ＋ 消息标签。否决 (b)：需显式修订 §6「No new market data sources」并新建生产者；否决 (c)：依赖操作者 12:30 ET 在桌前，正是 Guardian 要修的失效模式 |
+| **D69** | 标签落点与粒度（R7 Q3） | (a) 组合级存一次、注入 `agents.py` 全局上下文 (b) 逐标的加 `Indicators.session_regime` (c) 两者都做 | **✅ (a) 组合级存一次** | 一个市场级 `short_cover_bounce` 若写进 ~30 个标的的 `symbol_phases.indicators` 会复制 N 份，且与 `Indicators.regime_unknown`（`SPY` 日线**跨日** regime）撞名。存一行 `regime_labels`、在 `agents.py:_context()` 注入一行全局上下文，另起新名 `session_regime`。否决 (b)(c)：N 份复制／双真源 |
+| **D70** | 面板位置（R7 Q4） | (a) 扩 `/portfolio-analysis` 现有标签卡 (b) `/guard` 加只读卡 (c) 新页 `/regime` | **✅ (a) 扩 `/portfolio-analysis`** | 22:00 HKT 只有 30 秒；`/portfolio-analysis` 已有 `RISK OFF / CAUTION / RISK ON` 展示态卡。沿用 D59 的独立页思路但不必再开第三页，且 `/guard` 保持纯 ack 动作面（D62 语义不动）。否决 (b)(c)：把时序混进状态机／增加导航负担 |
+| **D71** | Run C 与推送（R7 Q5） | (a) 单次 12:30 ET 跑 (b) 12:30 ＋ 15:30 ET 覆核两跑 (c) 沿用 5 分钟 cycle 不做 ET 锚定 | **✅ (a) 单次 12:30 ET** | D60 的 Run A／Run B 不动；Run C 由 R3 的 `America/New_York` 锚定派生（DST 安全），推送复用 R4 的 Telegram 通道但**不进 5 分钟 nag 循环**。否决 (b)：多一次打扰；否决 (c)：「12:30 ET」变成近似值并跨 DST 漂，正是 D60 否过的 |
+| **D72** | 验收口径（R7 Q6） | (a) 可重放 `evidence`、标签可由存下输入复现、5 案例校准 (b) 以「还原机构意图 80%」为验收 (c) 先 shadow-only 暂缓验收 | **✅ (a) 可重放 `evidence`**；**明確否決 (b)** | n=5、同一段 regime、无标注无反例，「80% 機構意圖」不可证伪且声称了不可观测量。每条命中留 `evidence`、标签可从 `inputs` 重放；启用任何 gate 前须有跨 regime 标注样本与反例。否决 (c)：把验收无限期推迟 |
+| **D73** | 缺失原因如何呈现（R7 Q7，由 Q2 附注拆出） | (a) 每个 `unknown` 维度就地标注 (b) 单列一行 coverage footer (c) 只在面板卡显示 | **✅ (a) 就地标注** | 操作者在 Q2 加注「we should advise user why VIX is missing」，`insufficient_data` 不得是静默空白。形如 `VIX n/a (no intraday-high feed in store)`，区分「库里没有生产者」与「今天没抓到」，让操作者知道该不该信这个标签。否决 (b)(c)：理由离一眼之外／Telegram 上完全看不见 |
 
 ---
 
@@ -121,10 +129,11 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 - R6 covers the *machine*, not a networking overhaul. Tunnel behaviour is unchanged.
 - **R6 主机裁定为家用专用 Mac mini（D64）**，不是 Windows 共用机、不是云 VPS。IB Gateway 同机，`launchd` 自恢复，需在 `C-20261013-34` 的「每 Gateway 登录独立 client id」模式下给它单独的 client id。
 - **D66**：不设持仓级 `stop_line`；不新增 Settings 字段、不加迁移、不改 `advisor_signals` / `manage_book` / `drafts`。价格触发线只归 R5。
+- **R7（§13，已裁定 D67–D73）**：七条全取 (a) ⇒ **本节「No new market data sources」与 §1「no drafts, no orders, no tactic changes」两条边界一条都不用改**。D67 只读注解不 gate、D68 降級 `unknown` 不新增源、D70 不新开页、D71 不进 nag。若日后要启用 gate 或新行情源，仍须先显式修订这两条边界（§13.7）。
 
 ---
 
-## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定）
+## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7）
 
 操作者指令：「每個問題問我一遍，我來回答」。分两轮、每条带具体案例逐条问，**8 条全取推荐、零偏离、无跳过**。
 
@@ -154,6 +163,27 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **D66** | 持 200 股 NVDA、顾问已挂一条 pending `CLOSE` 草案：单独 `stop_line` 会同时产生「一条草案」＋「一条 guardian 红告警」，两套 ack 状态；镜像方案只出一行、批准草案即同时关闭 | (a) 删除并镜像顾问 (b) 保留到 R5 再喂 (c) 现在就加 `positions.stop_price` ＋ Settings 旋钮 ＋ 迁移 | **✅ (a) 删除并镜像顾问** |
 
 **明确否决**：(b) 让 `breach_stop_line` 成为 R2 告警表里永不触发的死分支；(c) 重复 R5 的职责、与 D22 `avg_price` 基准冲突、并要求一个生产者 ＋ UI ＋ 迁移。**不新增 Settings 字段、不加迁移、不改 `advisor_signals` / `manage_book` / `drafts`；R1 保持零 I/O 纯函数。** 裁定后决策编号扩到 **D1–D66（67 个节点）**，仍零待决。
+
+### 第八轮（2026-11-21，R7 企划 Q1–Q7 → D67–D73）
+
+操作者先给出 2026/11 对照表与 5 条午间规则要求「加到计划、可以放 R7」，确认合并后的 §13 文档后回 `Yes`，按「每個問題問我一遍」分两轮逐条问（Q1–Q4 ／ Q5–Q7），**七条全取推荐、零偏离、无跳过**。Q2 的回答带一句附注「but we should advise user why VIX is missing」，该附注**不代拍板**，拆成 Q7 单独再问，落为 D73。
+
+| 轮 | 决策 | 案例（问的是什么） | 裁定 |
+|---|---|---|---|
+| 1 | **D67** | 12:30 ET 判定 `liquidity_squeeze` 红，同时顾问挂着 pending NVDA CSP 草案等你批准 —— 标签该有多大权限 | ✅ (a) 只读注解，不 gate |
+| 1 | **D68** | 「VIX 34（早高 40 回落）、10Y 4.94%↓、金跌」这行里 4.5 个输入库内全无生产者 | ✅ (a) 降級 `unknown`、不臆造（＋附注拆出 D73） |
+| 1 | **D69** | 一个市场级 `short_cover_bounce` 要喂给 ~30 个标的，而 `Indicators` 已有跨日 `regime_unknown` | ✅ (a) 组合级存一次、注入 `agents.py` 上下文 |
+| 1 | **D70** | 22:00 HKT 只有 30 秒，`/portfolio-analysis` 已有展示态卡、`/guard` 是 ack 面 | ✅ (a) 扩 `/portfolio-analysis`，不新开页 |
+| 2 | **D71** | D60 已有 Run A／Run B，午间 12:30 ET 是第三跑 | ✅ (a) 单次 12:30 ET，R3 派生、R4 通道、不进 nag |
+| 2 | **D72** | 「價格行為＋債金背離＋消息標籤可還原 80% 機構意圖」能不能当验收 | ✅ (a) 可重放 `evidence`；明確否決 (b) 80% |
+| 2 | **D73** | `insufficient_data` 不能是静默空白，怎么告诉操作者 VIX 为什么缺 | ✅ (a) 每个 `unknown` 维度就地标注固定原因 |
+
+**裁定后的状态变化**：
+
+- 决策编号扩到 **D1–D73（74 个节点，`D4` 拆两段）**，**决策层面仍零待决**；Q1–Q6 的「裁定前不编号」约定已兑现为 D67–D72，Q2 附注拆出的 Q7 落为 D73。
+- **七条全取 (a) ⇒ §1「no orders / no tactic changes」与 §6「No new market data sources」一条都不用改**；R7 保持只读注解、不新增数据源、不 gate、不新开页、不进 nag 循环。
+- R7 从 **Planning／待裁定** 转为 **已裁定、契约冻结**；实现仍依赖 R3 ＋ R4（§13.7），**本轮零代码改动**。
+- 逐条依据见 §5 决策表与 §13.6；本轮台账 `C-20261121-7`。
 
 ---
 
@@ -294,4 +324,114 @@ for each position:
 
 ---
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D66 共 9 条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；R3–R6 待办
+## 13. R7 契约：午間 Regime Label 與收盤定性前瞻（2026-11-21，✅ 已裁定 D67–D73）
+
+> **来源**：操作者 2026-11-21 提供 2026/11 的「時間點 × 消息 × 暗池／大機構 × 聯儲」對照表與 5 條午間判斷規則，要求把「當天發生什麼」的判斷 ＋「當天結尾」的預知提供給既有打分表，並指定放在 **R7**。
+> **状态**：**✅ 已裁定（第八轮，D67–D73 七条全取推荐、零偏离）。仍是契约、不是实现 —— 零代码、零迁移、零 Settings 字段。** Q1–Q7 已编号并同步 `00` 册：**D1–D73 / 74 个节点零待决**。裁定记录见 §7 第八轮与 §13.6；逐条依据见 §5。**七条全取 (a) ⇒ §1／§6 两条边界均未修订。**
+
+### 13.1 思路判断
+
+**方向成立，但不能照抄这张表落地。** 值得做的部分是「把当天已发生的事压成一个可复核的标签，并喂给既有量化层」；这正是 §1 里「量化层已工作、缺的是判断层」的延伸。但按代码实测有 4 个硬问题：
+
+| # | 问题 | 判断 |
+|---|---|---|
+| 1 | **5 个输入里 4.5 个没有生产者**（§13.3） | 「不用接暗池真数据」这句成立，但**不等于不用接数据**。VIX 日内高、10Y、金、費半、NVDA 分鐘斜率全库皆无；只有 `pulse.py` 的延迟流式报价 ＋ 小时 `ib-delayed` 快照可用，且不存 tick 序列／日内高。照抄规则会得到一个永远靠猜的标签 |
+| 2 | **与 §1／§6 边界直接冲突** | §1 明写「A new strategy… no drafts, no orders, no tactic changes」、§6 明写「No new market data sources」。R7 既要新数据源，又要喂打分表（可能被 `wheel.py` 当开门控），还提出「只減不買／不加倉」这类动作指令。**裁定后已消解**：D67 只读注解、D68 降級 `unknown` 不新增源、D70 不新开页 ⇒ 两条边界一条都不用改（见 §13.7） |
+| 3 | **规则形态不对：5 条独立 if-then 抓不到真正的信号** | 操作者自己的结语「債金不同步的反彈，都是門，不是底」是**联合条件**，但表里 5 条是各自独立的单信号判定。且「股跌債也跌」讲的是**债券价格跌＝收益率升**，输入却定义成「10Y 收益率」，符号会反。「金跌」在股跌与股弹两种情形下含义相反（11/20 是流動性擠兌、11/21 是空頭回補），单看黄金无解 |
+| 4 | **样本与验收口径不可证伪** | 5 个日期是叙事挑選的同一段 regime（n≈3 週），「還原 80% 機構意圖」既无标注也无反例。本仓 `01/04/09` 册的「證偽／sanity／band_gap」惯例不接受这种验收。且「機構意圖」是不可观测量，标签不该声称还原它 |
+
+**建议的形态**：定义成「**午间可观测状态分类器**」—— 输出是价格／利率／黄金／波动率／消息标签的**联合状态**，不是机构意图、不是价格预测；规则用确定性真值表（可复核、可留痕），LLM 只在自由文本消息分类这一处出现且必须带 `unknown` 兜底。
+
+### 13.2 与既有裁定／迭代的冲突（已由 D67–D73 消解）
+
+| 既有口径 | 冲突点 | 裁定后的处置 |
+|---|---|---|
+| §1「no orders / no tactic changes」 | 「只減不買／不加倉」若由工具强制执行，就是新增门控 | **✅ D67**：只读注解、绝不改既有门控 ⇒ §1 不修订 |
+| §6「No new market data sources」 | 5 个输入全部需要新源 | **✅ D68**：降級 `unknown`、不新增源 ⇒ §6 不修订；**D73** 就地标注缺失原因 |
+| D60「两跑、NY 锚定」 | 午间 12:30 ET 是**第三跑** | **✅ D71**：不替换 Run A/B；新增 **Run C**，由 R3 的 NY 锚定派生，单次 12:30 ET |
+| R5「`VIX > 38` 触发线」 | VIX 规则重叠 | R5 = 操作者设的**静态阈值触发线**（`source='trigger'`）；R7 = **时间窗内相对状态**（spot vs 早盤高）。语义不同，不合并、不复用同一行 |
+| D62 / `guardian_alerts` | 标签是时序，不是待确认告警 | **✅ D69**：不进 ack 状态机、不加 `source='regime'`（`'trigger'` 已预留给 R5）；独立 append-only `regime_labels` 表 |
+| R3 / R4 未交付 | R7 没有定时跑、没有推送通道 | **R7 依赖 R3 ＋ R4**，排期在二者之后；不能独立开工（§13.7 不变） |
+| 面板 / `/portfolio-analysis` | 新标签要落在哪 | **✅ D70**：扩 `/portfolio-analysis` 现有标签卡；不新开页、`/guard` 保持纯 ack 面 |
+| 验收口径 | 「80% 機構意圖」不可证伪 | **✅ D72**：可重放 `evidence`、无准确率声明；明確否決 80% |
+
+### 13.3 数据可得性实测（2026-11-21，只读核实，非推测）
+
+| 输入 | 库内生产者 | 状态 |
+|---|---|---|
+| VIX 现值 ＋ 早盤高 | 无。全库 `VIX` 只出现在计划文档的 R5 示例 | ❌ |
+| 10Y 美债收益率 / `^TNX` / 债券价 | 无（`docs/athena/12-short-horizon-forecast-rnd.md` 仅 R&D 设想） | ❌ |
+| 黄金 GLD / GC / XAU | 无专用源；`GLD` 只是 `UNIVERSE_SEED` 里的字符串；D52 指导篮子提到 `GLD`/`TLT`/`SOXX` 但代码默认 `guidance_symbols` 并不含它们 | ❌ |
+| 費半 / SOX / SMH / SOXX | 无独立生产者，只是可放进 watchlist 的普通 ticker | ❌ |
+| NVDA 早盤 vs 午盤斜率 | 无。`market_bars` 只有日线与小时快照（同日合并成一根日线）；唯一 slope 是 `indicators.py` 的 21 session 跨日 `trend_slope_pct` | ❌ |
+| 盘中即时价 | **有但有限**：`pulse.py` 延迟流式 tick，仅按小时 `upsert_delayed()` 落库，不存 tick 序列、不存日内高；订阅限于 watchlist ＋ 持仓股 ＋ 在途股票单 | ⚠️ |
+| 消息／事件标签 | **有**：`news.py` 的 Yahoo RSS / Finviz / FOMC 日历 / Nasdaq 财报日历 / 手工 URL；`news_events.event_type` 半结构化。但 `score_title()` 只产出 5 个码，`AI_REGULATION` / `ANTITRUST_FINE` / `NARRATIVE_ATTACK` / `SUPPLY_CHAIN` 定义了却从不产生；**无 Fed 官员讲话正文、无 SEC／监管抓取** | ⚠️ |
+| LLM 分类能力 | 有：`agents.py` 的 News agent（schema 校验）、`dsh.read_article()` / `enrich_sentiment()`、`forecast_marks` 的 `risks[].code` | ✅ 可复用 |
+
+**结论（D68 / D73 已裁定）**：延续 D66「无生产者的数据一律留空并记旗标、不臆造」的纪律 —— 缺任一输入 ⇒ 该维度记 `unknown`，标签最多降到 `insufficient_data`，**不允许用叙述里的数字补位**。**D73**：每个 `unknown` 维度必须就地附一条固定原因（如 `VIX n/a (no intraday-high feed in store)`），区分「库里没有生产者」与「今天没抓到」，同一行推送与面板卡都带 —— `insufficient_data` 不得是静默空白。`VIX > 30 / > 35` 只是操作者给的候选阈值，标注**待校準**，不进验收。
+
+### 13.4 建议的规则形态：三轴联合矩阵
+
+把 5 条独立规则改成「**股 × 債(收益率) × 金**」方向矩阵 ＋ VIX 水位 ＋ 量能 ＋ 消息标签，一次判定一个标签：
+
+| 股 | 10Y 收益率 | 金 | VIX 水位 | 量能 | 消息标签 | 候选 label | 燈 |
+|---|---|---|---|---|---|---|---|
+| 跌 | 升（債價跌） | 跌 | 高位再升 | 放量 | 聯儲／監管／SEC | `liquidity_squeeze` | 🔴 |
+| 彈 | 降（債價升） | 跌 | 早高回落但 >30 | 縮量 | 只有 IPO／單股財報／空頭回補 | `short_cover_bounce` | 🟠 |
+| 跌 | 降（債價升） | 升 | 回落 | 正常 | 無重大標籤 | `normal_risk_off` | 🟡 |
+| 早紅→午綠 | — | — | — | 午間放量 | 個股做空／融資質疑 | `distribution_into_strength` | 🟠 |
+| 任一軸 `unknown` | — | — | — | — | — | `insufficient_data` | ⚪ |
+
+- **方向统一**：一律以「10Y 收益率升／降」表述，避免「股跌債也跌」的債價／收益率符号反转。
+- **消息标签**只做二分类：`narrative_only`（IPO 路演／單股財報／空頭回補 ⇒ `dead_cat` 候选）与 `regime_shift`（聯儲官員講話 ＋ 監管/SEC ＋ 債市異動**同时**出现）。「同时」是硬条件，缺一不算。
+- **收盤前瞻**是**定性** `close_bias ∈ {risk_off_into_close, bounce_likely_fades, neutral, insufficient_data}` ＋ 一句原因，**不是价格预测**。理由：库里已有 `forecast_marks` 的数值预测（默认关闭、shadow，输出 `bid/ask/stop/take_profit/dir_conf`，horizon 单位是 sessions），再叠一个价格预言机会重复 D54 删掉的「假旋钮」；`02` 册也早已否定 MPT 式最优化。
+- **不声称「还原机构意图」**：标签只描述可观测状态。操作者原话可存进风控档案：「午間的反彈，先看債和金，再看消息；債金不同步的反彈，都是門，不是底。」
+
+### 13.5 输出与落点（已裁定 D69 / D70 / D71 / D73）
+
+- **一行推送**（12:30 ET 示例形）：`🟠 11/21 午間：VIX 34（早高 40 回落）、NVDA 抽 +3% 無量、10Y 4.94%↓、金跌 →【空頭回補反抽】。close_bias: bounce_likely_fades。`
+- **降級形（D73）**：`⚪ … VIX n/a (no intraday-high feed in store)、10Y n/a (no ^TNX feed)、金 n/a (no gold feed) →【insufficient_data】。close_bias: insufficient_data。` —— 每个 `unknown` 就地给原因，推送与面板卡同带。
+- **标签词表**（封闭，禁止 `risks[].code` 那种自由串）：`liquidity_squeeze / short_cover_bounce / distribution_into_strength / normal_risk_off / regime_shift / dead_cat / insufficient_data`。
+- **存贮**：独立 append-only `regime_labels(account_id, day, run, label, close_bias, evidence jsonb, inputs jsonb, created_at)`，一跑一行；`evidence` 存「哪个输入 → 哪条规则命中 → 得出什么」，用于复核。**不复用 `guardian_alerts`**（它是 `open/skipped/resolved/auto_cleared` ack 去重语义，部分唯一索引会挡掉同键历史）。迁移号从 `054` 顺延，仅预留未落地。
+- **喂给打分表（✅ D69 组合级存一次）**：全库无字面叫「打分表」的表；最贴近的是 `indicators.py` 的 `Indicators`（14 字段、落 `symbol_phases.indicators`，被 `phases.evaluate_symbol()` / `agents.py` prompt / `wheel.py` 开门控 / `screener.py` 消费），另有 `advisor.py:_rule_fallback()` 字面 `score = 0.0` 写 `advisor_signals`。注意 `Indicators` 已有 `regime_unknown`（基于 `regime_index = "SPY"` 日线的**跨日** regime）—— R7 是**当日盘中**状态，**必须换名字**（`session_regime`），不可覆盖。市场级标签是组合级，逐标的写进 JSONB 会复制 N 份 ⇒ **裁定存一行 `regime_labels`、在 `agents.py:_context()` 注入一行全局上下文**；`wheel.py` 不做逐标的读取（D67 不 gate）。
+- **面板（✅ D70）**：`pages.py:1698-1699` 的 `/portfolio-analysis` 已有一张展示态 `RISK OFF / CAUTION / RISK ON` 卡（由 `advisor_signals` 推导、无时序）。**裁定在此扩一张「午間 Regime」卡**，不新开页；`/guard` 保持纯 ack 动作面（D62 语义不动）。
+
+### 13.6 第八轮裁定记录（Q1–Q7 → D67–D73，2026-11-21）
+
+**七条全取推荐、零偏离、无跳过。** 分两轮逐条问（Q1–Q4 ／ Q5–Q7），每条带具体案例；Q2 的回答附一句「but we should advise user why VIX is missing」，该附注拆成 Q7 单独再问，落为 D73。裁定记录亦见 §7 第八轮，逐条依据见 §5。
+
+| 问 | 决策 | 问题 | 选项 | 裁定 |
+|---|---|---|---|---|
+| **Q1** | **D67** | 标签的权限：只读注解，还是可压制加仓？ | (a) 只读注解、绝不改既有门控 (b) 可 gate：🔴/🟠 时抑制 `wheel.py` 新开仓 (c) 直接给动作指令 | **✅ (a)** |
+| **Q2** | **D68** | 4.5 个输入无生产者怎么处理 | (a) 降級 `unknown`、不臆造 (b) 新增轻量行情源 (c) 操作者粘贴 → LLM 分类 | **✅ (a)**；附注拆出 **Q7 → D73** |
+| **Q3** | **D69** | 落点与粒度 | (a) 组合级存 `regime_labels`、注入 `agents.py` 全局上下文 (b) 逐标的加 `Indicators.session_regime` (c) 两者都做 | **✅ (a)** |
+| **Q4** | **D70** | 面板位置 | (a) 扩 `/portfolio-analysis` 现有标签卡 (b) `/guard` 加只读卡 (c) 新页 `/regime` | **✅ (a)** |
+| **Q5** | **D71** | Run C 与推送 | (a) 单次 12:30 ET 跑 (b) 12:30 ＋ 15:30 ET 覆核两跑 (c) 沿用 5 分钟 cycle 不做 ET 锚定 | **✅ (a)** |
+| **Q6** | **D72** | 验收口径 | (a) 可重放 `evidence`、标签可由存下输入复现 (b) 以「还原机构意图 80%」为验收 (c) 先 shadow-only 暂缓验收 | **✅ (a)**；**明確否決 (b)** |
+| **Q7** | **D73** | 缺失原因如何呈现（由 Q2 附注拆出） | (a) 每个 `unknown` 维度就地标注 (b) 单列 coverage footer (c) 只在面板卡显示 | **✅ (a)** |
+
+**明确否决**：Q1 (b)(c) 改行为／造第二套决策面；Q2 (b)(c) 新数据源／人在回路；Q3 (b)(c) N 份复制／双真源；Q4 (b)(c) 混入 ack 面／第三页；Q5 (b)(c) 多一次打扰／跨 DST 漂移；Q6 (b) 不可证伪、(c) 无限期推迟验收；Q7 (b)(c) 理由离一眼之外／Telegram 看不见。**七条全取 (a) 的净效果**：§1／§6 边界零修订、零新增数据源、零 gate、零新页、零 nag 循环。
+
+### 13.7 边界与依赖
+
+- **依赖**：R3（ET 锚定调度／Run C）＋ R4（推送通道）＋ R2（面板），并需与 R5 的 `VIX > 38` 静态触发线划清语义。**R7 不能独立开工**，排期在 R3/R4 之后；放在 R7 只是编号，不代表可越过脊柱。
+- **本轮（第八轮裁定）不做**：零代码、零迁移、零 Settings 字段、不改 `advisor.py` / `wheel.py` / `drafts` / `guardian.py`、不接暗池数据、不产生订单、不新建价格预测模型。**R7 实现仍待 R3/R4 落地后另起台账**。
+- **边界修订状态**：D67–D73 全取 (a) ⇒ **§1「no drafts, no orders, no tactic changes」与 §6「No new market data sources」均保持原文、零修订**。若日后要启用 gate（Q1-b）或新行情源（Q2-b），须**另开一轮裁定显式修订这两条**，不得在实现里顺手改掉。
+- **核实校正**：§8 第 1 条写「`forecast_marks.horizons.*.stop` … 已被 `advisor.py` 消费」不够精确 —— 实测 `advisor.py` 不读取 `stop`，只把整份 `payload` 带进 `advisor_signals`；`stop` 随包带入但不参与任何判定。**D66 结论不变**（它仍是假朋友）。此处只记口径校正，不改写历史契约。
+- **案例库性质**：§13.8 的 2026/11 对照表由操作者提供、**未经独立核实**，仅作规则校准的工作案例；不得写成数据源、不得作为回测基准、不得把其中具体人名／机构／数字硬编码进代码或阈值。
+
+### 13.8 工作案例（操作者提供，未核实，仅供校准）
+
+| 日期 | 盤面 | 消息 | 債／金 | 操作者给的判定 |
+|---|---|---|---|---|
+| 11/4–11/5 | 納指 -5.5~6.36%、費半 -12% | 中期選舉 → AI 監管預期 | 10Y 單週 +30bp | 被動去槓桿 |
+| 11/9–11/11 | 反彈 3.4%、VIX 19.9→19.3 | AI 需求敘事重燃 | CPI 超預期但被蓋住 | 機構換倉 |
+| 11/19 | 高開 +1% → 收 -2.25% | 個股做空報告 | 金同跌 | 借高開出貨 |
+| 11/20 | 納指 -5.28%、VIX 盤中 40.03 | SEC／監管、作證 | 股債金同跌 | 流動性擠兌（最危險） |
+| 11/21 盤後 | 超賣反抽 +2~4%、無量 | 無實質利好 | 債穩、金跌 | 空頭回補反抽 |
+
+> 樣本 n=5 且集中在同一段 regime，僅用於把 §13.4 的矩陣逐格走一遍；不作為準確率證據。
+
+---
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；R3–R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R3/R4**
