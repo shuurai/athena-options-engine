@@ -60,6 +60,7 @@ NAV_GROUPS = (
             ("/positions", "Positions"),
             ("/orders", "Orders"),
             ("/book", "Heatmap"),
+            ("/guard", "Guardian"),
         ),
     ),
     (
@@ -692,6 +693,33 @@ select:focus,
 select:focus-visible {
   border-color: rgba(107, 150, 242, 0.38);
 }
+/* Guardian /guard (booklet 14, R2). Five colours, read in 30 seconds. */
+.tag.black { background: #0b0b0d; color: #e5e7eb; border-color: #3f3f46; }
+.stage > .guard-stack { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.guard-summary { flex: none; }
+.guard-stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 14px; margin: 10px 0 8px; }
+.guard-stats .k, .guard-account .k { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
+.guard-stats .v { display: block; margin-top: 3px; font-family: var(--font-mono); font-size: 15px; color: var(--site-text); }
+.guard-account { border-top: 1px solid var(--site-border); padding-top: 9px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.guard-tier { flex: none; }
+.guard-tier h2 .guard-count { font-family: var(--font-mono); font-size: 12px; color: var(--site-text-4); }
+.guard-empty { color: var(--site-text-4); margin: 6px 0 0; }
+.guard-row, .guard-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--site-border); }
+.guard-symbol { font-family: var(--font-mono); font-weight: 600; min-width: 72px; }
+.guard-flags { display: flex; flex-wrap: wrap; gap: 5px; flex: 1 1 auto; }
+.guard-flag { font-family: var(--font-mono); font-size: 11px; color: var(--site-text-3); background: #141922; border: 1px solid var(--site-border); border-radius: 4px; padding: 1px 6px; }
+.guard-drafts { font-size: 11px; color: var(--site-text-4); }
+.guard-drafts a { color: var(--site-primary); }
+.guard-state { font-family: var(--font-mono); font-size: 11px; color: var(--site-text-4); text-transform: uppercase; }
+.guard-ack { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+.guard-ack form { display: flex; gap: 6px; align-items: center; }
+.guard-ack .input { font-size: 11px; padding: 4px 8px; min-width: 150px; }
+.guard-ack .btn { font-size: 11px; padding: 4px 10px; }
+.guard-history { width: 100%; border-collapse: collapse; font-size: 12px; }
+.guard-history th { text-align: left; color: var(--site-text-4); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.guard-history td, .guard-history th { padding: 4px 8px; border-top: 1px solid var(--site-border); }
+.guard-error { border-color: #7f1d1d; }
+.guard-error pre { white-space: pre-wrap; font-size: 11px; color: var(--site-text-3); }
 """
 
 
@@ -1240,6 +1268,16 @@ def _nav_badges(conn) -> dict[str, tuple[int | str, bool, str]]:
         "/audit": (int(calls) + int(decisions), False, "today"),
         "/positions": (int(opened), False, "new today"),
     }
+    # Guardian is a side track: a missing table (migration not yet applied)
+    # must never take down the whole console (booklet 14 §11.4).
+    try:
+        from athena_orchestrator.guardian_view import open_alert_count
+
+        guard = open_alert_count(conn, account)
+    except Exception:
+        guard = 0
+    if guard:
+        found["/guard"] = (int(guard), True, "open alerts")
     from athena_orchestrator.sim import progress
 
     replay = progress(conn, account)

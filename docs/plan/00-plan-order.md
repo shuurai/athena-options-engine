@@ -314,12 +314,12 @@ graph TD
 
 ### 实施欠账 · 新增组（第 6 轮裁定之后，2026-11-21）
 
-以上 9 条是**旧层的补欠**。下面是 [14 册](14-guardian-escalation.md) 批的**新层**，与前 9 条不同：它不改任何既有行为，是 R1–R6 六个全新迭代。裁定已全部完成（D58–D66 全取推荐，D66 为 R1 交付后补裁定），**R1 已交付并经 D66 修订**。按依赖排序：
+以上 9 条是**旧层的补欠**。下面是 [14 册](14-guardian-escalation.md) 批的**新层**，与前 9 条不同：它不改任何既有行为，是 R1–R6 六个全新迭代。裁定已全部完成（D58–D66 全取推荐，D66 为 R1 交付后补裁定），**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）**。按依赖排序：
 
 | 迭代 | 待做 | 依赖 | 验收 |
 | --- | --- | --- | --- |
 | ~~**R1**~~ | ✅ **已交付 2026-11-21**（`C-20261121-3`）：`athena_risk/guardian.py` 纯函数，51 例单测、全量 229/229、5 仓位手核与 §3 面板示例一致、变异测试通过。**同日经 D66 修订**（`C-20261121-4`）：删除 stop_line 死分支、加 `pending_action` 镜像，单测数见 §9。详见 [14](14-guardian-escalation.md) §9 | — | 已验收 |
-| **R2** | `/guard` 独立页 ＋ `guardian_alerts` 表；五色板、Resolve / Skip+reason / auto-clear 三态 | R1 | 开页见活档位；Resolve 一条、Skip 写原因；下次跑 auto-clear |
+| ~~**R2**~~ | ✅ **已交付 2026-11-21**（`C-20261121-5`）：`guardian_alerts` 表（迁移 `053`）＋ `/guard` 五色板 ＋ Resolve / Skip+reason / auto-clear 三态；`guardian_view.py` 快照构造（`pending_action` 由 `today_signals()` ∩ pending 草案门控，批准草案即 auto-clear，不碰 `drafts.decide()`）。R2 单测 60/60、全量 291/291、真实 Postgres 迁移与 GET/POST 集成验证、两轮变异测试通过。契约见 [14](14-guardian-escalation.md) §11，交付记录 §12 | R1 | 已验收 |
 | **R3** | Schedule：Run A（open−60min）＋ Run B（open+5min），`America/New_York` 锚定；复用 `loop.py` runner | R2 | 跨 DST 边界两种偏移都落在正确 HKT 墙上时钟 |
 | **R4** | Telegram 催办：red+black 未确认每 5 分钟重发，内联 Resolve 复用 `_handle_callback`；dead-man：调度跑挂掉本身变危险告警 | R3 | paper 造红态确认 5 分钟节奏；手机 ack 停催；杀掉 orchestrator 收到「guardian is down」 |
 | **R5** | 触发线（`NVDA < 118` / `VIX > 38` / `MRVL > 145`…）作为一等告警源，复用同一 store 与催办路径 —— 早前「每日执行卡 A/B/C」里的选项 C | R4 | Settings 设一条，paper 穿越后一个轮询间隔内告警 |
@@ -408,7 +408,7 @@ graph TD
 | [11-draft-reasoning-counsel.md](11-draft-reasoning-counsel.md) | **D40–D44**：全部 pending 草案 Reason 加深（explain + counsel）；ManageExplainer；ATM/ITM/OTM。**D45**：Telegram Approve-page URL 回归。**已落地（2026-10-15）、已追认（2026-11-05，D42 附修正）** |
 | [12-germany-equity-ifx.md](12-germany-equity-ifx.md) | **D46–D50**：Germany / Xetra 股票（`market=de`，IBIS/EUR）；IFX。无欧期权。**已落地（2026-10-16）、已追认（2026-11-05，无附修正）** |
 | [13-portfolio-advisor.md](13-portfolio-advisor.md) | **D51–D57**：组合顾问。股票与空头期权的 CLOSE / TRIM 草案；IB 报价 + Yahoo 标题 + Fed / 财报。**已落地（2026-10-16）、已追认（2026-11-05，D52 换篮子、D54 删假旋钮）** |
-| [14-guardian-escalation.md](14-guardian-escalation.md) | **D58–D66**：风险监测层与任务告知。五档分级（盈利/健康/平衡/危险/暴雷）、`/guard` 面板、定时巡检、Telegram 每 5 分钟催办直到点已解决、专用常开 Mac mini；**D66** 定 stop line 处置（不臆造、镜像顾问、价格线归 R5）。**已裁定（2026-11-21，9 条全取推荐）；R1 conformance core 已交付并经 D66 修订（同日），R2–R6 待办** |
+| [14-guardian-escalation.md](14-guardian-escalation.md) | **D58–D66**：风险监测层与任务告知。五档分级（盈利/健康/平衡/危险/暴雷）、`/guard` 面板、定时巡检、Telegram 每 5 分钟催办直到点已解决、专用常开 Mac mini；**D66** 定 stop line 处置（不臆造、镜像顾问、价格线归 R5）。**已裁定（2026-11-21，9 条全取推荐）；R1 conformance core 已交付并经 D66 修订（同日）；R2 已交付并验证（§11 契约／§12 交付记录），R3–R6 待办** |
 
 ---
 

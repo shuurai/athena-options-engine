@@ -7,6 +7,7 @@ dependencies = [
     "athena-bots",
     "athena-exec",
     "athena-marketdata",
+    "athena-risk",
     "athena-settings",
     "athena-store",
     "athena-strategy-nfr",
@@ -16,6 +17,7 @@ dependencies = [
 athena-bots = { workspace = true }
 athena-exec = { workspace = true }
 athena-marketdata = { workspace = true }
+athena-risk = { workspace = true }
 athena-settings = { workspace = true }
 athena-store = { workspace = true }
 athena-strategy-nfr = { workspace = true }

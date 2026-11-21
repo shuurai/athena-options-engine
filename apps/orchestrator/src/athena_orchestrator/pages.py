@@ -197,6 +197,7 @@ def build(conn, path: str, query: dict) -> dict | None:
         "/positions": _positions_page,
         "/orders": _orders_page,
         "/book": _book_page,
+        "/guard": _guard_page,
         "/portfolio-analysis": _portfolio_analysis_page,
         "/accounts": _accounts,
         "/risk": _risk,
@@ -214,6 +215,8 @@ def submit(conn, path: str, form: dict, actor: str, allowlist: set[str]) -> dict
     account = _account()
     if path == "/drafts":
         return _post_draft(conn, account, form, actor, allowlist)
+    if path == "/guard":
+        return _post_guard(conn, account, form, actor)
     if path == "/news":
         return _post_news(conn, account, form)
     if path in {"/orchestration", "/strategy"}:
@@ -1109,6 +1112,82 @@ def _book_page(conn, account: str, query: dict) -> dict:
         body,
         [("info", "read only")],
     )
+
+
+# --- Guardian (booklet 14, R2) -------------------------------------------
+# The grading core and the alert store live in guardian_view.py. This page only
+# passes in the caller-owned rows/drafts/settings and renders. It never touches
+# Engine A, the wheel, or the advisor: guardian tells, the wheel does.
+
+
+def _guard_inputs(conn, account: str):
+    settings = load_active(conn, account) if account else None
+    rows = _position_rows(conn, account)
+    drafts = _pending_drafts(conn, account)
+    return settings, rows, drafts
+
+
+def _guard_page(conn, account: str, query: dict, note: str = "", status: int = 200) -> dict:
+    del query
+    from . import guardian_view as gv
+
+    if not account:
+        return _html(
+            "Guardian",
+            "Conformance and escalation.",
+            '<div class="card"><p>No account is configured.</p></div>',
+            [],
+        ) | {"status": 400}
+    settings, rows, drafts = _guard_inputs(conn, account)
+    store_error = ""
+    try:
+        snapshot, alerts = gv.sync(conn, account, rows, drafts, settings)
+    except Exception as exc:  # migration not applied: still show the live tiers
+        store_error = str(exc)
+        try:
+            snapshot = gv.build_snapshot(conn, account, rows, drafts, settings)
+        except Exception:
+            return _html(
+                "Guardian", "Conformance and escalation.",
+                f'<div class="card guard-error"><p>{escape(str(exc))}</p></div>', [],
+            ) | {"status": 400}
+        alerts = []
+    body = gv.render_board(
+        snapshot.report, alerts, drafts,
+        note=note, store_error=store_error, base_currency=snapshot.base_currency,
+    )
+    live = sum(1 for a in alerts if a.state in ("open", "skipped"))
+    chips = [("info", "read only"), ("warn" if live else "ok", f"{live} open alerts")]
+    return _html("Guardian", "Positions vs rules, and the one thing to do.", body, chips) | {"status": status}
+
+
+def _post_guard(conn, account: str, form: dict, actor: str) -> dict:
+    from . import guardian_view as gv
+
+    decision = (form.get("decision") or [""])[0]
+    raw_id = (form.get("alert_id") or [""])[0]
+    try:
+        alert_id = int(raw_id)
+    except (TypeError, ValueError):
+        return _guard_page(conn, account, {}, note="Unknown alert.", status=400)
+    moment = datetime.now(UTC)
+    if decision == "resolve":
+        note_text = (form.get("note") or [""])[0]
+        try:
+            gv.resolve(conn, account, alert_id, actor, note_text, moment)
+            conn.commit()
+        except ValueError as exc:
+            return _guard_page(conn, account, {}, note=str(exc), status=400)
+        return _guard_page(conn, account, {}, note=f"Resolved alert {alert_id}.")
+    if decision == "skip":
+        reason = (form.get("reason") or [""])[0]
+        try:
+            gv.skip(conn, account, alert_id, actor, reason, moment)
+            conn.commit()
+        except ValueError as exc:
+            return _guard_page(conn, account, {}, note=str(exc), status=400)
+        return _guard_page(conn, account, {}, note=f"Skipped alert {alert_id} for 24h.")
+    return _guard_page(conn, account, {}, note="Unknown action.", status=400)
 
 
 def _book_points(conn, settings, account: str, compute, load_bars) -> tuple[list, tuple | None]:

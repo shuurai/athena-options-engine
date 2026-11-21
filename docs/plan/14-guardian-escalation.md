@@ -1,7 +1,7 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21**（D58–D65，八条全取推荐，无偏离）。Side track. Not on the signal critical path (steps 1–9).
-No code in this booklet is built yet. Every rule below is a **ratified** decision node; **R1 is unblocked**. Rulings recorded in §7.
+**状态**：**Ratified 2026-11-21**（D58–D65 八条 ＋ D66 单条补裁定，全取推荐，无偏离）。Side track. Not on the signal critical path (steps 1–9).
+**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3–R6 待办。** Every rule below is a **ratified** decision node; rulings recorded in §7. Implementation contracts: §8 (R1) / §11 (R2); delivery records: §9 (R1) / §12 (R2).
 
 > **Origin (operator, 2026-11-21)**: during work/exam crunch weeks, execution function is consumed by work and the portfolio goes into autopilot — and autopilot only does one thing: nothing. Last week a black-swan-scale move took the book from fine to near-liquidation. The quantitative layer (per-position scoring) already works. What is missing is a layer that (a) compares every live position — including accidental ones — against the rule book, (b) tells the operator the one thing to do, at a fixed time, and (c) refuses to be ignored when it matters.
 
@@ -205,4 +205,93 @@ R1 是纯函数、只读、零 I/O：不连库、不连 IB、不写表、不发�
 
 ---
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D66 共 9 条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；R2 起待办
+## 11. R2 实现口径（2026-11-21，落地前的契约）
+
+R2 = **`guardian_alerts` 告警表 ＋ `/guard` 五色面板 ＋ Resolve / Skip+reason 三态闭环**。依赖 R1 的 `grade()`；**不含**调度（R3）、Telegram 催办（R4）、价格触发线（R5）、常开机器（R6）。全部口径由 D58–D66 已裁定项推导，**不是新决策**；凡库里无生产者的数据一律留空并记旗标，不臆造（延续 D66）。
+
+### 11.1 告警粒度与状态机（D61 / D62）
+
+| 项 | 口径 |
+|---|---|
+| 告警键 | `(account_id, symbol, breach)`。`symbol` 为持仓标的；账户级 breach 用保留哨兵 `*ACCOUNT*`（不可能是真代码）。`tier` 是**可更新列**，重分级只 UPDATE，不产生第二条 |
+| 哪些旗标开告警 | **仅硬违规**：`BREACH_FLAGS`（危险）∪ `BLOWUP_FLAGS`（暴雷）。临近窗/平衡档**永不开告警、永不催办**（D61）。平衡与盈利只在板上显示 |
+| 状态 | `open`（待确认）／`skipped`（带 `skip_until` 休眠）／`resolved`（操作者点 Resolve）／`auto_cleared`（breach 不再成立）。**终态行永不删除**（D62「never silently deleted」） |
+| 「本次告警」 | 每个 `(account, symbol, breach)` 取**最新一行**为当前 occurrence；旧行是历史。reconcile 只按当前行的状态决定下一步，不扫全历史 |
+| 唯一约束 | 部分唯一索引只在 `state IN ('open','skipped')` 上生效 ⇒ 每个键最多一条活告警，终态行可累积成历史 |
+| Skip 重开 | 休眠期 `24h`（D62 提议值）内不开新告警；`skip_until` 过期且 breach 仍在 ⇒ 同一行回到 `open`。breach 已消失 ⇒ `auto_cleared` |
+| Resolve | **本次**确认，保持 `resolved`：breach 仍在也**不**在下一跑重开（否则点一次 Resolve、页面一刷新就立刻弹回来，等于没确认）。breach 后来消失 ⇒ 转 `auto_cleared`，`ack_actor` / `ack_note` / `resolved_at` 保留 |
+| 复发 | 只有当前行已是 `auto_cleared`（即 breach 真消失过）而 breach 又出现时才 **INSERT 一条新 `open`**。这就是「拒绝被忽略」的正确支点：不是靠重复弹同一条，而是靠「消失后复发」重新武装 |
+
+**状态转移表**（`desired` = 本次 `grade()` 里的硬违规键集合）：
+
+| 当前行状态 | breach 仍在 desired | breach 已不在 desired |
+|---|---|---|
+| `open` | 保持（tier 变了就 UPDATE tier） | → `auto_cleared` |
+| `skipped` | 休眠中保持；`skip_until` 已过 → `open` | → `auto_cleared` |
+| `resolved` | 保持（不 nag、不重开） | → `auto_cleared` |
+| `auto_cleared` | **INSERT 新 `open`**（复发重新武装） | 保持 |
+
+**R2 的「一次 run」= `/guard` 页载入**（R3 会把同一个 `sync()` 接进定时跑批）。纯函数 `reconcile(report, alerts, now)` 产出 `ReconcilePlan`，薄 SQL 层 `apply_plan()` 执行 —— 与 R1 的纯核心同构，R3 复用时不需要碰 Web 层。
+
+### 11.2 `pending_action` 生产者与「批准草案即关闭」（D66 §10）
+
+D66 要求**不设第二套 ack**：顾问已挂的草案是唯一动作面，批准它必须同时关掉 guardian 红告警。落地方式**不改 `drafts.decide()` / `advisor_signals` / `manage_book`**，而是让 `pending_action` 由「当日顾问信号 ∩ 仍 pending 的草案」共同决定：
+
+```
+signals = today_signals(conn, account, HKT_today)      # advisor_signals.action
+pending = {d.symbol: d for d in pending_drafts}         # drafts.status = 'pending'
+for each position:
+    pending_action = signals[symbol].action if symbol in pending else None
+    (无信号时按草案 tactic 兜底：CLOSE→close，TRIM→trim)
+```
+
+- 红行 `advisor_close_pending` 链接该 symbol 的 pending 草案 id（`/drafts`）。
+- **批准/拒绝草案 ⇒ 草案不再 pending ⇒ 下次 `sync()` 时 `pending_action` 消失 ⇒ breach 自动 `auto_cleared`**。零 hook、零第二套 ack、不碰任何外层批准链路。
+- `advisor_trim_pending` 属平衡档，只显示、不开告警。
+
+### 11.3 快照构造与**诚实留白**
+
+新模块 `apps/orchestrator/src/athena_orchestrator/guardian_view.py`（不 import `pages`，避免环；`pages` 传入 `_position_rows` / `_pending_drafts` / `settings`）。`athena_risk.guardian` 保持零 I/O 不变。
+
+| 字段 | 来源 | 缺失时 |
+|---|---|---|
+| `GuardianPosition` 主体 | `pages._position_rows(conn, account)`（已含 qty / sec_type / right / strike / dte / market / pnl / currency / multiplier） | 跳过该仓 |
+| `market_value` / `unrealized_pnl` | 用 `money.ledger()` ＋ `money.convert()` 折算到账户基准币 | 无汇率 ⇒ `None` ⇒ R1 记 `missing_market_value` |
+| `classifiers` | `symbol_facts.classifiers` 逗号串 | 空 ⇒ R1 落 `UNCLASSIFIED` 桶 |
+| `managed`（D63） | `symbol.upper() in settings.watchlist` | 不在 ⇒ `unmanaged`、最高黄色 |
+| `GuardianRules` | `GuardianRules.from_limits(settings.risk)` 绑定 D32 四个重叠值 | — |
+| `AccountMarks` | `nav_marks.last_nav` / `account_marks.margin` / `.excess_liquidity` / `.base_currency`（各取最新一行） | 缺 ⇒ `unknown_margin`、账户压到平衡 |
+| **`delta`** | **本轮无来源**：migrations 全库无 delta 列，`chain_marks` 也只有 mid/strike，`budget._put_delta` 是按需 BS 计算、非快照可读 | **`delta=None`** ⇒ `assignment_risk` / `projected_el_negative` 在 R2 静默不触发。**明记为 R2 已知边界**，不虚构 delta（D66 纪律）；delta 源归后续迭代 |
+| **`margin_call`** | **无持久化来源**（IB 即时旗标未入库） | **`False`** ⇒ D58 的「IB margin-call 立即黑档」在 R2 只能由 EL<5% / MaintMargin>90% 触发；即时旗标归 R4/R6 的保证金轮询 |
+
+### 11.4 落地面
+
+| 面 | 改动 |
+|---|---|
+| 迁移 | `053_guardian_alerts.sql`：`id / account_id / symbol / breach / tier / state / source / reason / ack_actor / ack_note / created_at / updated_at / skip_until / resolved_at` ＋ 部分唯一索引 ＋ open 索引。`source` 缺省 `'grade'`，**预留给 R5 价格线**（`'trigger'`），R2 不写它 |
+| 页 | `pages.build()` 注册 `"/guard"`；`pages.submit()` 加 `decision=resolve\|skip`（skip 必须有 reason）；`_html()` 返回同形 dict |
+| 导航 | `NAV_GROUPS` 的 Core logic 加 `("/guard", "Guardian")`；`_nav_badges()` 加 open 红/黑告警数（**带 try/except**：迁移未跑时不得拖垮全站） |
+| 样式 | `_EXTRA_CSS` 加 `.tag.black`（暴雷）与少量 `.guard-*`；沿用既有 `.card` / `.tag` / `.btn` |
+| 包接线 | `apps/orchestrator/pyproject.toml` 补 `athena-risk` 直接依赖（源码早已 import）；同步 `uv.lock`；`packages/store/pyproject.toml` 的 `force-include` 补 045–053（原列表停在 044，属落地时发现的打包缺口） |
+| 测试 | 新增 `apps/orchestrator/tests/test_guardian_r2.py`：纯 `reconcile` 状态机、快照映射（含 `pending_action` 门控）、HTML 转义、POST SQL 参数与 account 作用域、fake conn |
+
+### 11.5 边界（R2 明确不做）
+
+不改 `advisor_signals` / `manage_book` / `drafts.decide()` / `advisor.py`；不加 Settings 字段；不设持仓级 `stop_line`（D66）；不发 Telegram、不建调度、不建心跳、不接价格线；不新增市场数据源。`guardian_alerts` 是本层唯一可写表（§1）。
+
+---
+
+## 12. R2 交付记录（2026-11-21）
+
+| 项 | 内容 |
+|---|---|
+| 状态 | ✅ **已实现并验证**。`C-20261121-5` |
+| 代码 | 新增 `053_guardian_alerts.sql`、`apps/orchestrator/src/athena_orchestrator/guardian_view.py`、`apps/orchestrator/tests/test_guardian_r2.py`；修改 `pages.py` / `console.py` / 两份 `pyproject.toml` / `uv.lock`。契约见 §11 |
+| 接口 | `sync()`（`build_snapshot()` → `reconcile()` → `apply_plan()` → `load_alerts()`）供 R3 直接复用；`resolve()` / `skip()` / `open_alert_count()`；`desired()` / `ReconcilePlan` 为纯核心，与 R1 同构 |
+| 验证 | ① R2 单测 **60/60**；② 全量 **291/291**（`skipped=2` 为既有）；③ `uv lock --check`（29 packages）、`compileall`、`from athena_orchestrator import main`、`git diff --check` 全绿；④ 真实 Postgres 一次性容器：`apply_migrations()` applied 49、`053` 落 14 列 ＋ `guardian_alerts_live` 部分唯一索引 ＋ `guardian_alerts_open` ＋ pkey，`_statements()` 切 3 条有效 statement；⑤ **live path `LIVE_PATH_OK`**：RUN1 两条 open（`advisor_close_pending` / `el_thin`）→ Resolve 后 RUN2 保持 `resolved` → 批准 D1 草案后仅前者 `auto_cleared`；⑥ skip 24h 休眠、25h 后回 `open`；⑦ **`LIVE_PAGE_OK`**：`pages.build` GET 200（五色带 ＋ ack form）、`pages.submit` POST 200 ＋ flash toast；⑧ 两轮变异测试均如期 FAIL，trap 还原 `cmp=0`、全量恢复 291/291；⑨ 台账机检 **97/97 `EXIT=0`** |
+| 边界 | **未做**：调度（R3）、Telegram 催办（R4）、价格触发线（R5）、常开机器／心跳（R6）、新市场数据源；不改 `drafts.decide()` / `advisor.py` / Settings。**已知留白**：`delta=None` ⇒ `assignment_risk` / `projected_el_negative` 不触发；`margin_call=False` ⇒ 即时 IB margin-call 黑档归 R4/R6（R2 仍可由 EL<5% 或 MaintMargin>90% 触发）。详见 §11.3 |
+| 提交 | 本批次独立提交（`Ship R2 Guardian alerts board with resolve, skip, and auto-clear.`）；hash 以 `git log -1 --format=%h` 为准，**不写入本文档** —— 文档与代码同一批次提交，自指不可能，沿用 §9 R1 惯例 |
+
+---
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D66 共 9 条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；R3–R6 待办
