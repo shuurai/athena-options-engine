@@ -227,7 +227,7 @@ graph TD
 | 五（2026-11-05，**追认旁支 18 条**） | **D40–D45**（[11](11-draft-reasoning-counsel.md) 草案推理深度）、**D46–D50**（[12](12-germany-equity-ifx.md) 德国 IFX 股票）、**D51–D57**（[13](13-portfolio-advisor.md) 组合顾问） | **15 条按现行追认，3 条附修正**：`D42` fact-pack 回退文本要标注「本地生成」；`D52` 篮子由 6/7 半导体换成 `QQQ/SPY/IWM/TLT/GLD/SOXX/NVDA`；`D54` 追认语义但删掉从未被读取的 `profit_take_relief_pct`。至此 **D1–D57 全部 58 个节点均有裁定** |
 | 六（2026-11-21，**新增 14 册 8 条**） | **D58–D65**（[14](14-guardian-escalation.md) Guardian 风险监测层与任务告知） | **8 条全取推荐、零偏离**：五档阈值 20/10/5%＋90%、独立 `/guard` 页、NY 锚定两跑、5 分钟仅 red+black 催办、逐条三态闭环、`unmanaged` 意外持仓、家用专用 Mac mini、10 分钟心跳。与前五轮不同：这 8 条是**裁定后将要实现的新层**，不是追认已上线行为。至此 **D1–D65 共 66 个节点全部有裁定** |
 | 七（2026-11-21，**D66 单条补裁定**） | **D66**（[14](14-guardian-escalation.md) §7 第七轮：stop line 的处置） | **全取推荐**：删除 R1 里无生产者的 `stop_line` / `trim_line` / `market_price` 与两个死旗标，改为调用方传入 `pending_action` 镜像顾问 `close` / `take_profit` / `trim`；操作者自定价格线只归 R5。**不新增 Settings 字段、不加迁移、不改 advisor / manage / drafts**。至此 **D1–D66 共 67 个节点零待决** |
-| 八（2026-11-21，**R7 企划七条**） | **D67–D73**（[14](14-guardian-escalation.md) §7 第八轮／§13.6：午間 Regime Label） | **7 条全取推荐、零偏离**：只读注解不 gate（D67）、降級 `unknown` 不新增源（D68）、组合级存一次注入 `agents.py`（D69）、扩 `/portfolio-analysis`（D70）、单次 12:30 ET Run C（D71）、可重放 `evidence` 且明確否決「80% 機構意圖」（D72）、每个 `unknown` 就地标注缺失原因（D73，由 Q2 附注拆出）。**七条全取 (a) ⇒ §1／§6 边界一条都不用改**；R7 从 Planning 转为已裁定、契约冻结，实现仍待 R3/R4。至此 **D1–D73 共 74 个节点零待决** |
+| 八（2026-11-21，**R7 企划七条**） | **D67–D73**（[14](14-guardian-escalation.md) §7 第八轮／§13.6：午間 Regime Label） | **7 条全取推荐、零偏离**：只读注解不 gate（D67）、降級 `unknown` 不新增源（D68）、组合级存一次注入 `agents.py`（D69）、扩 `/portfolio-analysis`（D70）、单次 12:30 ET Run C（D71）、可重放 `evidence` 且明確否決「80% 機構意圖」（D72）、每个 `unknown` 就地标注缺失原因（D73，由 Q2 附注拆出）。**七条全取 (a) ⇒ §1／§6 边界一条都不用改**；R7 从 Planning 转为已裁定、契约冻结，实现仍待 R4（R3 已于 2026-11-22 交付，`C-20261122-1`）。至此 **D1–D73 共 74 个节点零待决** |
 
 > **"追认"的意思要写清**：第三轮不是新决策，而是把**已经上线并在运行**的两条行为正式补进裁定表。核实依据是代码与活配置，不是这两句话本身 —— 见 §6 末的核实结论。
 
@@ -317,19 +317,19 @@ graph TD
 
 ### 实施欠账 · 新增组（第 6 轮裁定之后，2026-11-21）
 
-以上 9 条是**旧层的补欠**。下面是 [14 册](14-guardian-escalation.md) 批的**新层**，与前 9 条不同：它不改任何既有行为，是 R1–R7 七个全新迭代。裁定已全部完成（**D58–D73 共 16 条全取推荐、零偏离**；D66 为 R1 交付后补裁定，D67–D73 为第八轮 R7 裁定），**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）**。**D1–D73 / 74 个节点零待决**；R7 已裁定、契约冻结，实现仍待 R3/R4。按依赖排序：
+以上 9 条是**旧层的补欠**。下面是 [14 册](14-guardian-escalation.md) 批的**新层**，与前 9 条不同：它不改任何既有行为，是 R1–R7 七个全新迭代。裁定已全部完成（**D58–D73 共 16 条全取推荐、零偏离**；D66 为 R1 交付后补裁定，D67–D73 为第八轮 R7 裁定），**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）、R3 已交付并验证（2026-11-22）**。**D1–D73 / 74 个节点零待决**；R7 已裁定、契约冻结，实现仍待 R4。按依赖排序：
 
 | 迭代 | 待做 | 依赖 | 验收 |
 | --- | --- | --- | --- |
 | ~~**R1**~~ | ✅ **已交付 2026-11-21**（`C-20261121-3`）：`athena_risk/guardian.py` 纯函数，51 例单测、全量 229/229、5 仓位手核与 §3 面板示例一致、变异测试通过。**同日经 D66 修订**（`C-20261121-4`）：删除 stop_line 死分支、加 `pending_action` 镜像，单测数见 §9。详见 [14](14-guardian-escalation.md) §9 | — | 已验收 |
 | ~~**R2**~~ | ✅ **已交付 2026-11-21**（`C-20261121-5`）：`guardian_alerts` 表（迁移 `053`）＋ `/guard` 五色板 ＋ Resolve / Skip+reason / auto-clear 三态；`guardian_view.py` 快照构造（`pending_action` 由 `today_signals()` ∩ pending 草案门控，批准草案即 auto-clear，不碰 `drafts.decide()`）。R2 单测 60/60、全量 291/291、真实 Postgres 迁移与 GET/POST 集成验证、两轮变异测试通过。契约见 [14](14-guardian-escalation.md) §11，交付记录 §12 | R1 | 已验收 |
-| **R3** | Schedule：Run A（open−60min）＋ Run B（open+5min），`America/New_York` 锚定；复用 `loop.py` runner | R2 | 跨 DST 边界两种偏移都落在正确 HKT 墙上时钟 |
+| ~~**R3**~~ | ✅ **已交付 2026-11-22**（`C-20261122-1`）：`guardian_schedule.py` 纯 ET／DST 锚定（`ZoneInfo("America/New_York")`，不用 `slots.py` 的硬编码切日）＋ `guardian_runner.py` daemon 线程 ＋ `054_guardian_runs.sql` append-only grade 表（唯一键幂等）＋ `/guard` 只读「Scheduled runs」卡。**A/B 在 EDT 落 20:30/21:35 HKT、EST 落 21:30/22:35 HKT**（D60 案例逐格一致）；**Run C 12:30 ET 只派生不执行**，预留给 R7（D71）。工作日触发、无假日历（诚实留白）。契约见 [14](14-guardian-escalation.md) §14，交付记录 §15 | R2 | 跨 DST 边界两种偏移都落在正确 HKT 墙上时钟 |
 | **R4** | Telegram 催办：red+black 未确认每 5 分钟重发，内联 Resolve 复用 `_handle_callback`；dead-man：调度跑挂掉本身变危险告警 | R3 | paper 造红态确认 5 分钟节奏；手机 ack 停催；杀掉 orchestrator 收到「guardian is down」 |
 | **R5** | 触发线（`NVDA < 118` / `VIX > 38` / `MRVL > 145`…）作为一等告警源，复用同一 store 与催办路径 —— 早前「每日执行卡 A/B/C」里的选项 C | R4 | Settings 设一条，paper 穿越后一个轮询间隔内告警 |
 | **R6** | 专用常开 Mac mini（D64）：orchestrator ＋ exec-ib ＋ IB Gateway 在 `launchd` 看门狗下自恢复；10 分钟无心跳即 Telegram（D65） | R4（可与 R3–R5 并行） | 断电测试：杀机收到心跳告警、重启后无需 shell 自恢复 |
 | **R7** | ✅ **已裁定 2026-11-21**（`C-20261121-7`，D67–D73；**实现待 R3/R4**）：午間 12:30 ET **Run C**；股 × 10Y收益率 × 金 × VIX 水位 × 量能 ＋ 消息标签的**联合矩阵** → 封闭 `label` 词表 ＋ 定性 `close_bias`（非价格预测）；append-only `regime_labels`（`evidence` 可重放）；**组合级存一次、注入 `agents.py` 上下文**，只读注解、不改门控；扩 `/portfolio-analysis` 现有卡。5 个输入中 4.5 个无生产者 ⇒ 缺省 `unknown`、**就地标注固定原因**（D73）、不臆造。七条裁定见 [14](14-guardian-escalation.md) §13.6 | R3 ＋ R4（并与 R5 的静态触发线划界） | 每条命中留 `evidence`、标签可由存下输入重放；5 个工作案例逐格校准 |
 
-> **排期提醒**：R1→R4 是脊柱（逐层依赖），R5 吃 R4 的催办路径，R6 是基础设施可并行。但 **R4 跑在一台会掉线的机器上等于虚假的安全感** —— R6 不应落后太远。本组与前 9 条互不阻塞，可独立开工。**R7 已裁定（D67–D73）但实现仍依赖 R3（ET 锚定调度／Run C）＋ R4（推送通道），不可越过脊柱单独开工；且需与 R5 的 `VIX > 38` 静态触发线划清语义（[14](14-guardian-escalation.md) §13.7）。**
+> **排期提醒**：R1→R4 是脊柱（逐层依赖），R5 吃 R4 的催办路径，R6 是基础设施可并行。但 **R4 跑在一台会掉线的机器上等于虚假的安全感** —— R6 不应落后太远。本组与前 9 条互不阻塞，可独立开工。**R3 已交付（ET 锚定调度／Run C 派生已就位）；R7 已裁定（D67–D73）但实现仍依赖 R4（推送通道），不可越过脊柱单独开工；且需与 R5 的 `VIX > 38` 静态触发线划清语义（[14](14-guardian-escalation.md) §13.7）。**
 
 ---
 
@@ -412,7 +412,7 @@ graph TD
 | [11-draft-reasoning-counsel.md](11-draft-reasoning-counsel.md) | **D40–D44**：全部 pending 草案 Reason 加深（explain + counsel）；ManageExplainer；ATM/ITM/OTM。**D45**：Telegram Approve-page URL 回归。**已落地（2026-10-15）、已追认（2026-11-05，D42 附修正）** |
 | [12-germany-equity-ifx.md](12-germany-equity-ifx.md) | **D46–D50**：Germany / Xetra 股票（`market=de`，IBIS/EUR）；IFX。无欧期权。**已落地（2026-10-16）、已追认（2026-11-05，无附修正）** |
 | [13-portfolio-advisor.md](13-portfolio-advisor.md) | **D51–D57**：组合顾问。股票与空头期权的 CLOSE / TRIM 草案；IB 报价 + Yahoo 标题 + Fed / 财报。**已落地（2026-10-16）、已追认（2026-11-05，D52 换篮子、D54 删假旋钮）** |
-| [14-guardian-escalation.md](14-guardian-escalation.md) | **D58–D73**：风险监测层与任务告知。五档分级（盈利/健康/平衡/危险/暴雷）、`/guard` 面板、定时巡检、Telegram 每 5 分钟催办直到点已解决、专用常开 Mac mini；**D66** 定 stop line 处置（不臆造、镜像顾问、价格线归 R5）；**D67–D73** 定 R7 午間 Regime Label（只读注解、降級 `unknown`、组合级注入 `agents.py`、扩 `/portfolio-analysis`、单次 12:30 ET、可重放 `evidence`、缺失原因就地标注）。**已裁定（2026-11-21，16 条全取推荐、零偏离）；R1 conformance core 已交付并经 D66 修订（同日）；R2 已交付并验证（§11 契约／§12 交付记录）；R3–R6 待办；R7 已裁定、契约冻结（§13），实现待 R3/R4** |
+| [14-guardian-escalation.md](14-guardian-escalation.md) | **D58–D73**：风险监测层与任务告知。五档分级（盈利/健康/平衡/危险/暴雷）、`/guard` 面板、定时巡检、Telegram 每 5 分钟催办直到点已解决、专用常开 Mac mini；**D66** 定 stop line 处置（不臆造、镜像顾问、价格线归 R5）；**D67–D73** 定 R7 午間 Regime Label（只读注解、降級 `unknown`、组合级注入 `agents.py`、扩 `/portfolio-analysis`、单次 12:30 ET、可重放 `evidence`、缺失原因就地标注）。**已裁定（2026-11-21，16 条全取推荐、零偏离）；R1 conformance core 已交付并经 D66 修订（同日）；R2 已交付并验证（§11 契约／§12 交付记录）；R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）；R4–R6 待办；R7 已裁定、契约冻结（§13），实现待 R4** |
 
 ---
 
@@ -442,4 +442,6 @@ graph TD
 
 > **`035` 与 `030` 的分工（防止将来合并错）**：`option_choices`（`030` 加列后）是**当前候选阶梯**——键为 `(symbol, expiry, right, strike)`，**没有时间维度**，用途是"给 agent 看的可选项"；`chain_marks` 是**观测时序**——每次 cycle 追加一行 ATM 快照，用途是"给 rank 提供 20 个同口径样本"。**两者不可互相替代**：`option_choices` 无历史 ⇒ 无法算 rank；这正是 `option_plans` 分子冻结的同一个病（[04](04-indicator-tags.md) §3.1.4）。
 
-> **2026-11-21 核对**：本表开头「当前库内最后一个迁移是 `026`」为旧稿残留 —— 实际已 apply 到 `053_guardian_alerts.sql`（`C-20261121-5`）。`027`–`053` 的逐号补登记留作独立整理，本批次不做。**R7 若采用独立 `regime_labels` 表，号段自 `054` 起顺延；此处仅为预留，未落地、未 apply。**
+> **2026-11-21 核对**：本表开头「当前库内最后一个迁移是 `026`」为旧稿残留 —— 实际已 apply 到 `053_guardian_alerts.sql`（`C-20261121-5`）。`027`–`053` 的逐号补登记留作独立整理，本批次不做。
+>
+> **2026-11-22 号段修正（[14](14-guardian-escalation.md) §14.2）**：`054` 已归 **`054_guardian_runs.sql`**（R3，已落地、已 apply）。按「号段被占用则顺延、不插号」的既有纪律，**R7 的 `regime_labels` 顺延到 `055`**，仍为预留、未落地、未 apply。原注记「R7 自 `054` 起」作废；此修正只改号段登记，D67–D73 七条裁定与 §1／§6 边界均不变。

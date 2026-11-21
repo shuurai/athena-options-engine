@@ -14,6 +14,10 @@ from athena_exec.ops import consume_restart
 from athena_orchestrator.backfill import start_history_backfill
 from athena_orchestrator.console import start_console_server
 from athena_orchestrator.control import allowlist_from_env, start_control_server
+from athena_orchestrator.guardian_runner import (
+    start_guardian_scheduler,
+    stop_guardian_scheduler,
+)
 from athena_orchestrator.paper import run_paper_cycle
 from athena_orchestrator.runtime import (
     begin_running,
@@ -120,6 +124,8 @@ async def run_loop() -> None:
     from athena_exec.order_watch import start_order_watch
 
     start_order_watch(database_url)
+    start_guardian_scheduler(database_url)
+    log.info("guardian scheduler started (R3, A/B ET-anchored)")
     threading.Thread(
         target=refresh_display_rates, args=(database_url,), daemon=True, name="fx-rates"
     ).start()
@@ -140,11 +146,13 @@ async def run_loop() -> None:
     if completed is None:
         log.info("ops restart")
         stop_tunnel()
+        stop_guardian_scheduler()
         return
     while cycles == 0 or completed < cycles:
         if await _sleep_interruptible(sleep_seconds):
             log.info("ops restart")
             stop_tunnel()
+            stop_guardian_scheduler()
             return
         completed += 1
         begin_running(completed)

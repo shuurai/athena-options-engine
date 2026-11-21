@@ -562,8 +562,14 @@ def render_board(
     note: str = "",
     store_error: str = "",
     base_currency: str = "",
+    extra_cards: str = "",
 ) -> str:
-    """Pure. Five-colour board + per-alert ack forms. All dynamic text escaped."""
+    """Pure. Five-colour board + per-alert ack forms. All dynamic text escaped.
+
+    ``extra_cards`` is pre-rendered, already-escaped HTML appended as a card
+    after the summary. R3 uses it for the read-only Scheduled runs card; the
+    default keeps this module free of any R3 import (no cycle).
+    """
     drafts_by_symbol: dict[str, list[Mapping]] = {}
     for draft in drafts:
         symbol = str(draft.get("symbol") or "").upper()
@@ -599,6 +605,9 @@ def render_board(
         f'{" <span class=k>base</span> " + escape(base_currency) if base_currency else ""}</div>'
         "</div>"
     )
+
+    if extra_cards:
+        parts.append(extra_cards)
 
     for tier in _TIER_ORDER:
         tlabel, ttone, tglyph = _TIER_META[tier]

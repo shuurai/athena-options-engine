@@ -1,7 +1,7 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
 **状态**：**Ratified 2026-11-21**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离）。Side track. Not on the signal critical path (steps 1–9).
-**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3–R6 待办；R7 已裁定（D67–D73， Planning 阶段结束，实现仍待 R3/R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八轮）. Implementation contracts: §8 (R1) / §11 (R2); delivery records: §9 (R1) / §12 (R2); R7 contract + ratification: §13.
+**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4–R6 待办；R7 已裁定（D67–D73，Planning 阶段结束，实现仍待 R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3); R7 contract + ratification: §13.
 
 > **Origin (operator, 2026-11-21)**: during work/exam crunch weeks, execution function is consumed by work and the portfolio goes into autopilot — and autopilot only does one thing: nothing. Last week a black-swan-scale move took the book from fine to near-liquidation. The quantitative layer (per-position scoring) already works. What is missing is a layer that (a) compares every live position — including accidental ones — against the rule book, (b) tells the operator the one thing to do, at a fixed time, and (c) refuses to be ignored when it matters.
 
@@ -351,7 +351,7 @@ for each position:
 | D60「两跑、NY 锚定」 | 午间 12:30 ET 是**第三跑** | **✅ D71**：不替换 Run A/B；新增 **Run C**，由 R3 的 NY 锚定派生，单次 12:30 ET |
 | R5「`VIX > 38` 触发线」 | VIX 规则重叠 | R5 = 操作者设的**静态阈值触发线**（`source='trigger'`）；R7 = **时间窗内相对状态**（spot vs 早盤高）。语义不同，不合并、不复用同一行 |
 | D62 / `guardian_alerts` | 标签是时序，不是待确认告警 | **✅ D69**：不进 ack 状态机、不加 `source='regime'`（`'trigger'` 已预留给 R5）；独立 append-only `regime_labels` 表 |
-| R3 / R4 未交付 | R7 没有定时跑、没有推送通道 | **R7 依赖 R3 ＋ R4**，排期在二者之后；不能独立开工（§13.7 不变） |
+| ~~R3~~ / R4 未交付 | R7 没有定时跑、没有推送通道 | **✅ R3 已交付（§14／§15，ET 锚定调度与 Run C 派生已就位）**；R7 仍依赖 **R4 的推送通道**，排期在 R4 之后；不能独立开工（§13.7 不变） |
 | 面板 / `/portfolio-analysis` | 新标签要落在哪 | **✅ D70**：扩 `/portfolio-analysis` 现有标签卡；不新开页、`/guard` 保持纯 ack 面 |
 | 验收口径 | 「80% 機構意圖」不可证伪 | **✅ D72**：可重放 `evidence`、无准确率声明；明確否決 80% |
 
@@ -392,7 +392,7 @@ for each position:
 - **一行推送**（12:30 ET 示例形）：`🟠 11/21 午間：VIX 34（早高 40 回落）、NVDA 抽 +3% 無量、10Y 4.94%↓、金跌 →【空頭回補反抽】。close_bias: bounce_likely_fades。`
 - **降級形（D73）**：`⚪ … VIX n/a (no intraday-high feed in store)、10Y n/a (no ^TNX feed)、金 n/a (no gold feed) →【insufficient_data】。close_bias: insufficient_data。` —— 每个 `unknown` 就地给原因，推送与面板卡同带。
 - **标签词表**（封闭，禁止 `risks[].code` 那种自由串）：`liquidity_squeeze / short_cover_bounce / distribution_into_strength / normal_risk_off / regime_shift / dead_cat / insufficient_data`。
-- **存贮**：独立 append-only `regime_labels(account_id, day, run, label, close_bias, evidence jsonb, inputs jsonb, created_at)`，一跑一行；`evidence` 存「哪个输入 → 哪条规则命中 → 得出什么」，用于复核。**不复用 `guardian_alerts`**（它是 `open/skipped/resolved/auto_cleared` ack 去重语义，部分唯一索引会挡掉同键历史）。迁移号从 `054` 顺延，仅预留未落地。
+- **存贮**：独立 append-only `regime_labels(account_id, day, run, label, close_bias, evidence jsonb, inputs jsonb, created_at)`，一跑一行；`evidence` 存「哪个输入 → 哪条规则命中 → 得出什么」，用于复核。**不复用 `guardian_alerts`**（它是 `open/skipped/resolved/auto_cleared` ack 去重语义，部分唯一索引会挡掉同键历史）。**号段口径已由 R3 修正（§14.2）**：`054` 已归 `054_guardian_runs.sql`，R7 的 `regime_labels` 顺延到 `055`；此处仍仅为预留，未落地、未 apply。该修正只动号段登记，D67–D73 七条裁定与 §1／§6 边界均不变。
 - **喂给打分表（✅ D69 组合级存一次）**：全库无字面叫「打分表」的表；最贴近的是 `indicators.py` 的 `Indicators`（14 字段、落 `symbol_phases.indicators`，被 `phases.evaluate_symbol()` / `agents.py` prompt / `wheel.py` 开门控 / `screener.py` 消费），另有 `advisor.py:_rule_fallback()` 字面 `score = 0.0` 写 `advisor_signals`。注意 `Indicators` 已有 `regime_unknown`（基于 `regime_index = "SPY"` 日线的**跨日** regime）—— R7 是**当日盘中**状态，**必须换名字**（`session_regime`），不可覆盖。市场级标签是组合级，逐标的写进 JSONB 会复制 N 份 ⇒ **裁定存一行 `regime_labels`、在 `agents.py:_context()` 注入一行全局上下文**；`wheel.py` 不做逐标的读取（D67 不 gate）。
 - **面板（✅ D70）**：`pages.py:1698-1699` 的 `/portfolio-analysis` 已有一张展示态 `RISK OFF / CAUTION / RISK ON` 卡（由 `advisor_signals` 推导、无时序）。**裁定在此扩一张「午間 Regime」卡**，不新开页；`/guard` 保持纯 ack 动作面（D62 语义不动）。
 
@@ -415,7 +415,7 @@ for each position:
 ### 13.7 边界与依赖
 
 - **依赖**：R3（ET 锚定调度／Run C）＋ R4（推送通道）＋ R2（面板），并需与 R5 的 `VIX > 38` 静态触发线划清语义。**R7 不能独立开工**，排期在 R3/R4 之后；放在 R7 只是编号，不代表可越过脊柱。
-- **本轮（第八轮裁定）不做**：零代码、零迁移、零 Settings 字段、不改 `advisor.py` / `wheel.py` / `drafts` / `guardian.py`、不接暗池数据、不产生订单、不新建价格预测模型。**R7 实现仍待 R3/R4 落地后另起台账**。
+- **本轮（第八轮裁定）不做**：零代码、零迁移、零 Settings 字段、不改 `advisor.py` / `wheel.py` / `drafts` / `guardian.py`、不接暗池数据、不产生订单、不新建价格预测模型。**R7 实现仍待 R4 落地后另起台账**（R3 已于 2026-11-22 交付，见 §14／§15；ET 锚定调度与 Run C 派生已就位）。
 - **边界修订状态**：D67–D73 全取 (a) ⇒ **§1「no drafts, no orders, no tactic changes」与 §6「No new market data sources」均保持原文、零修订**。若日后要启用 gate（Q1-b）或新行情源（Q2-b），须**另开一轮裁定显式修订这两条**，不得在实现里顺手改掉。
 - **核实校正**：§8 第 1 条写「`forecast_marks.horizons.*.stop` … 已被 `advisor.py` 消费」不够精确 —— 实测 `advisor.py` 不读取 `stop`，只把整份 `payload` 带进 `advisor_signals`；`stop` 随包带入但不参与任何判定。**D66 结论不变**（它仍是假朋友）。此处只记口径校正，不改写历史契约。
 - **案例库性质**：§13.8 的 2026/11 对照表由操作者提供、**未经独立核实**，仅作规则校准的工作案例；不得写成数据源、不得作为回测基准、不得把其中具体人名／机构／数字硬编码进代码或阈值。
@@ -434,4 +434,92 @@ for each position:
 
 ---
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；R3–R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R3/R4**
+## 14. R3 实现口径（2026-11-22，落地前的契约）
+
+R3 = **ET 锚定的定时巡检 ＋ 每跑一次把 grade 写进 store**。它不改分级规则（R1）、不改告警状态机（R2）、不改门控／草案／订单（§1／§6）。全部口径由 **D60**（两跑、NY 锚定）、**D71**（Run C 12:30 ET、由 R3 派生）、**§4 R3 行**、**§12 R2 接口**推导，**不是新决策、不新增 D 编号**；D1–D73 / 74 个节点零待决保持不变。
+
+### 14.1 时间与 DST（D60）
+
+统一以 **`America/New_York` 墙上时钟**定义目标，再用 `zoneinfo` 按该交易日换算 UTC；**不复用** `athena_exec/slots.py` 的 `US_STANDARD_FROM = date(2026, 11, 2)` 硬编码切日 —— 那是一次性替换 `21:30-04:00` HKT 窗口的逻辑，不是 IANA DST 规则，跨年会失效。`US_OPEN = 09:30 ET`：
+
+| 跑 | 定义 | ET 墙上钟 |
+|---|---|---|
+| **A** | `US_OPEN − 60min` | 08:30 |
+| **B** | `US_OPEN + 5min` | 09:35 |
+| **C**（R7，D71） | 单次固定 | 12:30 |
+
+换算后的 HKT 墙上钟即 §4 的验收口径，与 D60 问询案例逐格一致：
+
+| 偏移 | A UTC | **A HKT** | B UTC | **B HKT** | C UTC | C HKT |
+|---|---|---|---|---|---|---|
+| EDT（UTC−4，如 2026-07-01） | 12:30 | **20:30** | 13:35 | **21:35** | 16:30 | 00:30 (+1d) |
+| EST（UTC−5，如 2026-12-01） | 13:30 | **21:30** | 14:35 | **22:35** | 17:30 | 01:30 (+1d) |
+
+D60 案例原文「NY 锚定给出 20:30/21:35 或 21:30/22:35」即上表 A/B 两列；固定 HKT 时钟会在冬季把「开盘后复查」提前到开盘前 55 分钟，正是 D60 否决 (b) 的原因。
+
+### 14.2 迁移号口径修正（只改号段，不动任何裁定）
+
+已提交的 §13.5 与 00 册 §12 曾写「R7 `regime_labels` 号段自 `054` 起顺延，仅预留未落地」。R3 是**第一个真正落地的后续迁移**，按 §12「号段被占用则顺延、不插号」的既有纪律：`054` 归 **`054_guardian_runs.sql`**，R7 的 `regime_labels` 顺延到 **`055`**。这是号段登记的技术修正，**D67–D73 七条裁定、§1／§6 两条边界、R7 契约冻结状态一律不变**；R7 实现时再从 `055` 起，不回填历史。
+
+### 14.3 存贮：`guardian_runs`（append-only）
+
+不复用 `guardian_alerts` —— 它是 `open/skipped/resolved/auto_cleared` 的 ack 去重状态机，且 `guardian_alerts_live` 部分唯一索引会挡掉同键历史（§13.5 为 `regime_labels` 写过同一条理由）。新增独立表，一跑一行、按账户：
+
+| 列 | 用途 |
+|---|---|
+| `account_id / trade_day / run` | 唯一键 `(account_id, trade_day, run)` ⇒ 同一跑重复触发由 `ON CONFLICT DO NOTHING` 幂等吞掉 |
+| `scheduled_at / ran_at` | ET 派生的计划时刻与实际执行时刻（timestamptz，UTC 存） |
+| `portfolio_tier / account_tier` | 五档分级字符串，面板直接读 |
+| `breach_count / proximity_count / unmanaged_count` | R1 `GuardianReport` 三个计数 |
+| `el_nl_pct / maint_nl_pct` | 可空 numeric；R2 §11.3 的诚实留白延续到持久化，`None` 不臆造 |
+| `account_flags / positions` | jsonb：账户旗标数组、逐标的 `{symbol, tier, flags, unmanaged}`，可重放本次 grade |
+| `status / detail` | `ok` 为主；失败／降级留痕（R4 的 dead-man 会消费，R3 不实现告警） |
+
+`/guard` GET 仍调 `sync()` 出「当前实时」五色板；R3 另加一张只读「Scheduled runs」卡展示最近 6 行，让操作者看得见「上次定时跑是什么时候、结论是什么」。表不存在时静默降级为空卡（与 `_nav_badges()` 的 try/except 同构），**不因迁移未跑而全站报错**。
+
+### 14.4 调度形态与接缝
+
+- 新增纯模块 `guardian_schedule.py`（零 I/O）：`run_moments(day)`、`next_run(now, runs)`、`hk_clock()`；`RUNS = ("A","B","C")`、`EXECUTED_RUNS = ("A", "B")`。
+- 新增薄适配 `guardian_runner.py`：复用 `pages._guard_inputs()`（lazy import，不复制 ~200 行 SQL）→ 原样调 `guardian_view.sync()` → 把 `GuardianReport` 序列化写一行 → `conn.commit()`。
+- 在 `loop.py` 起一条 **daemon 线程**，由 `next_run()` 算出下一次 fire 并用 `Event.wait()` 精确等待；**不改** 5 分钟 `cycle()` / `_cycle_sleep()` / `_bootstrap_cycle()` 语义，不引入 cron / APScheduler。`ops restart` 时 `stop_guardian_scheduler()` 与 `stop_tunnel()` 并列调用。
+- **Run C 只派生不执行**：`run_moments()` 已给出 12:30 ET 的 UTC 时刻（DST 安全），但 R3 的 `EXECUTED_RUNS` 不含 `C`，不写 `guardian_runs` 行、不推送。R7 只需接一个 handler 参数 `runs=("C",)` 并写自己的 `regime_labels`，**不必重做调度**。D71 的「由 R3 的 NY 锚定派生」即由此兑现。
+
+### 14.5 交易日口径与诚实留白
+
+全仓**无** US market holiday / trading-day helper（只读核实），且 §6「No new market data sources」不允许为此新增源 ⇒ R3 **只按 ET 工作日（Mon–Fri）触发**，周末跳过。**US 法定假日不在过滤范围**：假日会多一次无害的 grade 行（无订单、无草案、无改动，§1 边界不动），不臆造一张硬编码假日表。这是已知留白，与 D66「无生产者一律留空并记旗标」同纪律；若日后要有真假日历，须显式修订 §6 并另起裁定。
+
+### 14.6 幂等、重启与并发
+
+- **幂等**：`guardian_runs` 唯一键 ＋ `ON CONFLICT DO NOTHING`；`sync()` 的 `reconcile()` 本身幂等（D62），`guardian_alerts_live` 部分唯一索引兜住并发重复 INSERT。
+- **重启不回补**：`next_run()` 永远算「下一个未来时刻」；进程 10:00 ET 起来就等明天 A，不补今天 A/B。已在库里的行不重写。
+- **并发**：daemon 线程与 `/guard` GET 可能同时调 `sync()`；二者都是 `load_alerts → reconcile → apply_plan`，冲突由部分唯一索引 ＋ `ON CONFLICT DO NOTHING` 收敛，不新增锁。
+
+### 14.7 验收（§4 R3 行，逐条可测）
+
+1. EDT / EST 两种偏移下 A/B 的 HKT 墙上钟分别为 **20:30/21:35** 与 **21:30/22:35**；Run C 派生为 00:30/01:30 (+1d)。
+2. `next_run()` 在 A 前 → 今日 A；A 与 B 之间 → 今日 B；B 之后 → 下一工作日 A；周五 B 之后跳过周末 → 周一 A。
+3. 同一 `(account, day, run)` 写两次只留一行；`sync()` 被调用、`ON CONFLICT` 在 SQL 里。
+4. `/guard` 只读卡渲染、所有动态文本转义；表缺失时降级为空卡且 GET 仍 200。
+5. 真实 Postgres：`054` 迁移可 apply、表／唯一键／索引齐全、`_statements()` 切分正确。
+6. 两轮变异测试：改坏 DST 偏移或去掉 `ON CONFLICT` 必须 FAIL，还原后 `cmp=0`、全量回归通过。
+
+### 14.8 明确不做（R3 边界）
+
+不实现 Telegram 催办／dead-man（R4）、不实现 `VIX > 38` 等静态触发线（R5）、不实现常开机器／心跳（R6）、不实现 `regime_labels` 联合矩阵／`close_bias`／`evidence`／面板标签卡（R7）；不新增 Settings 字段、不改 `drafts.decide()` / `advisor.py` / `wheel.py` / `guardian.py`、不接新行情源、不产生订单、不改 5 分钟 cycle 语义。
+
+---
+
+## 15. R3 交付记录（2026-11-22）
+
+| 项 | 内容 |
+|---|---|
+| 状态 | ✅ **已实现并验证**。`C-20261122-1` |
+| 代码 | 新增 `054_guardian_runs.sql`、`guardian_schedule.py`、`guardian_runner.py`、`test_guardian_r3.py`；修改 `guardian_view.py` / `pages.py` / `loop.py` / `packages/store/pyproject.toml` / `00` 册 / `CHANGELOG.md` / `logs/2026-11-22.md`。契约见 §14 |
+| 接口 | `guardian_schedule.run_moments()` / `next_run()` / `hk_clock()`（纯）；`guardian_runner.run_once()` / `write_run()` / `load_runs()` / `render_run_history()` / `start_guardian_scheduler()` / `stop_guardian_scheduler()`；`render_board(..., extra_cards="")` 向后兼容。**R2 `sync()` 原样复用，未改一行** |
+| 验证 | ① R3 单测 **71/71**；② 全量 **362/362**（`skipped=2`）；③ `uv lock --check`（29 packages）、`compileall`、import smoke、`git diff --check` 全绿；④ 台账机检 **100/100 `EXIT=0`**；⑤ **真实 Postgres 一次性容器** `athena-r3-verify-55440`：`apply_migrations()` applied 50 且含 `054`、17 列 ＋ `guardian_runs_latest` ＋ 唯一约束齐全、`_statements()` 切 2 条；同一 `(U1, day, A)` 连跑两次只留 1 行、再跑 B 得 2 行；`load_runs()` 回 `20:30/21:35 HKT`；带卡 GET body 仍以 `<p class="note">` 开头 ⇒ `R3_LIVE_ALL_OK`；⑥ **两轮变异测试均如期 FAIL**：固定 UTC−4 偏移 ⇒ 24 例 `failures=5`；删 `ON CONFLICT` ⇒ 8 例 `failures=1` `EXIT=1`；两次 `cp` 还原 `cmp=0`、全量恢复 362/362；⑦ 容器与临时文件已清理 |
+| 边界 | **未做**：Telegram 催办／dead-man（R4）、静态触发线（R5）、常开机器／心跳（R6）、`regime_labels` 矩阵／`close_bias`／`evidence`／标签卡（R7）；不改 R1 分级、R2 状态机、`drafts.decide()` / `advisor.py` / `wheel.py` / Settings、5 分钟 cycle 语义、任何订单／门控／行情源。**已知留白**：无 US market holiday helper ⇒ 只按 ET 工作日触发，假日多一次无害 grade 行（§14.5）；重启不回补错过的跑（§14.6）；Run C 只派生、不写行、不推送（§14.4） |
+| 提交 | 本批次独立提交；hash 以 `git log -1 --format=%h` 为准，**不写入本文档** —— 文档与代码同一批次提交，自指不可能，沿用 §9／§12 惯例 |
+
+---
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4–R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**

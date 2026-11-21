@@ -105,6 +105,7 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-21 | 实现 R2 Guardian 告警表、/guard 面板与三态闭环 | [C-20261121-5](logs/2026-11-21.md#c-20261121-5) |
 | 2026-11-21 | 新增 R7 午間 Regime Label 企划與待裁定項 | [C-20261121-6](logs/2026-11-21.md#c-20261121-6) |
 | 2026-11-21 | 裁定 R7 七条并编号 D67–D73 | [C-20261121-7](logs/2026-11-21.md#c-20261121-7) |
+| 2026-11-22 | 实现 R3 ET 锚定调度与 guardian grade 存储 | [C-20261122-1](logs/2026-11-22.md#c-20261122-1) |
 
 ## Notes
 

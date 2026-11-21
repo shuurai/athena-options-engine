@@ -1152,9 +1152,18 @@ def _guard_page(conn, account: str, query: dict, note: str = "", status: int = 2
                 f'<div class="card guard-error"><p>{escape(str(exc))}</p></div>', [],
             ) | {"status": 400}
         alerts = []
+    # R3: read-only Scheduled runs card. Degrade to no card when 054 is not
+    # applied yet, so a migration gap never breaks the whole page.
+    runs_html = ""
+    try:
+        from . import guardian_runner as gr
+        runs_html = gr.render_run_history(gr.load_runs(conn, account))
+    except Exception:
+        runs_html = ""
     body = gv.render_board(
         snapshot.report, alerts, drafts,
         note=note, store_error=store_error, base_currency=snapshot.base_currency,
+        extra_cards=runs_html,
     )
     live = sum(1 for a in alerts if a.state in ("open", "skipped"))
     chips = [("info", "read only"), ("warn" if live else "ok", f"{live} open alerts")]
