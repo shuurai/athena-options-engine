@@ -1,5 +1,6 @@
 """Settings payload. Secrets stay in the environment, not in this document."""
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -296,6 +297,35 @@ UNIVERSE_SEED = (
 )
 
 
+class TriggerLine(BaseModel):
+    """Operator price line (R5 / D85). Stored inside settings_versions.payload.
+
+    ``level`` stays a plain finite number so the jsonb row is serialisable;
+    comparisons go through ``Decimal(str(level))`` in guardian_trigger.
+    """
+
+    symbol: str
+    op: Literal["<", ">"]
+    level: float
+
+    @field_validator("symbol", mode="before")
+    @classmethod
+    def _symbol(cls, value: object) -> str:
+        text = str(value or "").strip().upper()
+        if not text or len(text) > 12 or text.startswith(".") or text.endswith(".") or ".." in text:
+            raise ValueError("Use a ticker such as NVDA or 700.")
+        if any(char != "." and not char.isalnum() for char in text):
+            raise ValueError("Use a ticker such as NVDA or 700.")
+        return text
+
+    @field_validator("level")
+    @classmethod
+    def _level(cls, value: float) -> float:
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("Level must be a positive number.")
+        return value
+
+
 class SettingsPayload(BaseModel):
     privilege: Privilege = "all_orders"
     global_currency: GlobalCurrency = "HKD"
@@ -318,6 +348,7 @@ class SettingsPayload(BaseModel):
     retain_local_days: int = 14
     cycle_minutes: int = 5
     sim_symbols: list[str] = Field(default_factory=lambda: list(SIM_SYMBOLS))
+    trigger_lines: list[TriggerLine] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod

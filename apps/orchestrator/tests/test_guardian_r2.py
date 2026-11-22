@@ -449,7 +449,7 @@ class TestSql(unittest.TestCase):
 
     def test_load_alerts_maps_columns(self) -> None:
         conn = _FakeConn({"SELECT id, symbol, breach, tier, state, skip_until": [
-            (9, "NVDA", "uncovered_call", "danger", "open", None),
+            (9, "NVDA", "uncovered_call", "danger", "open", None, "grade"),
         ]})
         rows = gv.load_alerts(conn, "U1")
         self.assertEqual(rows[0], _alert(id=9))
@@ -463,7 +463,7 @@ class TestSql(unittest.TestCase):
     def test_empty_plan_does_not_commit(self) -> None:
         conn = _FakeConn(routes={
             "SELECT id, symbol, breach, tier, state, skip_until": [(
-                1, "NVDA", "uncovered_call", "danger", "open", None)],
+                1, "NVDA", "uncovered_call", "danger", "open", None, "grade")],
         })
         # Patch build_snapshot so sync() needs only the alert query.
         snap = gv.assemble([_row()], [], _settings(), {}, {},

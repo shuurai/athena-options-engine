@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Mapping, Sequence
 
+from athena_orchestrator import guardian_trigger as gt
 from athena_orchestrator import guardian_view as gv
 from athena_orchestrator.guardian_schedule import (
     ET,
@@ -86,6 +87,7 @@ class TickPlan:
     nags: tuple[tuple[int, str], ...] = ()
     monitor: str = ""
     deadman: int = 0
+    triggers: int = 0
     signature: tuple[tuple[str, str, str, int], ...] = ()
 
 
@@ -340,6 +342,11 @@ def nag_tick(
     """One 300s tick. Pure decisions + thin SQL; no sending, no sleeping."""
     touch_heartbeat(conn)
 
+    # D87: R5 evaluates on this same fixed 300s tick and the same
+    # connection, before due rows are read, so a fresh trigger nag
+    # fires within one poll interval. No new thread, no cycle change.
+    triggers = gt.evaluate_tick(conn, now, accounts)
+
     deadman = 0
     if session and accounts and slots:
         earliest = min(s.trade_day for s in slots)
@@ -355,7 +362,8 @@ def nag_tick(
     signature = tuple(dups)
     monitor = duplicate_report(dups) if dups and signature != tuple(previous_signature) else ""
 
-    return TickPlan(nags=nags, monitor=monitor, deadman=deadman, signature=signature)
+    return TickPlan(nags=nags, monitor=monitor, deadman=deadman,
+                    signature=signature, triggers=len(triggers.opens))
 
 
 # ---------------------------------------------------------------------------
@@ -422,10 +430,10 @@ def _nag_loop(database_url: str) -> None:
             if plan.monitor:
                 notify_guardian_once(plan.monitor)
             signature = plan.signature
-            if plan.nags or plan.deadman or plan.monitor:
+            if plan.nags or plan.deadman or plan.monitor or plan.triggers:
                 log.info(
-                    "guardian nag tick nags=%s deadman=%s monitor=%s",
-                    len(plan.nags), plan.deadman, bool(plan.monitor),
+                    "guardian nag tick nags=%s deadman=%s triggers=%s monitor=%s",
+                    len(plan.nags), plan.deadman, plan.triggers, bool(plan.monitor),
                 )
         except Exception:
             log.exception("guardian nag tick failed")

@@ -34,6 +34,7 @@ from athena_settings.model import (
     RiskLimits,
     SettingsPayload,
     TacticFlags,
+    TriggerLine,
     normalize_provider,
 )
 from athena_settings.prompts import AGENT_ORDER, AGENT_ROLES, PREDICTION_NAME, TRADE_NAME, resolved_agents
@@ -3119,6 +3120,7 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Wash window days', 'wash_window_days', news.wash_window_days, 'Those headlines must fall inside this many days.')}</div></div>"
         "</div></div>"
         "</form>"
+        f"{_trigger_lines_card(current)}"
     )
     return _html(
         "Settings",
@@ -3560,12 +3562,87 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
     return _risk(conn, account, {}, f"Saved version {new_id}. Privilege stays {payload.privilege}.")
 
 
+def _trigger_lines_card(current) -> str:
+    """D90: operator add/remove table. Lives outside the main settings form."""
+    def _direction(op: str) -> str:
+        return "below" if op == "<" else "above"
+
+    rows = "".join(
+        "<tr>"
+        f"<td>{escape(line.symbol)}</td>"
+        f"<td>{escape(_direction(line.op))}</td>"
+        f'<td class="mono">{escape(format(Decimal(str(line.level)).normalize(), "f"))}</td>'
+        "<td>"
+        '<form method="post" action="/settings" class="trigger-remove">'
+        '<input type="hidden" name="action" value="trigger_remove">'
+        f'<input type="hidden" name="trigger_index" value="{index}">'
+        '<button class="btn ghost" type="submit">Remove</button></form>'
+        "</td></tr>"
+        for index, line in enumerate(current.trigger_lines)
+    )
+    if not rows:
+        rows = '<tr><td colspan="4">No trigger lines yet.</td></tr>'
+    return (
+        '<div class="card"><h2>Trigger lines</h2>'
+        '<p class="card-lead">Operator price lines. A crossed line opens a red Guardian '
+        'alert with a 5-minute nag and an inline Resolve. Only symbols with stored '
+        'market data can fire (D84).</p>'
+        '<table class="data"><thead><tr><th>Symbol</th><th>When price is</th>'
+        f'<th>Level</th><th></th></tr></thead><tbody>{rows}</tbody></table>'
+        '<form method="post" action="/settings" class="trigger-add">'
+        '<input type="hidden" name="action" value="trigger_add">'
+        '<input class="input" name="trigger_symbol" placeholder="NVDA" required>'
+        '<select class="input" name="trigger_op">'
+        '<option value="&lt;">below</option><option value="&gt;">above</option></select>'
+        '<input class="input" name="trigger_level" type="number" min="0" step="any" '
+        'placeholder="118" required>'
+        '<button class="btn" type="submit">Add line</button>'
+        "</form></div>"
+    )
+
+
+def _post_trigger_line(conn, account: str, payload, form: dict, actor: str, action: str) -> dict:
+    """D90: add/remove one line via save_settings(), so settings_audits records it."""
+    def fail(message: str) -> dict:
+        return _settings(conn, account, {}, message) | {"status": 400}
+
+    lines = list(payload.trigger_lines)
+    if action == "trigger_remove":
+        try:
+            index = int((form.get("trigger_index") or [""])[0])
+        except ValueError:
+            return fail("That line could not be found.")
+        if not 0 <= index < len(lines):
+            return fail("That line could not be found.")
+        removed = lines.pop(index)
+        note = f"trigger remove {removed.symbol} {removed.op} {removed.level}"
+    else:
+        try:
+            symbol = clean_symbol((form.get("trigger_symbol") or [""])[0])
+            op = (form.get("trigger_op") or [""])[0].strip()
+            level = float((form.get("trigger_level") or [""])[0].strip())
+            line = TriggerLine(symbol=symbol, op=op, level=level)
+        except ValueError:
+            return fail("Use a ticker, a direction (below/above) and a positive level.")
+        if any(item.symbol == line.symbol and item.op == line.op
+               and Decimal(str(item.level)) == Decimal(str(line.level)) for item in lines):
+            return fail("That line is already configured.")
+        lines.append(line)
+        note = f"trigger add {line.symbol} {line.op} {line.level}"
+    payload.trigger_lines = lines
+    return _save_live(conn, account, payload, actor, note)
+
+
 def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     if not account:
         return _settings(conn, account, {}, "No account is configured.") | {"status": 400}
     current = load_active(conn, account)
     payload = SettingsPayload.model_validate(current.model_dump())
     action = (form.get("action") or [""])[0]
+    # D90: a trigger-only form must not be asked for the dozen numeric
+    # knobs that the main settings form posts. Handle it early.
+    if action in {"trigger_add", "trigger_remove"}:
+        return _post_trigger_line(conn, account, payload, form, actor, action)
     if action == "link":
         from athena_bots.telegram import issue_link_code
 

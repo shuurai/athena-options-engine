@@ -114,6 +114,7 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-22 | 启动 R5：合并静态触发线落地前契约与待裁定项 | [C-20261122-7](logs/2026-11-22.md#c-20261122-7) |
 | 2026-11-22 | 裁定 R5 契约 D84–D90 与架构拆分 D91–D94 并同步计数 | [C-20261122-8](logs/2026-11-22.md#c-20261122-8) |
 | 2026-11-22 | Bump to v1.0.3 and ship R5 contract batch | [C-20261122-9](logs/2026-11-22.md#c-20261122-9) |
+| 2026-11-22 | 实现 R5 静态触发线并补齐交付记录 | [C-20261122-10](logs/2026-11-22.md#c-20261122-10) |
 
 ## Notes
 

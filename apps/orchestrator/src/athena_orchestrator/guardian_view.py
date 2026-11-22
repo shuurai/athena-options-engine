@@ -121,6 +121,7 @@ class AlertRow:
     tier: str
     state: str
     skip_until: datetime | None = None
+    source: str = "grade"
 
 
 @dataclass(frozen=True)
@@ -168,6 +169,10 @@ def reconcile(
     wanted = desired(report)
     current: dict[tuple[str, str], AlertRow] = {}
     for row in alerts:
+        # D86: R5 owns source='trigger' rows. Only grade rows may be
+        # auto-cleared here, so a trigger alert survives opening /guard.
+        if row.source != "grade":
+            continue
         current.setdefault((row.symbol, row.breach), row)
 
     open_new: list[ProposedAlert] = []
@@ -332,7 +337,7 @@ def assemble(
 # Thin SQL
 # ---------------------------------------------------------------------------
 
-_ALERT_COLUMNS = "id, symbol, breach, tier, state, skip_until"
+_ALERT_COLUMNS = "id, symbol, breach, tier, state, skip_until, source"
 
 
 def load_alerts(conn, account: str) -> list[AlertRow]:
@@ -349,7 +354,8 @@ def load_alerts(conn, account: str) -> list[AlertRow]:
         (account,),
     ).fetchall()
     return [
-        AlertRow(int(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), r[5])
+        AlertRow(int(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), r[5],
+                 str(r[6] or "grade"))
         for r in found
     ]
 
@@ -555,6 +561,27 @@ def _position_line(item: PositionGrade, drafts_by_symbol) -> str:
     )
 
 
+def _trigger_card(alerts: Sequence[AlertRow]) -> str:
+    """D86: trigger rows are shown, but never mixed into the R1 grade tiers.
+
+    Grade rows are untouched by this card; when there is no trigger row the
+    board renders exactly as R2 did. Ack forms reuse the existing /guard
+    Resolve / Skip paths (D70: no new page, no second ack channel).
+    """
+    rows = [a for a in alerts if a.source == "trigger" and a.state in _LIVE_STATES]
+    if not rows:
+        return ""
+    lines = [
+        '<div class="guard-alert">'
+        f'<span class="tag red">{escape(alert.breach)}</span>'
+        f'<span class="guard-state">{escape(alert.state)}</span>'
+        f"{_ack_forms(alert)}</div>"
+        for alert in rows
+    ]
+    return ('<div class="card guard-tier"><h2>Trigger lines</h2>'
+            + "".join(lines) + "</div>")
+
+
 def render_board(
     report: GuardianReport,
     alerts: Sequence[AlertRow],
@@ -608,6 +635,10 @@ def render_board(
 
     if extra_cards:
         parts.append(extra_cards)
+
+    trigger_card = _trigger_card(alerts)
+    if trigger_card:
+        parts.append(trigger_card)
 
     for tier in _TIER_ORDER:
         tlabel, ttone, tglyph = _TIER_META[tier]

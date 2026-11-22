@@ -1,6 +1,6 @@
 """Versioned Athena settings."""
 
-from athena_settings.model import SettingsPayload, cycle_book, enabled_watchlist, open_symbols, standard_payload
+from athena_settings.model import SettingsPayload, TriggerLine, cycle_book, enabled_watchlist, open_symbols, standard_payload
 from athena_settings.repository import (
     SettingsVersion,
     format_settings,
@@ -12,6 +12,7 @@ from athena_settings.repository import (
 
 __all__ = [
     "SettingsPayload",
+    "TriggerLine",
     "SettingsVersion",
     "cycle_book",
     "enabled_watchlist",
