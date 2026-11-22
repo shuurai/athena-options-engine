@@ -1,7 +1,7 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。**
-**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5–R6 待办；R7 已裁定（D67–D73，Planning 阶段结束，实现仍待 R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4); R7 contract + ratification: §13; **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).**
+**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；零代码、零迁移、§1／§6 零修订。**
+**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 契约 ✅ 已裁定（§19，D84–D90）、R6 待办；R7 已裁定（D67–D73，Planning 阶段结束，实现仍待 R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4); R7 contract + ratification: §13; R5 implementation contract: §19 (✅ ratified D84–D90); data-layer split: §20 (D91–D94, pre-ratified inputs for the D79 round); **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).**
 
 > **Origin (operator, 2026-11-21)**: during work/exam crunch weeks, execution function is consumed by work and the portfolio goes into autopilot — and autopilot only does one thing: nothing. Last week a black-swan-scale move took the book from fine to near-liquidation. The quantitative layer (per-position scoring) already works. What is missing is a layer that (a) compares every live position — including accidental ones — against the rule book, (b) tells the operator the one thing to do, at a fixed time, and (c) refuses to be ignored when it matters.
 
@@ -94,13 +94,15 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 
 > **2026-11-22 第十轮口径校正（D80，不改本表原文）**：§4 R4 验收栏「kill the orchestrator, get the "guardian is down" message」在**单进程架构下不可达** —— 唯一的 Telegram 发送端是 `loop.py:134` 在 orchestrator **进程内**起的 daemon poll 线程，进程被 kill 则发送端一起消失（§17.3① 实测）。按 **D80 (a)**：R4 只做进程内可观测的 run 失败告警 ＋ 5 分钟心跳 ＋ **重启后补报**；「死亡期间实时告警」明确归 **R6 外部 watchdog**（本表 R6 行「Unplug test: kill the box, get the heartbeat alert」）。本表历史原文保留不改，R4 验收按 §18 交付记录执行。
 
+> **2026-11-22 第十一轮口径校正（D84／D87／D88／D94，不改本表原文）**：R5 验收栏 `Set a line in Settings; cross it in paper; alert fires within one poll interval` 中的 `VIX > 38` 例子在**本批次无生产者**（全库 `.py`／`.sql` 零 VIX 命中；`broker.py:1036-1051` 只建 `Stock`、无 IND 合约路径），按 **D84 (a)** 记为 R5 已知留白，等「R7 数据源」裁定轮显式修订 §6 后再补；R5 v1 只支持 `market_bars` 里既有真源标的（STK）。「一个轮询间隔」＝ **R4 `nag_tick()` 固定 300s**（D87／D82）。价格取 `last_tradeable_price()`（`pricing.py:65`）：**`ib-delayed` 整点快照是主源、`ib-daily` 是回落**（D88／D94），不做真·穿越边沿检测、以「当前快照是否越线」为准。本表历史原文保留不改。
+
 **Sequencing logic**: R1→R2→R3→R4 is the spine (each needs the previous). R5 needs R4's escalation path. R6 is infrastructure and can run in parallel with R3–R5 — but note that **R4 on an unreliable machine is a false sense of safety**, so R6 should not trail far behind. **R7 is numbered after R6 but depends on R3 (ET-anchored scheduler) + R4 (delivery), so it cannot jump the spine; it must also be separated semantically from R5's static trigger lines (§13.7).**
 
 ---
 
-## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 R4）
+## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分）
 
-**二十六条全部裁定：二十四条取推荐、二条明确偏离（Q2／D75、Q4／D83）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5；**D80–D83** 是 R4 实现契约的第十轮裁定（Q1–Q4 编号化，其中 Q4 手写答复偏离推荐、另补一次「state 唯一性落点」确认问项），见 §7 第十轮与 §17.6。
+**三十七条全部裁定：三十四条取推荐、三条明确偏离（Q2／D75、Q4／D83、Q5／D88）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5；**D80–D83** 是 R4 实现契约的第十轮裁定（Q1–Q4 编号化，其中 Q4 手写答复偏离推荐、另补一次「state 唯一性落点」确认问项），见 §7 第十轮与 §17.6；**D84–D94** 是第十一轮 R5 实现契约与架构拆分裁定（Q1–Q7 编号化为 D84–D90，Q5 手写答复偏离推荐另补确认问项；架构四问编号化为 D91–D94），见 §7 第十一轮、§19.6 与 §20.2。
 
 | # | Decision | Options | 裁定 | 依据 |
 |---|---|---|---|---|
@@ -130,6 +132,17 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **D81** | inline Resolve 跨包落点（§17 Q2） | (a) `register_callback` 注入 (b) bots 内直接 UPDATE (c) ack 下沉 `athena_store` (d) 只给 `/guard` URL | **✅ (a) `athena_bots.register_callback(prefix, handler)`** | 案例：手机点 inline Resolve，`_handle_callback` 只认 `approve:/reject:` 且 `_apply()` 改 drafts，`gv.resolve()` 在 orchestrator 包，bots 反向 import 会成环（§17.3②）。由 `loop.py` 启动时注入 `guardres` → `gv.resolve`，复用既有 `_fresh_allowlist()` 校验，**零环依赖、零重复 SQL、R2 状态机原样复用**。否决 (b)：绕过 R2 状态机、D62 三态可能分叉；否决 (c)：动存储层与 R2 交付代码，改动面最大；否决 (d)：「ack from phone stops it」闭环打折 |
 | **D82** | 5 分钟 nag 节奏载体（§17 Q3） | (a) 专用 daemon 固定 300s (b) 挂进 `cycle()` (c) 塞进 R3 `_scheduler_loop` (d) 只在 `/guard` 载入时判定 | **✅ (a) 专用 daemon `Event.wait(300)`** | 案例：Settings 把 `cycle_minutes` 改成 15，D61 硬裁定的「5 分钟一条」不能跟着漂（§14.8 冻结「不改 5 分钟 cycle 语义」、§17.3③）。新起一条 daemon 线程与 R3 `guardian_runner` 同构，节奏由代码固定、**不动 `cycle()`**。否决 (b)：随 Settings 漂移、违背 D61；否决 (c)：R3 是 `next_run()` 长等待、无 5 分钟 tick，会把两套节奏绑死；否决 (d)：无人开页面就完全不催 |
 | **D83** | 逐条发送与唯一性落点（§17 Q4，手写答复） | (a) 逐条 ＋ 内存去重 (b) 汇总 ＋ 一组按钮 (c) 只发最严重 (d) 逐条不去重；**补充确认**：复用 R2 state 唯一性／新建 state 表／仅内存去重／扩唯一索引 | **⚠️ 手写答复（偏离推荐 a）＋ 补充确认取「复用 R2 state 唯一性」** | 案例：同时 3 条 open 红／黑告警。操作者原文：「要有每一個position state和portfolio state管理，state 要有 action/alert唯一性，如果還沒解決alert，那自然不需要重加新的alert。不過萬一重複了，去重也是必要的一個監測」⇒ **唯一性下沉到 state 层**：复用 `guardian_alerts` 表（`symbol` 粒度＝position state、`*ACCOUNT*` 哨兵＝portfolio state）＋ `guardian_alerts_live` 部分唯一索引 `(account_id, symbol, breach) WHERE state IN ('open','skipped')` ＋ `sync()` reconcile ⇒ 未解决不重加；**不建进程内存去重表、不建新 state 表、零新迁移、`055` 不动**。另加 `GROUP BY ... HAVING count(*)>1` 重复 live 行自检（仅监测、记日志 ＋ 一条消息、不改状态机）作为「萬一重複」的兜底可观测。逐条发送 ＋ 每条带自己的 inline Resolve 保留。补充确认问项否决「新建 state 表」（要新迁移号段／挤 `055`）、「仅内存去重」（唯一性不持久、与原话相冲）、「扩唯一索引加 action 列」（要 ALTER 且回头改 R2 `sync()`） |
+| **D84** | R5 Q1：`VIX > 38` 无生产者（§19 Q1） | (a) 只接既有真源标的 (b) 本轮建 VIX feed (c) 代理量 (d) 永 unknown | **✅ (a) 只接既有真源标的** | 实测全库 `.py`／`.sql` 零 VIX 命中；`quote_fields()`／`stock_contract()` 无 IND 合约路径；D79 已把新行情源排到独立裁定轮、§6 零修订。`VIX > 38` 记为 R5 已知留白，§4 验收栏加口径校正、不改原文 |
+| **D85** | R5 Q2：配置落点（`SettingsPayload` 封闭模型） | (a) 声明字段 `trigger_lines` (b) 新建表 `056` (c) 塞 `050` jsonb (d) 环境变量 | **✅ (a) 声明字段、零迁移** | `_payload_of()` 按 `model_fields` 裁剪、`KNOBS` 只认 5 个标量 ⇒ 未声明键在下次 load→save 丢失。复用 `save_settings()` ＋ `settings_audits` 版本审计；§6 D66 行后追加口径校正注记、**不改 D66 原文** |
+| **D86** | R5 Q3：`reconcile()` 会清掉 trigger 行 | (a) `AlertRow` 加 `source`、只清 `grade` (b) `load_alerts()` 过滤 (c) 独立表 (d) 复用旗标词表 | **✅ (a) 只对 `source='grade'` auto_clear** | `load_alerts()` 不过滤 source、`sync()` 由 `/guard` 调用；`desired()` 只产 R1 词表 ⇒ 打开面板即误判「breach gone」。`load_alerts()` 仍返回全部行供面板显示，R2 对 grade 行行为零变化 |
+| **D87** | R5 Q4：求值节奏 | (a) 挂 `nag_tick()` 固定 300s (b) `cycle()` (c) 第三条 daemon (d) 页面载入 | **✅ (a) `nag_tick()`** | D82 已定专用 daemon 固定 300s；`cycle_minutes` 可改 1–60，挂 `cycle()` 会让线漂移。不改 `cycle()`、不新增线程、不动 `NAG_INTERVAL`；「一个轮询间隔」= 300s |
+| **D88** | R5 Q5：生命周期／「不要用 ib delayed」 | (a) 状态判定 ＋ R5 自管 auto_clear (b) 真边沿检测 (c) 永不自动清 (d) 每次越线新行；**手写答复** ＋ 两轮确认 | **⚠️ 手写答复（偏离推荐 a）⇒ 意图登记、实现仍取 (a)** | 操作者原文「athena 现在已经有ibkr 的 realtime tick 了，不会要用 ib delayed」，并提「processor 机制」＋「VIX 像真 ticker 一样加到 universe」。实测：`pendingTickersEvent` 是**实时事件流**，但 `reqMarketDataType(3)` 是 **IB delayed**，且 tick **不持久化**（`_store_prints()` 折成整点 `ib-delayed` 行）。按 D91 把 processor／VIX 拆到独立「R7 数据源」轮；R5 v1 仍取 (a)：稳定 `breach` key ＋ `WHERE NOT EXISTS`、未 Resolve 不重加、回到阈值内由 R5 自管 auto_clear。价格取 `last_tradeable_price()`（D94 确认），不改 `pricing.py` |
+| **D89** | R5 Q6：档位 | (a) `danger` (b) `balanced` (c) 可配 tier (d) `blowup` | **✅ (a) `tier='danger'`** | `_DUE_SQL`／`due_alerts()` 不看 `source`，只看 `tier IN ('danger','blowup')` ⇒ 红档自动进 5 分钟催办 ＋ inline `guardres` Resolve，发送端零改动 |
+| **D90** | R5 Q7：配置 UI | (a) `/settings` 增删表 (b) `/guard` 配置区 (c) Telegram 命令 (d) 新页 `/triggers` | **✅ (a) `/settings` 增删表** | `_post_settings()` 固定 action 白名单；最接近先例是 `_universe()` Symbol pool 增删表（走 `save_settings()` 审计）。D70 定 `/guard` 保持纯 ack 面、不新开页 |
+| **D91** | 架构拆分：processor／VIX 排到哪里（确认问 1） | (a) 拆：R5 按已答 Q1–Q7 落地，processor＋VIX 另起轮显式修订 §6 (b) 本轮只做 processor (c) 本轮全做 (d) 冻结 | **✅ (a) 拆** | processor 是既有事件流的进程内重构（不新增 vendor），VIX ticker 需要 IND 合约 ＋ entitlement（真新源）。§19.7／§19.8／D79 明写该轮未开工、§6 冻结 ⇒ **本批次 §6 零修订、零代码、零迁移**；「R7 数据源」轮仍是唯一落点 |
+| **D92** | 架构：VIX 在 universe 的落点（确认问 2） | (a) 独立 `data_symbols` 数据专用列表 (b) watchlist ＋ 非交易旗标 (c) 直接进 watchlist (d) 硬编码常量 | **✅ (a) 独立数据专用列表** | 全库无 universe 表，universe = `SettingsPayload.watchlist` ＋ `UNIVERSE_SEED`；`cycle_book()`（`model.py:347`）把 watchlist 喂进 `run_paper_cycle()` ⇒ 直接加 `VIX` 会让策略引擎**对一个指数开期权草案**并每轮烧 AI 调用；`stock_contract()` 只建 `ib_insync.Stock`，IB 无法 qualify。声明字段永不进 `cycle_book()`／drafts |
+| **D93** | 架构：processor 产物落点与 hook 位置（确认问 3） | (a) 复用 `market_bars` 既有 source (b) 新 `'ib-tick'` source (c) 新表 `056` (d) 纯进程内 | **✅ (a) 复用既有 source** | `_take_tickers()`（`pulse.py:437`）先经 `note_print()` 去重再 fan-out，挂后面会漏 tick ⇒ processor 必须挂**原始 ticker event、去重之前**；完成日线走既有 `store_ib_daily()`、日内快照走 `upsert_delayed()`。零迁移、零 `pricing.py` 改动；`market_bars` 的 `UNIQUE (symbol, ts, source)` 已够用 |
+| **D94** | 架构：「ib delayed」含义／实时数据准则（确认问 4 ＋ 补充确认） | (a) 指整点快照行 (b) 指 delayed 报价源 (c) 两者 (d) 仅是备注；**手写「I am not sure…build based on live market data as much as possible」⇒ 补一次 R5 价格源确认** | **✅ 手写答复 ＋ 补充确认取「`last_tradeable_price()` 原样」** | 实测纠正三处（§20.3）：**(i)** `ib-delayed` **不是**「没有真 tick 时的备份」—— `last_tradeable_price()`（`pricing.py:65`）**优先**取最新 `ib-delayed` 整点行、`ib-daily` 才是回落，`quote_pair()` 同序；`pendingTickersEvent` 的 tick 从不持久化，整点 `ib-delayed` 行就是唯一的日内持久表示。**(ii)** `gate.py:31` 是委托守卫、**不拦订阅**，真正无 IND 路径的是 `stock_contract()`／`_qualify_stock()`／`_quote_contract()`。**(iii)** `_merge()`（`:318-320`）丢弃没有 `ib-daily` 行的日子 ⇒ delayed-only 行**不会**污染 rails／RV20／`year_view()`。R5 v1 按补充确认**原样使用** `last_tradeable_price()`；「尽量基于实时行情构建」登记为「R7 数据源」轮的**常设要求**，§6 本批次仍冻结 |
 
 ---
 
@@ -144,10 +157,11 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 - **R7（§13，已裁定 D67–D73）**：七条全取 (a) ⇒ **本节「No new market data sources」与 §1「no drafts, no orders, no tactic changes」两条边界一条都不用改**。D67 只读注解不 gate、D68 降級 `unknown` 不新增源、D70 不新开页、D71 不进 nag。若日后要启用 gate 或新行情源，仍须先显式修订这两条边界（§13.7）。
 - **R7 VIX 补充企划（§16，第九轮 D74–D79）**：**D75 明确表达了「新增行情源／用 IBKR 建」的意图，但 D79 裁定把它排到独立的「R7 数据源」裁定轮** ⇒ 本批次**本节「No new market data sources」与 §1 仍保持原文、零修订、零代码、零迁移**。四个新维度暂以 `unknown` ＋ 就地原因为 interim（D68/D73 纪律）。下一轮须显式修订本节后才能建生产者；不得在实现里顺手接 feed、IND 合约或期权 IV。D74 只读注解、D76 剥动作、D77 不推送、D78 不作验收 ⇒ §1 亦无需改。
 - **R4（§17，第十轮 D80–D83）**：四条裁定全部落在既有接缝内 —— D80 归 R6、D81 用 `register_callback` 注入（零环依赖）、D82 专用 300s daemon、D83 复用 R2 state 唯一性 ＋ 重复自检。⇒ **本节「No new market data sources」／「5-min nag is the maximum intrusion. No email, no second channel, no phone call」与 §1「no drafts, no orders, no tactic changes」三条边界均保持原文、零修订**；零新通道、零新数据源、零订单／草案／门控、零新迁移（`055` 不动）。
+- **R5（§19，第十一轮 D84–D90）＋ 架构拆分（§20，D91–D94）**：D84 只接既有真源标的、D85 声明字段零迁移、D86 只清 grade、D87 挂 nag_tick、D88 意图登记但实现取 (a)、D89 danger、D90 `/settings` 增删表；D91 明确把 processor／VIX **拆到独立「R7 数据源」裁定轮**。⇒ **本节「No new market data sources」与 §1「no drafts, no orders, no tactic changes」两条边界仍保持原文、零修订**；零新数据源、零第二通道、零订单／草案／门控、零新迁移（`055` 仍归 R7 `regime_labels`、不建 `056`）。D92–D94 是该未来轮的**预裁定输入**，不是 R5 实现指令；该轮开工时仍须先显式修订本节。
 
 ---
 
-## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX ＋ 第十轮 R4）
+## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分）
 
 操作者指令：「每個問題問我一遍，我來回答」。分两轮、每条带具体案例逐条问，**8 条全取推荐、零偏离、无跳过**（第六轮 D58–D65 的原始记录；第七／八／九轮见下文各节）。
 
@@ -242,6 +256,38 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 - 裁定轮**零代码改动**；实现、验证与交付记录见 §18 与同日后续台账条目。逐条依据见 §5 决策表与 §17.6。
 
 > Q4 手写答复原文：「要有每一個position state和portfolio state管理，state 要有 action/alert唯一性，如果還沒解決alert，那自然不需要重加新的alert。不過萬一重複了，去重也是必要的一個監測」。
+
+---
+
+### 第十一轮（2026-11-22，R5 实现契约 Q1–Q7 → D84–D90；架构拆分四问 → D91–D94）
+
+操作者 2026-11-22 指令 `start on R5`。按 doc-first 先合并落地前契约（§19 ＋ `C-20261122-7`，零代码、零迁移、待裁定），再按「每個問題問我一遍」分两轮逐条裁定 Q1–Q7、每条带具体案例。**七条中六条取推荐、一条手写偏离（Q5／D88）、零跳过**；Q5 手写答复挑战「无 tick 序列」的调研结论，助手先做只读核实（证实 `pulse.py:319` 确有 `pendingTickersEvent` 实时事件流，但 `:318`／`:354` 用 `reqMarketDataType(3)` delayed、tick 不持久化），再补一次「processor／VIX 落点」确认问项；两份手写答复引入新架构意图，故再补四问（拆分排期／VIX 落点／processor 产物／ib delayed 含义），其中第 4 问又手写「I am not sure」，按第十轮 Q4／D83 先例**再补一次 R5 价格源确认问项**（取推荐、不另编号、并入 D94）。共 **十一条裁定：十条取推荐、一条明确偏离、零跳过**。
+
+| 轮 | 决策 | 案例（问的是什么） | 裁定 |
+|---|---|---|---|
+| 1 | **D84** | 操作者设 `VIX > 38`，但全库 `.py`／`.sql` 零 VIX 命中、无 IND 合约路径，paper 里这条线永远读不到 | ✅ (a) R5 v1 只接既有真源标的；VIX 记已知留白、§4 口径校正、不改原文 |
+| 1 | **D85** | 把 `NVDA < 118` 塞进 `payload` 未声明键，下一次 `/settings` 保存线就凭空消失 | ✅ (a) 给 `SettingsPayload` 加声明字段 `trigger_lines`，零迁移、复用 `settings_audits` |
+| 1 | **D86** | 刚写好的 `source='trigger'` open 行，有人打开 `/guard` 就被 `reconcile()` 判「breach gone」自动清掉 | ✅ (a) `AlertRow` 加 `source`，`reconcile()` 只对 `source='grade'` auto_clear |
+| 1 | **D87** | 把 `cycle_minutes` 改成 15，触发线会不会变成 15 分钟才判一次 | ✅ (a) 求值挂 `nag_tick()` 固定 300s daemon，不动 `cycle()` |
+| 1 | **D88** | `NVDA < 118`，10:00 快照 117.5、11:00 快照 119，库里看不到期间穿越几次 | ⚠️ **手写答复、偏离推荐 (a)** ⇒ processor／VIX 意图登记并拆到独立「R7 数据源」轮（D91）；R5 v1 实现仍取 (a) 状态判定 ＋ R5 自管 auto_clear，价格源经补充确认取 `last_tradeable_price()` |
+| 1 | **D89** | `MRVL > 145` 穿越后希望手机收到可一键 Resolve 的催办 | ✅ (a) `tier='danger'`，复用 R4 催办与 `guardres`，发送端零改动 |
+| 1 | **D90** | 要加 `NVDA < 118`、删 `MRVL > 145`，在哪操作 | ✅ (a) `/settings` 加 Trigger lines 增删表 ＋ `add`／`remove` action，`/guard` 不动 |
+| 2 | **D91** | processor 重构 `pulse.py` 不新增 vendor，VIX ticker 却需要 IND 合约＋entitlement；§6 仍冻结，怎么排 | ✅ (a) 拆：R5 按已答 Q1–Q7 落地；processor＋VIX 进独立「R7 数据源」轮且须显式修订 §6 |
+| 2 | **D92** | 把 `VIX` 加进 `watchlist`，`cycle_book()` 会把它喂进策略引擎、对一个指数开期权草案 | ✅ (a) 独立 `data_symbols` 数据专用列表，永不进 `cycle_book()`／drafts |
+| 2 | **D93** | `_take_tickers()` 先去重再 fan-out，day-bar processor 挂后面会漏 tick | ✅ (a) processor 挂原始 ticker event、去重之前；复用 `market_bars` 既有 `store_ib_daily()`／`upsert_delayed()`，零迁移 |
+| 2 | **D94** | 「ib delayed」到底指 `reqMarketDataType(3)` 还是整点 `market_bars('ib-delayed')` 行 | ⚠️ **手写「I am not sure…build based on live market data as much as possible」** ⇒ 只读核实纠正三处（见 §20.3），补一次确认问项取推荐 (a)：R5 v1 原样使用 `last_tradeable_price()`；「尽量基于实时行情」登记为未来轮常设要求 |
+
+**裁定后的状态变化**：
+
+- 决策编号扩到 **D1–D94（95 个节点，`D4` 拆两段）**，**决策层面仍零待决**；§19.6 的「裁定前不编号」约定已兑现为 D84–D90，架构四问兑现为 D91–D94。累计 **37 条裁定：34 条取推荐、3 条明确偏离（D75／D83／D88）、零跳过**。
+- **§1／§6／「no second channel」三条边界保持原文、零修订**：D84 不建 VIX feed、D85 零迁移、D91 明确把新数据源拆到未来轮 ⇒ 零新数据源、零第二通道、零订单／草案／门控、**零新迁移**（`055` 仍归 R7 `regime_labels`、`056` 不建）。
+- §19 从 **⚠️ 待裁定、未编号** 转为 **✅ 已裁定 D84–D90**；§19.2 第 7 行的 `gate.py:31` 过度断言按实测修正为「`gate.py` 是委托守卫、不拦订阅，真正无 IND 路径的是 `stock_contract()` 只建 `Stock`」；§19.3① 的 VIX 悖论按 D84／D91 记为已知留白 ＋ 拆分路径。
+- **§4 R5 验收栏**：`VIX > 38` 例子（D84）、「一个轮询间隔」＝ 300s（D87）与价格取 `last_tradeable_price()`（D94）均以「口径校正」注记追加，**不改写 §4 历史原文**（沿用 D80／§13.7 惯例）。
+- **D92–D94 是「R7 数据源」轮的预裁定输入，不是 R5 实现指令**；该轮开工时仍须先显式修订 §6，本批次零代码、零迁移、§6 零修订（D79 纪律）。归档见 §20。
+- 裁定轮**零代码改动**；R5 实现、验证与交付记录另起 §21 与同日后续台账条目。
+
+> Q5／D88 手写答复原文：「athena 现在已经有ibkr 的 realtime tick 了，不会要用 ib delayed」。确认问项另两份手写原文：「应该做一些 processor 机制，会收到ticker event，该怎么处理怎么处理，比如计算 day bar，或其他需要。以后但凡需要数据的都用类似的方式去添加新的processor 就好了。」／「我希望去拿到 vix tick 数据， 就像是一个真的ticker 一样，加到universe 里，用 processor 概念去计算其他维度的 vix 数据」。
+> D94 手写答复原文：「I am not sure, because ib-delayed is only used when there is no real ticks as a back up. But you should be building based on live market data as much as possible」；补充确认问项取推荐 (a)「Use `last_tradeable_price()` 原样」，不另编号、并入 D94（沿用第十轮 Q4／D83 先例）。
 
 ---
 
@@ -801,5 +847,165 @@ R4 = **一条专用 daemon 线程**（固定 300s、与 R3 `guardian_runner` 同
 
 ---
 
+## 19. R5 实现口径：静态触发线（2026-11-22，✅ 第十一轮已裁定 D84–D90）
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过 ⇒ 共 26 条 / D1–D83 84 个节点零待决）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5–R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**
+> **来源**：操作者 2026-11-22 指令 `start on R5`。按 doc-first 纪律：**先只读调研 → 合并落地前契约 → 逐条裁定 → 再实现**；本节是**落地前契约，不是交付记录**。
+> **状态**：**✅ 第十一轮已裁定（Q1–Q7 → D84–D90；架构拆分四问 → D91–D94）、零代码、零迁移、§1／§6 零修订、本条不单独提交**。裁定记录见 §19.6，架构拆分归档见 §20，交付记录实现后另起 §21。
+> **依赖**：R4 已交付（§17／§18，催办路径与 inline Resolve 已就位）；R2 `guardian_alerts` state 层已就位；R6 可并行。**「R7 数据源」裁定轮（D79）仍未开工；按 D91，processor 机制与 VIX ticker 已拆到该轮、须先显式修订 §6，R5 不得越过它去建 VIX 生产者。**
+
+### 19.1 已裁定的输入（不是新决策）
+
+| 已裁定项 | 对 R5 的约束 |
+|---|---|
+| **D66**（§7 第七轮／§10） | 不设持仓级 `stop_line`；**价格型触发线唯一归 R5**；R1/R2 不写它。D66 同时写「不新增 Settings 字段、不加迁移」—— 该句限定于 **R1 的无来源假旋钮**，是否覆盖 R5 自身配置需 Q2 裁定（不改 D66 原文） |
+| **D61 / D62 / D83**（§5／§17） | 只有 `open` 红／黑会 5 分钟催办；告警唯一性在 **R2 state 层**（`guardian_alerts_live` 部分唯一索引 ＋ `sync()` reconcile），不建进程内存去重表；重复 live 行须有自检监测 |
+| **D71 / D70**（§13） | 单次 12:30 ET Run C 不进 5 分钟 nag；`/guard` 保持纯 ack 面、不新开页 |
+| **D68 / D73 / D79**（§13／§16） | 无生产者 ⇒ 降級 `unknown` ＋ 就地原因，**不臆造**；「新增行情源」排到独立「R7 数据源」裁定轮、本批次 §6 零修订 |
+| **D82**（§17.6） | 5 分钟节奏由**专用 daemon 固定 `Event.wait(300)`** 承载，不动 `cycle()`、不受 `cycle_minutes` 影响 |
+| **§14.8**（R3 冻结） | 不改 5 分钟 `cycle()` / `_cycle_sleep()` / `_bootstrap_cycle()` 语义 |
+| **§1／§6** | no drafts / no orders / no tactic changes；**No new market data sources**；5-min nag 是最大侵入、无第二通道 |
+| **§11.4／§17.5** | `053` 的 `source` 缺省 `'grade'`，**`'trigger'` 已预留给 R5**；R4 用 `'deadman'`，三者仅登记、不加枚举约束 |
+| **§13.7** | R5 = 操作者设的**静态阈值线**（`source='trigger'`）；R7 = 时间窗内相对状态。语义不同、不合并、不复用同一行 |
+| **§4／00 册 §6 R5 验收** | `Set a line in Settings; cross it in paper; alert fires within one poll interval`（原文保留）；**D84／D87／D94 口径校正已回填**：`VIX > 38` 为已知留白、「一个轮询间隔」＝ 300s、价格取 `last_tradeable_price()` |
+
+### 19.2 只读接缝实测（2026-11-22，精确行号；本轮零代码改动）
+
+| # | 位置 | 实测事实 | R5 相关性 |
+|---|---|---|---|
+| 1 | `001_settings_versions.sql:1`／`005_account_books.sql:14` | `payload jsonb NOT NULL` ＋ `settings_versions_one_active_per_account` 部分唯一索引 | 配置物理可存 jsonb，零迁移 |
+| 2 | `packages/settings/.../model.py:299` | `SettingsPayload(BaseModel)` **封闭模型**，`cycle_minutes: int = 5`（`:319`） | 多余 JSON 键不被声明 |
+| 3 | `.../repository.py:44`／`:91`／`:127`／`:227` | `KNOBS` 仅 5 个标量键；`set_knob()` 拒未知 key；`_payload_of()` 用 `model_fields` 裁剪；`load_active()` 用 `**payload.model_dump()` 重建 | **额外键在下次 load→save 被丢弃**；旋钮 API 装不下变长列表 |
+| 4 | `packages/marketdata/.../pricing.py:65` | `last_tradeable_price(conn, symbol)` → 先 `last_intraday_price`，否则 `last_daily_close` | 价格单一真源，读既有 `market_bars`，**不新增数据源** |
+| 5 | `.../pricing.py:254` | `upsert_delayed(conn, symbol, price, hour)` 写 `market_bars('ib-delayed')` | paper 穿越验收的可控造价入口 |
+| 6 | `apps/orchestrator/.../pulse.py:259`／`:471` | 独立 `_refresh_loop` daemon；`_store_prints()` 按小时 `upsert_delayed()` | 价格生产者已存在，R5 只读 |
+| 7 | `broker.py:1054`／`:1036-1051`／`:1094-1104`；`pulse.py:318/354/430`；`gate.py:13-35` | `quote_fields()` 只建 STK/CASH；`stock_contract()`／`_quote_contract()` 只建 `ib_insync.Stock`／`Forex`；`reqMktData(contract, "", False, False)` generic tick 为空 | **无 IND／指数合约路径 ⇒ VIX 无生产者**。⚠️ **第十一轮实测校正**：`gate.py:31` 的 `{STK, OPT}` 是 `live_block_reason()`（已批准草案 → IB 委托）的守卫，**不拦 `reqMktData` 订阅**；第九轮／本节原文把它列为 IND 阻塞属过度断言，此处按实测更正、`logs/` 历史条目不改写 |
+| 8 | 14 册 `:420`（§13.3）／`:631`（§16.2） | `VIX` 全库 `.py`/`.sql` 零命中，仅出现在计划文档 | 验收例子 `VIX > 38` 与实测冲突（§19.3①） |
+| 9 | `053_guardian_alerts.sql:10`／`:20` | `source text NOT NULL DEFAULT 'grade'`，**无 CHECK／枚举**；部分唯一索引 `(account_id, symbol, breach) WHERE state IN ('open','skipped')` | `source='trigger'` 可直接写；唯一性天然复用 |
+| 10 | `guardian_view.py:338`／`:367` | `load_alerts()` **不过滤 `source`**；`apply_plan()` INSERT 硬编码 `'grade'` | R5 须有自己的写入路径，不能借 `apply_plan()` |
+| 11 | `guardian_view.py:158`（`reconcile()`） | 任何不在 `desired(report)` 的 `(symbol, breach)` ⇒ `auto_clear` | **跨迭代冲突**：trigger 行会被 R2 清掉（§19.3③） |
+| 12 | `guardian_view.py:490`／`pages.py:1144` | `sync()` 由 `_guard_page()` 调用；`sync()` 内 `reconcile → apply_plan → commit` | 只要有人打开 `/guard`，trigger 行就会被判「breach gone」 |
+| 13 | `guardian_nag.py:250`／`:97` | `_DUE_SQL` 与 `due_alerts()` **都不看 `source`**，`WHERE state='open' AND tier IN ('danger','blowup')` | 红／黑 trigger 行**自动被 5 分钟催办**，零改动发送端 |
+| 14 | `guardian_nag.py:331`／`:432`／`loop.py:137` | `nag_tick()` 在固定 300s daemon；`_STOP.wait(NAG_INTERVAL)`；`start_guardian_nag()` 已在 `loop.py` 接线 | 求值节奏的天然载体（Q4） |
+| 15 | `apps/bots/.../telegram.py:66`／`:90`／`:73` | `guardian_markup()` 每条一个 inline Resolve；`notify_guardian()`；`notify_guardian_once()` | ack 路径自动复用 `guardres → gv.resolve()` |
+| 16 | `pages.py:3056`／`:3563`／`:214` | `_settings()` 表单；`_post_settings()` 固定 action 白名单；`submit()` 派发 | 配置 UI 落点（Q7） |
+| 17 | `pages.py:923`／`:3300`／`:3392` | `_universe()` Symbol pool 增删表 ＋ `_post_universe()` ＋ `save_settings()` 审计 | 最接近的「增删列表」先例 |
+| 18 | `loop.py:148`／`:52`；`packages/settings/.../model.py:319` | `cycle()` 只跑 `run_paper_cycle()`；`_cycle_sleep()` 取 `cycle_minutes`（可改 1–60） | §14.8 冻结，R5 不改它 |
+| 19 | `migrations/`；`pyproject.toml:12`；14 册 `:543`／00 册 `:455` | 最高 `054`；`055` 物理缺失、`force-include` 逐文件登记；**`055` 冻结预留给 R7 `regime_labels`** | 零迁移目标；若需新表须顺延 `056` |
+| 20 | `guardian_view.py:14`／`guardian_nag.py:64` | 模块 docstring 与 source 注释**已预告** `source='trigger'` 归 R5 | 契约与代码意图一致，无需新约定 |
+
+### 19.3 四个硬问题（裁定前的原始记录，不预设结论）
+
+**① `VIX > 38` 无生产者的悖论。** §4 R5 验收栏与 00 册 §6 明写 `VIX > 38` 为示例，但 §13.3／§16.2 实测全库 `.py`/`.sql` 零 VIX 命中，`quote_fields()` 无 IND 路径、`gate.py:31` 硬限 `{STK, OPT}`、`reqMktData` generic tick 为空；D79 已把「新增行情源」排到独立「R7 数据源」裁定轮并要求**先显式修订 §6**。R5 若现在建 VIX feed，等于越过 D79；若不建，则验收例子有一条永远不触发。与 R4 的 dead-man 悖论同型。
+
+> **✅ 第十一轮裁定（D84／D91）**：取 (a) —— R5 v1 只接 `market_bars` 里既有真源标的（STK），`VIX > 38` 记为 R5 已知留白并在 §4 验收栏加口径校正；processor 机制与 VIX ticker 按 **D91** 拆到独立「R7 数据源」轮，该轮须先显式修订 §6。本批次不建 VIX feed、§6 零修订。
+
+**② 「Set a line in Settings」与 D66 的边界冲突。** 验收原文要求操作者在 Settings 设线，但 §6 D66 行写「不新增 Settings 字段、不加迁移」，且 `SettingsPayload` 是封闭 Pydantic 模型 —— `settings_versions.payload` 虽是 jsonb，未声明的键在 `load_active()`→`save_settings()` 往返中被 `_payload_of()` 按 `model_fields` 裁掉；`set_knob()` 的 `KNOBS` 只认 5 个标量旋钮。→ 要么给模型加一个声明字段（纯代码、零迁移），要么新建表（占用 `056`），要么走非 DB 配置。
+
+**③ R2 `reconcile()` 会清掉 R5 行（真实跨迭代状态机冲突）。** `load_alerts()` 不过滤 `source`，`reconcile()` 把任何不在 `desired(report)` 的 `(symbol, breach)` 判为 `auto_clear`；而 `desired()` 只产 R1 的旗标词表。R5 写入 `source='trigger'` 的 open 行后，**只要有人打开 `/guard`**（`_guard_page` → `sync()`），该行就会被判「breach gone」并 `auto_cleared`。这不是推测：`guardian_view.py:178-184` 逐行可验。D83 要求唯一性归 state 层，但没解决「谁有权清这一行」。
+
+**④ 求值节奏与「穿越」语义。** 库里有两条 300s 节奏：`cycle()`（受 `cycle_minutes` 漂移，§14.8 冻结）与 R4 专用 nag daemon（D82 固定 300s）。而 `market_bars` 只有整点 `ib-delayed` 快照 ＋ 日线回落，**无 tick 序列、无日内高**，因此无法做真正的「穿越边沿」检测，只能判「当前快照是否越线」。验收的「一个轮询间隔内」需要一个明确载体与一个诚实的状态语义。
+
+### 19.4 合规形态（✅ 第十一轮已裁定 D84–D90）
+
+**已裁定组合（六条取推荐、一条手写偏离但实现口径回到推荐 ⇒ 零迁移、`055` 不动、§1／§6 零修订）：****Q1(a) 只接既有真源标的** ＋ **Q2(a) 给 `SettingsPayload` 加一个声明字段 `trigger_lines`** ＋ **Q3(a) `reconcile()` 只对 `source='grade'` auto_clear** ＋ **Q4(a) 求值挂进 `nag_tick()` 同一 300s daemon** ＋ **Q5(a) 状态判定 ＋ R5 自管 auto_clear** ＋ **Q6(a) `tier='danger'`** ＋ **Q7(a) `/settings` 增删表**。Q5／D88 为手写偏离：偏离意图（processor／VIX ticker）按 **D91** 拆到独立裁定轮登记，R5 v1 的实现口径仍回到 (a)；本节与 §19.5 按裁定回填，**不是实现里顺手改掉**（§13.7 同纪律）。
+
+### 19.5 由已裁定项推导的实现口径（✅ 已裁定 D84–D90）
+
+- **`source` 值登记**：`'grade'`（R2）／`'trigger'`（R5）／`'deadman'`（R4）三者互不冲突，**仅登记、不加 CHECK／枚举**（§17.5 先例）。
+- **唯一性（D83）**：`breach` 用稳定 key（如 `trigger:<symbol>:<op>:<level>`），复用 `guardian_alerts_live` 部分唯一索引 ＋ `WHERE NOT EXISTS`（跨终态行）＋ `ON CONFLICT DO NOTHING`；**不建内存去重表、不建新 state 表**。R5 自己写 INSERT，不借 `apply_plan()`（它硬编码 `'grade'`）。
+- **重复监测（D83）**：复用 R4 已落地的 `duplicate_live_keys()` / `duplicate_report()` / `nag_tick()` 的 signature 机制，零新增监测代码。
+- **催办与 ack（D61/D81/D82）**：`tier='danger'` 的 trigger 行由 `_DUE_SQL` 自动拾取 → `notify_guardian()` 带自己的 inline Resolve → `guardres` → `gv.resolve()`。**发送端零改动**。
+- **节奏（Q4）**：求值放进 `nag_tick()` 同一固定 300s tick，不改 `cycle()`、不新增线程、不动 `NAG_INTERVAL`；「一个轮询间隔」= 300s。
+- **只读边界**：只读 `market_bars`（经 `last_tradeable_price()`）与 `settings_versions`；只写 `guardian_alerts`（`source='trigger'`）与 `settings_versions`（配置）。不改 `advisor_signals` / `manage_book` / `drafts.decide()` / `advisor.py` / `wheel.py` / `guardian.py` / `pulse.py` / `quote_fields()` / `gate.py` / `reqMktData`。
+- **§1／§6 边界**：零新数据源、零第二通道、零订单／草案／门控、零新迁移。**Q2 已裁 (a)（D85）**，须在 §6 D66 行后追加「口径校正」注记：D66 的「不新增 Settings 字段」限定于 R1 的无来源假旋钮，R5 有真实价格生产者、其配置字段属 R5 自身范围 —— **不改 D66 原文**（沿用 §4 R4 口径校正惯例）。
+- **`055` 号段**：零迁移路径下 `055` 仍归 R7 `regime_labels`、`056` 也不建；`packages/store/pyproject.toml` 的 `force-include` 不动。
+- **§4 R5 验收栏**：VIX 例子（D84）、「一个轮询间隔」＝ 300s（D87）与价格源 `last_tradeable_price()`（D94）的口径校正已以注记追加，**不改写历史原文**。
+
+### 19.6 裁定记录 Q1–Q7（✅ 第十一轮已裁定 D84–D90，逐条带案例问过一遍后回填）
+
+沿用「每個問題問我一遍」惯例，每条带具体案例。下表是**裁定前**的问项与推荐（原文保留、不改写），**裁定结果见紧随其后的结果表**。
+
+| 问 | 问题（带案例） | 选项 | 推荐 |
+|---|---|---|---|
+| **Q1** | §4 R5 验收写 `VIX > 38`，但实测 `.py`/`.sql` 零 VIX 命中、`broker.py:1054` 无 IND 合约、`gate.py:31` 硬限 `{STK, OPT}`；D79 已把「新增行情源」排到独立「R7 数据源」裁定轮、本批次 §6 零修订。例：操作者设 `VIX > 38`，paper 里 VIX 永远读不到，这条线该怎么算？ | (a) R5 v1 只支持**既有真源标的**（`market_bars` 里的 STK），`VIX > 38` 记为 R5 已知留白、等「R7 数据源」轮显式修订 §6 后再补；§4 验收栏加「口径校正」注记、不改原文 (b) 本轮就显式修订 §6，把 VIX feed／IBKR IND 合约一起建进 R5 (c) 用代理量（如 SPY 日内跌幅）近似 VIX，不接真源 (d) VIX 线永为 `unknown`、不求值也不告警 | **(a)** |
+| **Q2** | 验收要「Set a line in Settings」，但 `SettingsPayload`（`model.py:299`）是封闭模型，`_payload_of()`（`:127`）按 `model_fields` 裁剪、`set_knob()`（`:91`）的 `KNOBS` 只认 5 个标量键；§6 D66 行写「不新增 Settings 字段、不加迁移」。例：把 `NVDA < 118` 塞进 `payload` 的未声明键，下一次 `/settings` 保存后就被裁掉，线凭空消失。配置落点在哪？ | (a) 给 `SettingsPayload` 加**一个声明字段** `trigger_lines: list[TriggerLine]`（纯代码、零迁移），复用 `save_settings()` ＋ `settings_audits` 版本审计；`055` 不动（§6 加口径校正注记） (b) 新建 `trigger_lines` 表 ＋ 迁移 `056`（`055` 仍归 R7） (c) 塞进 `050 cycle_progress.payload`（复用现有 jsonb） (d) 不进库，走环境变量／本地配置文件 | **(a)** |
+| **Q3** | R5 写一条 `source='trigger'` 的 open 行；此时有人打开 `/guard` → `_guard_page()`（`pages.py:1144`）→ `gv.sync()` → `reconcile()`（`guardian_view.py:178-184`）把不在 `desired(report)` 的 `(symbol, breach)` 判 `auto_clear`。结果：告警还没被看到就被自动清掉、5 分钟催办也停了。谁有权清这一行？ | (a) `AlertRow` 加 `source` 字段，`reconcile()` **只对 `source='grade'` 做 auto_clear**；`load_alerts()` 仍返回全部行供 `/guard` 面板显示，R2 对 grade 行行为零变化 (b) `load_alerts()` 直接加 `WHERE source='grade'`，trigger 行不进 R2 视图（面板也看不到） (c) trigger 行放独立表、不进 `guardian_alerts` (d) trigger 行复用 R1 旗标词表，让 `desired()` 认得它 | **(a)** |
+| **Q4** | §14.8 冻结「不改 5 分钟 cycle 语义」，`cycle()` 间隔来自 `cycle_minutes`（可改成 15 分钟）；D82 已定专用 daemon 固定 300s。例：操作者把 `cycle_minutes` 改成 15，触发线会不会变成 15 分钟才判一次？求值挂哪？ | (a) 求值放进 R4 的 `nag_tick()`（同一固定 300s daemon、同一连接），不改 `cycle()`、不新增线程、不动 `NAG_INTERVAL` (b) 挂进 `cycle()` 的 `run_paper_cycle()` 之后 (c) 另起第三条 daemon 线程固定 300s (d) 只在 `/guard` 页面加载时求值 | **(a)** |
+| **Q5** | `market_bars` 只有整点 `ib-delayed` 快照 ＋ 日线回落，无 tick 序列、无日内高 ⇒ 做不了真·「穿越边沿」检测。例：`NVDA < 118`，10:00 快照 117.5、11:00 快照 119；期间可能穿过多次但库里看不到。D83 又要求「未解決 alert 不重加、萬一重複去重也是必要監測」。一条线的生命周期怎么定？ | (a) **状态判定**：当前快照越线即写一条 open（稳定 `breach` key ＋ `WHERE NOT EXISTS`，未 Resolve 不重加）；价格回到阈值内时由 **R5 自己** auto_clear（只管 `source='trigger'`），`reason` 记穿越价与时刻 (b) 真·边沿检测，需新增 tick 序列／新表 (c) 一次性触发，永不自动清、必须人工 Resolve (d) 每次越线都新开一行 | **(a)** |
+| **Q6** | 价格线不是 R1 的硬 breach，但 `_DUE_SQL`（`guardian_nag.py:250`）不过滤 `source`，只有 `tier IN ('danger','blowup')` 会被 5 分钟催办并带 inline Resolve。例：操作者设 `MRVL > 145`，穿越后希望手机收到可一键 Resolve 的催办。给什么档位？ | (a) `tier='danger'`（红），复用 R4 催办与 `guardres` 一键 Resolve，发送端零改动 (b) `tier='balanced'`，只上 `/guard` 面板、不催办 (c) 每条线可配 tier（新增旋钮） (d) `tier='blowup'`，最高优先级 | **(a)** |
+| **Q7** | `/settings` 的 `_post_settings()`（`pages.py:3563`）action 白名单是 link/unlink/clear-*/generate-api-key 等固定动作 ＋ 6 个标量旋钮；全库没有增删触发线的表单（最接近的是 `_universe()` 的 Symbol pool 增删表，`:923`／`:3300`）。D70 定 `/guard` 保持纯 ack 面、不新开页。例：操作者要加 `NVDA < 118`、删 `MRVL > 145`，在哪操作？ | (a) `/settings` 加一张 **Trigger lines 增删表** ＋ `add` / `remove` 两个 action，走 `save_settings()` 审计；`/guard` 不动、不新开页 (b) `/guard` 页加配置区 (c) 只给 Telegram `/trigger add ...` 命令，不做 Web UI (d) 新开 `/triggers` 页 | **(a)** |
+
+**裁定结果**：✅ **已裁定（第十一轮，2026-11-22）** —— 分两轮逐条问过（Q1–Q4／Q5–Q7），每条带具体案例；**七条中六条取推荐、一条手写偏离（Q5／D88）、零跳过**。Q5 手写答复偏离推荐后，先只读核实再补确认问项；确认问项的两份手写答复引入新架构意图，故另补四问并编号 **D91–D94**（见 §20）。D94 又手写「I am not sure」，按第十轮 Q4／D83 先例再补一次 R5 价格源确认问项（取推荐，不另编号、并入 D94）。**不替操作者猜**。
+
+| 问 | 编号 | 性质 | 裁定 | 手写答复原文 |
+|---|---|---|---|---|
+| Q1 | **D84** | ✅ 取推荐 (a) | R5 v1 只接既有真源标的；`VIX > 38` 记已知留白、§4 口径校正、等「R7 数据源」轮 | — |
+| Q2 | **D85** | ✅ 取推荐 (a) | `SettingsPayload` 加声明字段 `trigger_lines: list[TriggerLine]`，纯代码零迁移、复用 `settings_audits`；§6 D66 行后加口径校正注记、**不改原文** | — |
+| Q3 | **D86** | ✅ 取推荐 (a) | `AlertRow` 加 `source`；`reconcile()` 只对 `source='grade'` auto_clear；`load_alerts()` 仍返回全部行 | — |
+| Q4 | **D87** | ✅ 取推荐 (a) | 求值放进 `nag_tick()` 同一固定 300s daemon；不改 `cycle()`、不新增线程、不动 `NAG_INTERVAL` | — |
+| Q5 | **D88** | ⚠️ **手写偏离（推荐 a）** | **意图登记 ＋ 拆分**：processor／VIX ticker 归独立「R7 数据源」轮（D91–D94 预裁定输入）；**R5 v1 实现仍取 (a)** 状态判定 ＋ R5 自管 auto_clear，价格取 `last_tradeable_price()`（D94 补充确认） | 「athena 现在已经有ibkr 的 realtime tick 了，不会要用 ib delayed」 |
+| Q6 | **D89** | ✅ 取推荐 (a) | `tier='danger'`，自动复用 R4 5 分钟催办与 `guardres` inline Resolve，发送端零改动 | — |
+| Q7 | **D90** | ✅ 取推荐 (a) | `/settings` 加 Trigger lines 增删表 ＋ `add`／`remove` action，走 `save_settings()` 审计；`/guard` 不动、不新开页 | — |
+
+> **Q5 确认问项的两份手写原文**：「应该做一些 processor 机制，会收到ticker event，该怎么处理怎么处理，比如计算 day bar，或其他需要。以后但凡需要数据的都用类似的方式去添加新的processor 就好了。」／「我希望去拿到 vix tick 数据， 就像是一个真的ticker 一样，加到universe 里，用 processor 概念去计算其他维度的 vix 数据」。→ 四问拆为 **D91–D94**，见 §20.2。
+
+### 19.7 边界同步（✅ 第十一轮已回填）
+
+- 裁定**未改变 D58–D83 任何结论**；不改 R1–R4 交付状态；不新增数据源／迁移／Settings 旋钮语义之外的字段／通道／订单／草案／门控。
+- **D 计数**：裁定后为 **D1–D94 / 95 个节点零待决**（本轮十一条：D84–D90 为 Q1–Q7、D91–D94 为架构拆分四问）；14 册 §5／§7／页眉页脚与 00 册 §5／§6／§11／§12 已同步。
+- **`055` 仍为 R7 `regime_labels` 预留号段**；零迁移路径下 R5 不占用 `055`、也不新建 `056`。`packages/store/pyproject.toml` 的 `force-include` 不动。
+- **§4 R5 验收栏**的 VIX 例子按 Q1 裁定结果追加「口径校正」注记，**不改写历史原文**（§13.7／§4 R4 先例）。
+- **「R7 数据源」裁定轮（D79）仍未开工**；R5 不得建 VIX feed、不得改 `quote_fields()` / `gate.py` / `reqMktData`。**D91 明确把 processor 机制与 VIX ticker 拆到该轮，D92–D94 为其预裁定输入**；该轮开工时须先显式修订 §6，本批次 §6 保持原文、零修订。
+
+### 19.8 明确不做（R5 边界）
+
+不实现 R6 常开机器／launchd watchdog／进程外实时心跳，不实现 R7 `regime_labels` 矩阵／`close_bias`／`evidence`／标签卡，不实现 VIX／10Y／真 IV Rank 的生产者（D79），不建「第二套 ack」，不改 R1 分级词表、不改 R3 ET 锚定调度、不改 R4 的固定 300s 节奏与 `guardres` 路由；不改 `advisor_signals` / `manage_book` / `drafts.decide()` / `advisor.py` / `wheel.py` / `guardian.py` / `pulse.py` / `quote_fields()` / `gate.py`；不新增市场数据源、不新增告警通道、不改 5 分钟 `cycle()` 语义、不产生订单／草案／门控。
+
+> **第十一轮补充（D91–D94）**：processor 机制／VIX「像真 ticker 一样进 universe」／`data_symbols` 数据专用列表／tick 产物落点**均不属 R5**，登记为「R7 数据源」轮的预裁定输入（§20）；R5 不改 `pulse.py`、不订阅 IND 合约、不切 `reqMarketDataType(1)`、不建 VIX feed。「尽量基于实时行情构建」是该轮的常设要求，**不是** R5 改动 `pricing.py` 的授权。
+
+---
+
+## 20. 第十一轮架构拆分：「R7 数据源」轮预裁定输入（2026-11-22，✅ D91–D94，零代码／零迁移／§6 零修订）
+
+> **性质**：本节是 **D91 的拆分归档 ＋ D92–D94 的预裁定输入**，**不是** R5 实现指令，也**不是**「R7 数据源」轮的开工。D79 裁定该轮须**先显式修订 §6**；本批次 §1／§6 两条边界保持原文、零修订、零代码、零迁移。
+
+### 20.1 为什么拆
+
+Q5／D88 的手写答复与两份确认手写答复，把两个性质不同的东西绑在一起：
+
+| 意图 | 性质 | 是否新数据源 | 落点 |
+|---|---|---|---|
+| **processor 机制**：收到 `pendingTickersEvent` 后按需要计算 day bar 或其他维度，以后凡需数据就加新 processor | 既有事件流的**进程内重构**；`pulse.py` 目前只有硬编码 `_take_tickers()`，无 registry／dispatcher | ❌ 不新增 vendor | 「R7 数据源」轮（D91） |
+| **VIX 像真 ticker 一样进 universe**，用 processor 算其他 VIX 维度 | 需要 `secType=IND`／CBOE 合约路径、IBKR entitlement、指数专属交易时段 | ✅ 真新数据源 | 「R7 数据源」轮（D91） |
+
+§19.7／§19.8／D79 明写该轮尚未开工、§6「No new market data sources」冻结 ⇒ **D91 取 (a) 拆分**：R5 Q1–Q7 按已答口径落地，processor ＋ VIX 归未来轮。
+
+### 20.2 四问裁定记录（D91–D94）
+
+| 问 | 编号 | 性质 | 裁定 | 依据（只读实测） |
+|---|---|---|---|---|
+| 1 拆分排期 | **D91** | ✅ 取推荐 (a) | R5 按已答 Q1–Q7 落地；processor＋VIX 进独立「R7 数据源」轮且须显式修订 §6；本批次 §6 零修订 | §19.7／§19.8／D79 |
+| 2 VIX 落点 | **D92** | ✅ 取推荐 (a) | 独立 `data_symbols` 数据专用声明字段，**永不进** `cycle_book()`／drafts；pulse 订阅它、processor 消费它 | 无 universe 表；`model.py:291/312/347`；`broker.py:1036-1051` |
+| 3 processor 产物 | **D93** | ✅ 取推荐 (a) | hook 挂在**原始 ticker event、`note_print()` 去重之前**；完成日线走 `store_ib_daily()`、日内快照走 `upsert_delayed()`；复用 `market_bars` 既有 source，零迁移 | `pulse.py:437-478`；`pricing.py:254/269`；`002_paper.sql:1-12` `UNIQUE (symbol, ts, source)` |
+| 4 「ib delayed」含义 | **D94** | ⚠️ 手写「I am not sure」⇒ 补一次 R5 价格源确认（取推荐 a，不另编号） | R5 v1 **原样使用** `last_tradeable_price()`；「尽量基于实时行情构建」登记为本轮常设要求 | 见 §20.3 三处实测校正 |
+
+> D94 手写答复原文：「I am not sure, because ib-delayed is only used when there is no real ticks as a back up. But you should be building based on live market data as much as possible」。补充确认问项：「`NVDA < 118`，10:00 整点 `ib-delayed` 行 117.50、今天还没有 `ib-daily` bar，R5 v1 该读什么？」⇒ ✅ 取推荐 (a)「Use `last_tradeable_price()` 原样」。沿用第十轮 Q4／D83：手写偏离只补一次确认问项、不另编号、并入本体决策。
+
+### 20.3 第十一轮实测校正（三处，历史条目不改写）
+
+1. **`ib-delayed` 不是「没有真 tick 时的备份」，而是主源。** `last_tradeable_price()`（`pricing.py:65-70`）先取 `_latest_intraday()` ＝ 最新 `ib-delayed` 整点行（`:295-307`），取不到才回落 `last_daily_close()` ＝ `ib-daily`；`quote_pair()`（`:102-124`）同序。`pulse.py:471-477` 把 `pendingTickersEvent` 的 tick 折成**每小时一行** `ib-delayed`（`upsert_delayed()`，`pricing.py:254-266`），**tick 从不持久化**。⇒ 现状不存在「真 tick 优先、delayed 兜底」的回落，只有 delayed 优先、daily 兜底。操作者手写答复中的回落方向与代码相反，按实测记录、不替操作者改结论。
+2. **`gate.py:31` 的 `{STK, OPT}` 被过度断言。** `gate.py` 是 `live_block_reason()`（已批准草案 → IB 委托的守卫，`:13-35`），**不拦 `reqMktData` 订阅**。真正没有 IND／指数合约路径的是 `stock_contract()`（`broker.py:1036-1051`）／`_qualify_stock()`（`:147-155`）／`_quote_contract()`（`:1094-1104`）只建 `ib_insync.Stock`／`Forex`。第九轮 D79 与 §19.2 第 7 行的表述按此更正（§19.2 本轮已改；`logs/` 历史条目 append-only 不改写）。
+3. **整点 `ib-delayed` 行不会污染 rails／RV20／year-band。** `daily_bars()` 虽 `source IN ('ib-daily','ib-delayed')`（`pricing.py:39`），但 `_merge()`（`:318-320`）丢弃任何**没有 `ib-daily` 行**的日子；`year_view()`（`:85`）的高低也只来自 `daily_bars()`。真正的耦合只有 `last_tradeable_price()`／`quote_pair()`。助手在确认问项前的口述把污染面说大了，此处按实测更正。
+
+### 20.4 未来轮开工条件（不是本批次授权）
+
+- 须先**显式修订 §6「No new market data sources」**（D79／§13.7 纪律），再定 CBOE VIX 期限结构／10Y／真 IV Rank 的 vendor feed 与 IBKR entitlement。
+- 须定 `reqMarketDataType(1)` live 与 entitlement；`README.md:143-147` 明写缺订阅时 IB 回 error 162、行冻结在上一笔存储价。
+- 须定 IND 合约构造、指数专属交易时段（`cash_open()` 现按 US cash 窗口 `slots.py:31-52` 过滤，会丢掉 CBOE 延长时段 tick）、`quote_fields()` 的 index kind、`gate.py` 的委托边界。
+- `055` 仍冻结给 R7 `regime_labels`；若需专用表从 `056` 顺延，`pyproject.toml` 的 `force-include` 须逐文件登记。
+- 「尽量基于实时行情构建」作为常设要求写入该轮契约；**不是** R5 改 `pricing.py`／`pulse.py` 的授权。
+
+---
+
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 37 条 / D1–D94 95 个节点零待决）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 契约 ✅ 已裁定（§19，D84–D90；架构拆分 D91–D94 见 §20）、R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、零代码、零迁移、§1／§6 零修订、`055` 不动**
