@@ -1,4 +1,10 @@
-"""Long-poll Telegram. Only allowlisted user ids can Approve or Reject."""
+"""Long-poll Telegram. Only allowlisted user ids can Approve or Reject.
+
+R4 (booklet 14, section 17 / D80-D83): ``athena_bots`` owns the send path and
+a callback-namespace registry. It must NEVER import the orchestrator package —
+the orchestrator depends on bots, so a reverse import would be a cycle (D81).
+The orchestrator injects its ``guardres`` handler at loop start.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +14,7 @@ import os
 import secrets
 import threading
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -34,6 +41,56 @@ OFFSET_PATH = Path("var/telegram.offset")
 polling = False
 _thread: threading.Thread | None = None
 _link_codes: dict[str, datetime] = {}
+
+# D81: callback namespaces injected by the orchestrator. Key is the prefix
+# before the first ":" in callback_data; value receives (database_url, actor,
+# payload) and returns a short human-readable result for answerCallbackQuery.
+# Bots never imports the orchestrator, so no cycle is created.
+CallbackHandler = Callable[[str, str, str], str]
+_CALLBACKS: dict[str, CallbackHandler] = {}
+_RESERVED_PREFIXES = frozenset({"approve", "reject"})
+
+
+def register_callback(prefix: str, handler: CallbackHandler) -> None:
+    """Register a non-draft callback namespace (D81).
+
+    ``loop.py`` injects ``guardres`` -> ``guardian_view.resolve`` at startup.
+    Re-registering the same prefix replaces the handler (idempotent restart).
+    """
+    clean = (prefix or "").strip()
+    if not clean or ":" in clean or clean in _RESERVED_PREFIXES or any(c.isspace() for c in clean):
+        raise ValueError("callback prefix must be a single non-reserved token")
+    _CALLBACKS[clean] = handler
+
+
+def guardian_markup(alert_id: int) -> dict[str, list]:
+    """One inline Resolve button per alert (D62 / D83): never a blanket ack."""
+    return {"inline_keyboard": [[
+        {"text": "Resolve", "callback_data": f"guardres:{alert_id}"},
+    ]]}
+
+
+def notify_guardian_once(text: str, markup: dict | None = None) -> None:
+    """D71 single-push interface, deliberately separate from the 5-min nag loop.
+
+    R7's Run C calls this; it must NOT be fed into the nag cadence.
+    """
+    token, allow = _live_send()
+    if not token:
+        log.info("telegram token missing")
+        return
+    client = TelegramClient(token)
+    for chat_id in allow:
+        payload: dict[str, object] = {"chat_id": chat_id, "text": text}
+        if markup:
+            payload["reply_markup"] = markup
+        client.call("sendMessage", payload)
+
+
+def notify_guardian(alert_id: int, text: str) -> None:
+    """Send one nag message with its own inline Resolve (D83: per-alert)."""
+    notify_guardian_once(text, guardian_markup(alert_id))
+    log.info("telegram guardian nag alert=%s", alert_id)
 
 
 class TelegramClient:
@@ -492,11 +549,21 @@ def _handle_callback(client: TelegramClient, database_url: str, allowlist: set[s
     if actor not in allowlist:
         client.call("answerCallbackQuery", {"callback_query_id": query_id, "text": "Not allowlisted", "show_alert": True})
         return
-    decision, _, draft_id = data.partition(":")
-    if decision not in {"approve", "reject"} or not draft_id:
+    decision, _, payload = data.partition(":")
+    handler = _CALLBACKS.get(decision)
+    if handler is not None and payload:
+        # D81: injected namespace. Allowlist was checked above; the handler owns
+        # its own SQL and never reaches decide()/drafts.
+        try:
+            result = handler(database_url, actor, payload)
+        except Exception as exc:
+            log.exception("guardian callback failed prefix=%s", decision)
+            result = f"Could not resolve: {exc.__class__.__name__}"
+    elif decision in {"approve", "reject"} and payload:
+        result = _apply(database_url, allowlist, payload, decision, actor)
+    else:
         client.call("answerCallbackQuery", {"callback_query_id": query_id, "text": "Unknown button"})
         return
-    result = _apply(database_url, allowlist, draft_id, decision, actor)
     client.call("answerCallbackQuery", {"callback_query_id": query_id, "text": result[:180]})
     chat = (message.get("chat") or {}).get("id")
     if chat is not None and message.get("message_id") is not None:

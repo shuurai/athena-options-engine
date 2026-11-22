@@ -33,8 +33,10 @@ from athena_orchestrator.guardian_schedule import (
 
 __all__ = [
     "RunGrade",
+    "failed_grade",
     "report_payload",
     "write_run",
+    "write_failed_run",
     "load_runs",
     "render_run_history",
     "run_once",
@@ -65,6 +67,17 @@ FROM guardian_runs
 WHERE account_id = %s
 ORDER BY ran_at DESC, id DESC
 LIMIT %s
+"""
+
+# D80 / section 14.3 (frozen R4 seam): a failed run leaves a durable row.
+# Deliberately omits every grade column so the schema defaults apply — no
+# fabricated counts and no invented EL/NL. One row per (account, day, run).
+_WRITE_FAILED_SQL = """
+INSERT INTO guardian_runs
+    (account_id, trade_day, run, scheduled_at, ran_at,
+     portfolio_tier, account_tier, status, detail)
+VALUES (%s, %s, %s, %s, %s, 'unknown', 'unknown', 'failed', %s)
+ON CONFLICT (account_id, trade_day, run) DO NOTHING
 """
 
 
@@ -125,6 +138,31 @@ def write_run(conn, grade: RunGrade) -> None:
             p["el_nl_pct"], p["maint_nl_pct"],
             Jsonb(p["account_flags"]), Jsonb(p["positions"]),
             grade.status, grade.detail,
+        ),
+    )
+
+
+def failed_grade(account: str, slot: RunSlot, exc: BaseException, moment: datetime) -> RunGrade:
+    """D80: degraded row for a run that threw. Tiers 'unknown', numbers absent."""
+    return RunGrade(
+        account_id=account,
+        trade_day=slot.trade_day,
+        run=slot.run,
+        scheduled_at=slot.moment,
+        ran_at=moment,
+        payload={},
+        status="failed",
+        detail=exc.__class__.__name__,
+    )
+
+
+def write_failed_run(conn, grade: RunGrade) -> None:
+    """Write the durable failure marker. Caller owns a fresh connection."""
+    conn.execute(
+        _WRITE_FAILED_SQL,
+        (
+            grade.account_id, grade.trade_day, grade.run,
+            grade.scheduled_at, grade.ran_at, grade.detail,
         ),
     )
 
@@ -243,10 +281,24 @@ def _scheduler_loop(database_url: str) -> None:
                     "guardian run ok account=%s run=%s day=%s hkt=%s",
                     account, slot.run, slot.trade_day, hk_clock(slot.moment),
                 )
-            except Exception:
+            except Exception as exc:
                 log.exception(
                     "guardian run failed account=%s run=%s", account, slot.run,
                 )
+                # D80 / section 14.3: durable failure marker for R4's dead-man.
+                # Separate connection + new transaction: the failed run's
+                # connection may already be aborted. Never invent a grade.
+                try:
+                    with connect(database_url) as fresh:
+                        write_failed_run(fresh, failed_grade(
+                            account, slot, exc, datetime.now(timezone.utc),
+                        ))
+                        fresh.commit()
+                except Exception:
+                    log.exception(
+                        "guardian failed-run marker failed account=%s run=%s",
+                        account, slot.run,
+                    )
 
 
 def start_guardian_scheduler(database_url: str) -> None:

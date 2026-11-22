@@ -1,7 +1,7 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过）。Side track. Not on the signal critical path (steps 1–9).
-**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4–R6 待办；R7 已裁定（D67–D73，Planning 阶段结束，实现仍待 R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3); R7 contract + ratification: §13; **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.**
+**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。**
+**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5–R6 待办；R7 已裁定（D67–D73，Planning 阶段结束，实现仍待 R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4); R7 contract + ratification: §13; **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).**
 
 > **Origin (operator, 2026-11-21)**: during work/exam crunch weeks, execution function is consumed by work and the portfolio goes into autopilot — and autopilot only does one thing: nothing. Last week a black-swan-scale move took the book from fine to near-liquidation. The quantitative layer (per-position scoring) already works. What is missing is a layer that (a) compares every live position — including accidental ones — against the rule book, (b) tells the operator the one thing to do, at a fixed time, and (c) refuses to be ignored when it matters.
 
@@ -92,13 +92,15 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **R6** | Dedicated host | Always-on machine running orchestrator + exec-ib + IB Gateway under a watchdog (launchd/systemd auto-restart), with a heartbeat: if no heartbeat for 10 min during US hours, Telegram fires | R4 | Unplug test: kill the box, get the heartbeat alert; reboot, everything self-recovers without a shell |
 | **R7** | Midday regime label + close bias (**✅ 已裁定 D67–D73**) | **Run C** at 12:30 ET; joint matrix (stocks × 10Y yield × gold × VIX level × volume + news tags) → closed `label` vocabulary + qualitative `close_bias` (**not** a price forecast); append-only `regime_labels` with replayable `evidence`; fed into the existing `Indicators` / `agents.py` context as **read-only annotation, no gating**. 4.5 of 5 inputs have no producer today ⇒ missing input records `unknown` **with an inline reason**, never invented. Seven rulings D67–D73, see §13 | R3 + R4 (and separated from R5's static trigger lines) | Every fired rule leaves `evidence`; label reproducible from stored inputs; 5 worked cases calibrate the matrix |
 
+> **2026-11-22 第十轮口径校正（D80，不改本表原文）**：§4 R4 验收栏「kill the orchestrator, get the "guardian is down" message」在**单进程架构下不可达** —— 唯一的 Telegram 发送端是 `loop.py:134` 在 orchestrator **进程内**起的 daemon poll 线程，进程被 kill 则发送端一起消失（§17.3① 实测）。按 **D80 (a)**：R4 只做进程内可观测的 run 失败告警 ＋ 5 分钟心跳 ＋ **重启后补报**；「死亡期间实时告警」明确归 **R6 外部 watchdog**（本表 R6 行「Unplug test: kill the box, get the heartbeat alert」）。本表历史原文保留不改，R4 验收按 §18 交付记录执行。
+
 **Sequencing logic**: R1→R2→R3→R4 is the spine (each needs the previous). R5 needs R4's escalation path. R6 is infrastructure and can run in parallel with R3–R5 — but note that **R4 on an unreliable machine is a false sense of safety**, so R6 should not trail far behind. **R7 is numbered after R6 but depends on R3 (ET-anchored scheduler) + R4 (delivery), so it cannot jump the spine; it must also be separated semantically from R5's static trigger lines (§13.7).**
 
 ---
 
-## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮）
+## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 R4）
 
-**二十二条全部裁定：二十一条取推荐、一条明确偏离（Q2／D75）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5。
+**二十六条全部裁定：二十四条取推荐、二条明确偏离（Q2／D75、Q4／D83）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5；**D80–D83** 是 R4 实现契约的第十轮裁定（Q1–Q4 编号化，其中 Q4 手写答复偏离推荐、另补一次「state 唯一性落点」确认问项），见 §7 第十轮与 §17.6。
 
 | # | Decision | Options | 裁定 | 依据 |
 |---|---|---|---|---|
@@ -124,6 +126,10 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **D77** | 0–5 分与推送（§16 Q4） | (a) 展示用命中维度数 (b) ≥2 分推 Telegram (c) 不做计分 | **✅ (a) 展示用命中维度数** | 案例：12:30 ET 亮 2 个维度，`/guard` 已有一条硬违规 open —— 命中数只显示在 `/portfolio-analysis` 现有卡（D70），不新推送、不进 nag、`/guard` 保持纯 ack 面。否决 (b)：须改 D71 单次跑且造新催办路径；否决 (c)：丢掉「亮了几个」的一眼可读性 |
 | **D78** | 11/13 案例与验收（§16 Q5） | (a) 未核实工作案例 (b) 以「11/13 应亮 4–5 条」为验收 (c) shadow-only 暂缓 | **✅ (a) 未核实工作案例**；**明確否決 (b)** | n=1、后见之明挑选、无标注无反例，与 D72 否决的「80% 機構意圖」同类。仅记为第 6 个校准案例；验收仍是可重放 `evidence` ＋ 既有 5 案例，不声称准确率、不硬编码数字。否决 (c)：把验收无限期推迟 |
 | **D79** | Q2 偏离的排期与 §6 边界（§16 Q6，由 Q2 拆出） | (a) 另起「R7 数据源」裁定轮显式修订 §6 (b) 本批次改 §6、IBKR 优先 (c) 本批次改 §6、5 个源全接 | **✅ (a) 另起裁定轮** | §13.7 明写「新行情源须另开一轮裁定显式修订 §6，不得在实现里顺手改掉」。实测 `quote_fields()` 只建 STK/CASH、`gate.py:31` 硬限 `{STK, OPT}`、`reqMktData` 的 generic tick list 为空 ⇒ IBKR 侧目前无 IND 合约路径、无期权 IV 度量；CBOE 期限结构与 10Y 收益率多半仍需 vendor feed。**本批次 §6 保持原文、零修订**；四维度暂 `unknown` ＋ 就地原因，下一轮再定 feeds／entitlements／迁移。否决 (b)(c)：把未经核实的 entitlement 与 vendor 决策压进本批次 |
+| **D80** | dead-man 边界与落点（§17 Q1） | (a) 进程内补报 ＋ 归 R6 (b) 提前拉独立 watchdog (c) 整块推 R6 (d) 外部 dead-man 服务 | **✅ (a) 进程内补报 ＋ 归 R6** | 案例：22:40 `kill -9` orchestrator，§4 验收要 22:50 收到「guardian is down」，但唯一 Telegram 发送端是 `loop.py:134` 在**同进程**起的 daemon 线程、一起死（§17.3① 实测）⇒ 进程内无存活组件能报自己的死亡。R4 只做 ① `guardian_runs.status='failed'` 失败行（§14.3 冻结接缝）② 每 5 分钟 touch `cycle_progress.updated_at` 心跳 ③ 重启后消费 `status/detail` 补报 missed；「死亡期间实时告警」明确归 **R6 外部 watchdog**（§4 R6 行）。**§4 R4 验收栏记口径校正、不改写 D65 原文**。否决 (b)：吃掉 R6 范围、多一个部署单元；否决 (c)：§14.3 冻结接缝作废、须显式改 R3 契约；否决 (d)：新增第二通道，触碰 §6 |
+| **D81** | inline Resolve 跨包落点（§17 Q2） | (a) `register_callback` 注入 (b) bots 内直接 UPDATE (c) ack 下沉 `athena_store` (d) 只给 `/guard` URL | **✅ (a) `athena_bots.register_callback(prefix, handler)`** | 案例：手机点 inline Resolve，`_handle_callback` 只认 `approve:/reject:` 且 `_apply()` 改 drafts，`gv.resolve()` 在 orchestrator 包，bots 反向 import 会成环（§17.3②）。由 `loop.py` 启动时注入 `guardres` → `gv.resolve`，复用既有 `_fresh_allowlist()` 校验，**零环依赖、零重复 SQL、R2 状态机原样复用**。否决 (b)：绕过 R2 状态机、D62 三态可能分叉；否决 (c)：动存储层与 R2 交付代码，改动面最大；否决 (d)：「ack from phone stops it」闭环打折 |
+| **D82** | 5 分钟 nag 节奏载体（§17 Q3） | (a) 专用 daemon 固定 300s (b) 挂进 `cycle()` (c) 塞进 R3 `_scheduler_loop` (d) 只在 `/guard` 载入时判定 | **✅ (a) 专用 daemon `Event.wait(300)`** | 案例：Settings 把 `cycle_minutes` 改成 15，D61 硬裁定的「5 分钟一条」不能跟着漂（§14.8 冻结「不改 5 分钟 cycle 语义」、§17.3③）。新起一条 daemon 线程与 R3 `guardian_runner` 同构，节奏由代码固定、**不动 `cycle()`**。否决 (b)：随 Settings 漂移、违背 D61；否决 (c)：R3 是 `next_run()` 长等待、无 5 分钟 tick，会把两套节奏绑死；否决 (d)：无人开页面就完全不催 |
+| **D83** | 逐条发送与唯一性落点（§17 Q4，手写答复） | (a) 逐条 ＋ 内存去重 (b) 汇总 ＋ 一组按钮 (c) 只发最严重 (d) 逐条不去重；**补充确认**：复用 R2 state 唯一性／新建 state 表／仅内存去重／扩唯一索引 | **⚠️ 手写答复（偏离推荐 a）＋ 补充确认取「复用 R2 state 唯一性」** | 案例：同时 3 条 open 红／黑告警。操作者原文：「要有每一個position state和portfolio state管理，state 要有 action/alert唯一性，如果還沒解決alert，那自然不需要重加新的alert。不過萬一重複了，去重也是必要的一個監測」⇒ **唯一性下沉到 state 层**：复用 `guardian_alerts` 表（`symbol` 粒度＝position state、`*ACCOUNT*` 哨兵＝portfolio state）＋ `guardian_alerts_live` 部分唯一索引 `(account_id, symbol, breach) WHERE state IN ('open','skipped')` ＋ `sync()` reconcile ⇒ 未解决不重加；**不建进程内存去重表、不建新 state 表、零新迁移、`055` 不动**。另加 `GROUP BY ... HAVING count(*)>1` 重复 live 行自检（仅监测、记日志 ＋ 一条消息、不改状态机）作为「萬一重複」的兜底可观测。逐条发送 ＋ 每条带自己的 inline Resolve 保留。补充确认问项否决「新建 state 表」（要新迁移号段／挤 `055`）、「仅内存去重」（唯一性不持久、与原话相冲）、「扩唯一索引加 action 列」（要 ALTER 且回头改 R2 `sync()`） |
 
 ---
 
@@ -137,10 +143,11 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 - **D66**：不设持仓级 `stop_line`；不新增 Settings 字段、不加迁移、不改 `advisor_signals` / `manage_book` / `drafts`。价格触发线只归 R5。
 - **R7（§13，已裁定 D67–D73）**：七条全取 (a) ⇒ **本节「No new market data sources」与 §1「no drafts, no orders, no tactic changes」两条边界一条都不用改**。D67 只读注解不 gate、D68 降級 `unknown` 不新增源、D70 不新开页、D71 不进 nag。若日后要启用 gate 或新行情源，仍须先显式修订这两条边界（§13.7）。
 - **R7 VIX 补充企划（§16，第九轮 D74–D79）**：**D75 明确表达了「新增行情源／用 IBKR 建」的意图，但 D79 裁定把它排到独立的「R7 数据源」裁定轮** ⇒ 本批次**本节「No new market data sources」与 §1 仍保持原文、零修订、零代码、零迁移**。四个新维度暂以 `unknown` ＋ 就地原因为 interim（D68/D73 纪律）。下一轮须显式修订本节后才能建生产者；不得在实现里顺手接 feed、IND 合约或期权 IV。D74 只读注解、D76 剥动作、D77 不推送、D78 不作验收 ⇒ §1 亦无需改。
+- **R4（§17，第十轮 D80–D83）**：四条裁定全部落在既有接缝内 —— D80 归 R6、D81 用 `register_callback` 注入（零环依赖）、D82 专用 300s daemon、D83 复用 R2 state 唯一性 ＋ 重复自检。⇒ **本节「No new market data sources」／「5-min nag is the maximum intrusion. No email, no second channel, no phone call」与 §1「no drafts, no orders, no tactic changes」三条边界均保持原文、零修订**；零新通道、零新数据源、零订单／草案／门控、零新迁移（`055` 不动）。
 
 ---
 
-## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX）
+## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX ＋ 第十轮 R4）
 
 操作者指令：「每個問題問我一遍，我來回答」。分两轮、每条带具体案例逐条问，**8 条全取推荐、零偏离、无跳过**（第六轮 D58–D65 的原始记录；第七／八／九轮见下文各节）。
 
@@ -212,6 +219,29 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 - §16 从 **⚠️ 企划／待裁定** 转为 **✅ 已裁定**；四个 VIX 维度以 **interim `unknown` ＋ 就地原因** 登记进 §13.9（D74），等下一轮显式修订 §6 后才建生产者。
 - **下一轮（尚未开工）**：「R7 数据源」裁定轮，须显式修订 §6，并决定 CBOE VIX 期限结构／10Y 收益率的 vendor feed 与 IBKR entitlement、`gate.py` 的 `{STK, OPT}` 硬限、`reqMktData` generic tick list、真 IV Rank 时序表与迁移号（不得占用 `055`，见 §14.2）。
 - 逐条依据见 §5 决策表与 §16.5；本轮台账 `C-20261122-3`。**本轮零代码改动。**
+
+---
+
+### 第十轮（2026-11-22，R4 实现契约 Q1–Q4 → D80–D83）
+
+操作者 2026-11-22 指令 `Start R4`。按 doc-first 先合并落地前契约（§17 ＋ `C-20261122-4`，零代码、零迁移、待裁定），再按「每個問題問我一遍」逐条裁定 Q1–Q4、每条带具体案例。**四条中三条取推荐、一条明确偏离（Q4／D83）、零跳过**；Q4 为手写答复、未选任何选项，故另补一次「state 唯一性落点」确认问项（取推荐 (a)，不另编号，并入 D83）。
+
+| 轮 | 决策 | 案例（问的是什么） | 裁定 |
+|---|---|---|---|
+| 1 | **D80** | 22:40 `kill -9` orchestrator，§4 R4 验收要 22:50 收到「guardian is down」，但发送端是同进程 daemon 线程、一起死了 | ✅ (a) 进程内补报（失败行／5 分钟心跳／重启后补报）＋「死亡期间实时告警」归 R6；§4 记口径校正 |
+| 1 | **D81** | 手机点 inline Resolve，`_handle_callback` 只认 `approve:/reject:` 且 `_apply()` 改 drafts，`gv.resolve()` 在 orchestrator 包 | ✅ (a) `athena_bots.register_callback(prefix, handler)`，`loop.py` 注入 `guardres` → `gv.resolve` |
+| 1 | **D82** | Settings 把 `cycle_minutes` 改成 15，nag 会不会变 15 分钟一条 | ✅ (a) 专用 daemon 线程固定 `Event.wait(300)`，不动 `cycle()` |
+| 1 | **D83** | 同时 3 条 open 红／黑告警，每 5 分钟发几条？重启后会不会重复轰炸 | ⚠️ **手写答复、偏离推荐 (a)** ⇒ 唯一性下沉到 R2 state 层 ＋ 重复 live 行自检；补充确认取 (a)「复用 R2 state 唯一性」；逐条发送保留 |
+
+**裁定后的状态变化**：
+
+- 决策编号扩到 **D1–D83（84 个节点，`D4` 拆两段）**，**决策层面仍零待决**；§17.6 的「裁定前不编号」约定已兑现为 D80–D83。
+- **§1／§6／「no second channel」三条边界保持原文、零修订**：D80 归 R6 不新增通道、D81 零环依赖不新增包、D82 不动 `cycle()`、D83 复用 R2 既有表 ⇒ 零新数据源、零第二通道、零订单／草案／门控、**零新迁移**（`055` 仍归 R7 `regime_labels`）。
+- §17 从 **⚠️ 待裁定、未编号** 转为 **✅ 已裁定 D80–D83**；§17.5 的「nag 去重状态放进程内存」按 **D83** 改写为「唯一性下沉到 state 层 ＋ 重复自检」—— 这是本轮唯一一处对推荐口径的实质改写，**是裁定结果、不是实现里顺手改**。
+- **§4 R4 验收栏的 dead-man 悖论**：按 D80 在 §4 表后以「口径校正」注记记录归属，**不改写 §4 历史契约原文、不改 D65 裁定文字**（沿用 §13.7 惯例）。
+- 裁定轮**零代码改动**；实现、验证与交付记录见 §18 与同日后续台账条目。逐条依据见 §5 决策表与 §17.6。
+
+> Q4 手写答复原文：「要有每一個position state和portfolio state管理，state 要有 action/alert唯一性，如果還沒解決alert，那自然不需要重加新的alert。不過萬一重複了，去重也是必要的一個監測」。
 
 ---
 
@@ -653,6 +683,123 @@ D60 案例原文「NY 锚定给出 20:30/21:35 或 21:30/22:35」即上表 A/B �
 - 11/13 的 VIX 19.30／17.49→18.70→19.30、VIX1D +26.5%、NVDA IV Rank 93.3、10Y +24bp、VIX/VIX3M 0.936、VIX1Y−VIX9D 5.03 等数字**由操作者提供、未经独立核实**，仅作第 6 个校准工作案例；**不作验收、不作回测基准、不得硬编码进代码或阈值**（D78）。
 - 操作者结语可存进风控档案：「預警不是 VIX 破 30，是『指數還在 19、但短端保險和單股 IV 已經先慌』。」—— 但**工具内不声称还原机构意图**（D72）。
 
+## 17. R4 实现口径：Telegram 催办与 dead-man（2026-11-22，✅ 第十轮已裁定 D80–D83）
+
+> **来源**：操作者 2026-11-22 指令 `Start R4`。按 doc-first 纪律：**先合并契约 → 逐条裁定 → 再实现**；本节是落地前的契约，**不是交付记录**。
+> **状态**：**✅ 第十轮已裁定（2026-11-22，Q1–Q4 → D80–D83）**。裁定记录见 §17.6 与 §7 第十轮，交付记录见 §18（✅ 已回填）。**裁定本身零代码、零迁移、零 Settings 字段、零运行时改动**；实现见 §18，与契约 `C-20261122-4`／裁定 `C-20261122-5`／交付 `C-20261122-6` 同批入库。
+> **依赖**：R3 已交付（§14／§15）；R7 已裁定（§13／§16）但实现仍待本轮的推送通道（D71）；R5／R6 待办。
+> **相关**：§3 每日仪式、§4 R4 行、§5 D61／D62／D65、§6 边界、§11 R2 状态机、**§14.3 `guardian_runs.status/detail` 已冻结的 R4 dead-man 接缝**、§16.6、`C-20261122-4`。
+
+### 17.1 已裁定输入（不是新决策）
+
+| 裁定 | 内容 | R4 如何兑现 |
+|---|---|---|
+| **D61** | 5 分钟 nag、仅 tier ≥ 危险（red+black）、Telegram；明确否决 15 分钟与「也催 平衡」 | nag 查询只取 `state='open'` 且 `tier IN ('danger','blowup')`；固定 300s，不受 Settings 影响 |
+| **D62** | 逐条三态闭环：Resolve / Skip+reason / auto-clear；`resolved` 保持已确认、不 nag、不重开 | 只 nag `open`；`skipped` 是**带 reason 的一种 ack**（休眠 24h），不 nag；ack 后立刻从待发集合移除 |
+| **D65** | US 时段 10 分钟无心跳 → Telegram；否决「只在定时跑检查」与 5 分钟（假 down） | 心跳读既有持久行；实时「进程死亡」告警的归属见 Q1 |
+| **D71** | Run C 12:30 ET 复用 R4 的 Telegram 通道，**但不进 5 分钟 nag 循环** | R4 暴露「单次推送」接口，与 nag 循环分离，R7 只调前者 |
+| **§6** | 5 分钟 nag 是入侵上限；无 email、无第二通道、无电话 | 只用既有 `athena_bots` Telegram 通道；不新增任何通道／外部服务 |
+| **§1** | 不产生 orders / drafts / tactic changes；只读 IB 与 store，除自身 alert/ack 表 | nag 只读 `guardian_alerts`；dead-man 只写本层 `guardian_runs` / `guardian_alerts` |
+
+### 17.2 只读接缝核实（2026-11-22，非推测）
+
+| 需要 | 实测 | 状态 |
+|---|---|---|
+| Telegram 发送端 | `athena_bots/telegram.py` 的 `notify_draft()` / `notify_fill()` / `notify_expired()` → `_send_plain()` → `_live_send()` → `TelegramClient.call("sendMessage")`；`athena_bots.__init__` 导出 4 个符号 | ✅ 已有 |
+| polling 线程 | `telegram.py:227 start_telegram_polling()` → `:232 ensure_polling()` → `:237 threading.Thread(target=_poll_forever, daemon=True)`；由 `loop.py:134` 在 **orchestrator 进程内**启动 | ⚠️ 与 orchestrator 同进程 |
+| 回调路由 | `telegram.py:486 _handle_callback()`：`:495 decision, _, draft_id = data.partition(":")`，`:496 if decision not in {"approve","reject"}`，`:499 _apply()` → `decide()` 改 **drafts** | ❌ 硬编码，无 guardian 命名空间 |
+| inline keyboard | `telegram.py:800 _markup()` 产 `{"inline_keyboard": ...}`；`:806` `callback_data=f"approve:{draft_id}"`；D45 的「Open approve page」URL 按钮同处 | ✅ 可复用形态 |
+| allowlist | `_handle_callback():488 _fresh_allowlist(database_url)`，`:492` 非白名单直接拒 | ✅ 已有，R4 白拿 |
+| 包依赖方向 | `apps/orchestrator/pyproject.toml` 依赖 `athena-bots`；**`apps/bots/pyproject.toml` 只依赖 exec/settings/store/strategy-nfr，不依赖 orchestrator** | ⚠️ 反向 import 会成环 |
+| 告警状态机 | `guardian_view.py` 的 `load_alerts()` / `resolve()` / `skip()` / `sync()`；`_LIVE_STATES={"open","skipped"}`；`053` 的 `source` 缺省 `'grade'`、§11.4 预留 `'trigger'` 给 R5 | ✅ 已有 |
+| 档位字符串 | `Tier.DANGER="danger"` / `Tier.BLOWUP="blowup"`（`guardian.py:80-81`），`guardian_alerts.tier` 存该值 | ✅ D61 过滤可直接用 |
+| 失败留痕 | `054_guardian_runs.sql` 有 `status` / `detail` / `ran_at`；**§14.3 明写「失败／降级留痕（R4 的 dead-man 会消费，R3 不实现告警）」** | ✅ 冻结接缝 |
+| 但 R3 现状 | `guardian_runner.py:211 RunGrade(..., status="ok")` 硬编码；`:246 except` 只 `log.exception`，**不写失败行** | ❌ R4 需补写（动 R3 已交付代码） |
+| 心跳生产者 | `050_cycle_progress.sql` 单行 `payload jsonb + updated_at`；`runtime.py:157 bind_database()` 的 `save()` 每周期 `ON CONFLICT DO UPDATE SET payload, updated_at=now()`；`restore()` **只读 `payload`** | ⚠️ 节奏由 `cycle_minutes` 决定（默认 300、可改） |
+| 既有 nag | `guardian_runner._scheduler_loop()` 是 ET 锚定的 `next_run()` 长等待，无 5 分钟 tick；`loop.py:138 cycle()` 由 `_cycle_sleep()` 读 `cycle_minutes` | ❌ 无 |
+| US 时段判定 | `guardian_schedule.py` 只有 `is_us_weekday()`（Mon–Fri）；`slots.py` 的 HKT 窗口是硬编码切日，§14.1 明确不复用 | ❌ 需新增纯函数 |
+| 迁移号 | `054` 归 R3，**`055` 已冻结预留给 R7 `regime_labels`**（§14.2／§16.6 明写「不得占用」） | ⚠️ R4 宜零迁移 |
+| 通道边界 | §6「5-min nag is the maximum intrusion. No email, no second channel, no phone call.」 | ✅ Telegram 是既有通道，不算第二通道 |
+
+### 17.3 四个硬问题（判断，非新裁定）
+
+**① dead-man 悖论（最重要）**：§4 R4 验收写「kill the orchestrator, get the 'guardian is down' message」，§5 D65 案例写「22:40 进程死 → 22:50 收到」。但实测唯一的 Telegram 发送端是 `loop.py:134` 在 **orchestrator 进程内**起的 daemon poll 线程，所有 `notify_*` 也在同进程同步发出。进程被 kill ⇒ 发送端一起消失 ⇒ **进程内没有任何存活组件能报告自己的死亡**。这是 dead-man switch 的经典悖论。§4 R6 行才是「常开机器 ＋ launchd watchdog ＋ 10 分钟无心跳即 Telegram」的归属，验收栏「Unplug test: kill the box, get the heartbeat alert」也在 R6。**结论：R4 单独做不到「死亡期间实时告警」；能做的是「run 失败告警」＋「重启后补报」。** 见 Q1。
+
+**② `_handle_callback` 跨包**：D62 案例要求「ack from phone stops it」，§4 R4 要求「inline Resolve button (reuses `_handle_callback`)」。但回调路由在 `athena_bots`，`gv.resolve()` 在 `athena_orchestrator`；bots 不依赖 orchestrator，反向 import 会成环。见 Q2。
+
+**③ 5 分钟节奏被 Settings 绑架**：D61 的 5 分钟是硬裁定，但 `loop.py` 的 `cycle()` 间隔来自 `load_active(...).cycle_minutes`（可改），且 §14.8 冻结「不改 5 分钟 cycle 语义」。把 nag 挂进 cycle 会让节奏随 Settings 漂移。见 Q3。
+
+**④ 逐条 vs 汇总 ＋ 去重**：D61 案例「考试中 14:00 uncovered NVDA call 转红，5 分钟一条 ＝ 首小时 12 条」、D62 案例「同日两条 breach（NVDA uncovered ＋ MRVL 37%）」，都指向逐条。但 §6「maximum intrusion」要求总量克制；且进程重启若不去重会重复轰炸。见 Q4。
+
+### 17.4 合规形态（✅ 已裁定，D80–D83 口径）
+
+R4 = **一条专用 daemon 线程**（固定 300s、与 R3 `guardian_runner` 同构）＋ **一条新的 Telegram 消息类型**（带 inline Resolve）＋ **一个回调命名空间**（复用 `_handle_callback` 的 allowlist 校验）＋ **dead-man 消费 `guardian_runs.status/detail`**（§14.3 已冻结的接缝）。
+
+分层与 R1／R2／R3 一致：**纯核心**（`due_alerts()` / `nag_text()` / `is_us_session()`，零 I/O）→ **薄 SQL**（读 open 告警、touch 心跳、写失败行）→ **发送适配**（`athena_bots.notify_guardian()`）→ **daemon 线**（`loop.py` 起停，不动 `cycle()`）。
+
+告警集合每轮重算：`state='open' AND tier IN ('danger','blowup')`，按 `account_id` 分组、逐条发；`resolved` / `skipped` / `auto_cleared` 一律不催。**ack 停催不靠新状态**，靠下一轮查询自然不再命中 —— 与 D62「不设第二套 ack」同纪律。**D83 进一步把唯一性下沉到 state 层**：不建进程内存去重表，唯一性由 `guardian_alerts_live` 部分唯一索引 ＋ `sync()` reconcile 保证；另加 `GROUP BY ... HAVING count(*)>1` 的重复 live 行自检（仅监测、不改状态机）。
+
+### 17.5 由已裁定项推导的实现口径（✅ 已确认）
+
+- **零迁移**：`055` 仍归 R7 `regime_labels`（§14.2／§16.6）。**D83 裁定：不建进程内存去重表、不建新 state 表** —— 唯一性复用 R2 的 `guardian_alerts_live` 部分唯一索引 `(account_id, symbol, breach) WHERE state IN ('open','skipped')` 与 `sync()` reconcile，`position state`＝`symbol` 粒度、`portfolio state`＝`*ACCOUNT*` 哨兵；nag 每轮只查 `open`，未解决不重加。另加**重复 live 行自检**（`GROUP BY account_id, symbol, breach HAVING count(*)>1`，命中记日志 ＋ 一条监测消息，不改状态机）作为「萬一重複了」的兜底可观测。心跳复用 `cycle_progress.updated_at` —— nag 线程每 5 分钟 `UPDATE ... SET updated_at=now() WHERE id=1`，**不改 `payload`、不影响 `restore()`**（它只读 `payload`）。
+- **`source` 值登记**：`053` 的 `source` 缺省 `'grade'`，§11.4 已把 `'trigger'` 预留给 R5；R4 dead-man 用 **`'deadman'`**，三者互不冲突，仅登记、不加枚举约束。
+- **补写 `guardian_runs` 失败行**（动 R3 已交付代码，须回归）：`_scheduler_loop` 的 `except` 分支除 `log.exception` 外，另用**独立连接／新事务**写一行 `RunGrade(status="failed", detail=<异常类名>)`；档位字段用降级值 `'unknown'`、数值字段留 `None`，**不臆造 EL/NL**。同一 `(account, day, run)` 与成功行共用唯一键，§14.6「重启不回补」保证不重试覆盖。
+- **`is_us_session(now)` 纯函数**（新增到 `guardian_schedule.py`，零 I/O）：ET 09:30–16:00 且 `is_us_weekday()`；延续 §14.5「无 US 假日历」的诚实留白，假日按普通工作日处理。
+- **R7 单次推送接口**（D71）：R4 暴露 `notify_guardian_once(text, markup)` 与 nag 循环分离；R7 Run C 只调前者，**不进 5 分钟 nag**。
+- **只读边界**：nag 只读 `guardian_alerts`；dead-man 只写本层 `guardian_runs` / `guardian_alerts` / touch `cycle_progress.updated_at`；不改 `advisor_signals` / `manage_book` / `drafts` / `wheel.py` / `guardian.py`、不改 R1 分级、不改 R2 状态机、不改 R3 的 ET 锚定调度（除本条明列的失败行补写）。
+- **§1／§6 两条边界预计零修订**：不产生订单／草案／门控、不新增数据源、不新增通道。若 Q1 选 (d) 或 Q2 选 (c) 等触碰边界的选项，须在裁定轮**显式修订**，不得在实现里顺手改掉（§13.7 同纪律）。
+
+### 17.6 裁定记录 Q1–Q4 → D80–D83（2026-11-22 第十轮）
+
+沿用「每個問題問我一遍」惯例，每条带具体案例。下表是**裁定前**的问项与推荐（原文保留、不改写）；**裁定结果见紧随其后的结果表**。Q4 操作者手写答复、未选任何选项，故另补一次「state 唯一性落点」确认问项（取推荐 (a)，不另编号，归入 D83）。
+
+| 问 | 问题（带案例） | 选项 | 推荐 |
+|---|---|---|---|
+| **Q1** | 22:40 `kill -9` orchestrator，§4 R4 验收要 22:50 收到「guardian is down」，但发送端是同进程 daemon 线程、一起死了。R4 该做到哪一步？ | (a) 只做进程内可观测：run 失败告警 ＋ 每 5 分钟心跳 ＋ **重启后补报**；「死亡期间实时告警」明确归 R6 外部 watchdog，§4 R4 验收栏记**口径校正**（不改 D65 裁定文字）(b) R4 提前拉起独立 watchdog 进程（吃掉 R6 一部分）(c) R4 完全不碰 dead-man，整块推 R6（§14.3 冻结接缝作废，须显式改 R3 契约）(d) 接外部 dead-man 服务（healthchecks.io 等） | **(a)** |
+| **Q2** | 手机上点 inline Resolve；`_handle_callback` 只认 `approve:/reject:` 且调 `decide()` 改 drafts，`gv.resolve()` 又在 orchestrator 包（bots 不能反向 import）。怎么接？ | (a) `athena_bots` 暴露 `register_callback(prefix, handler)`，`loop.py` 启动时注入 `guardres` → `gv.resolve`；复用既有 allowlist 校验，零环依赖、零重复 SQL (b) bots 内直接写一条薄 UPDATE (c) ack 逻辑下沉 `athena_store` 两包共用 (d) 按钮只给「打开 /guard」URL | **(a)** |
+| **Q3** | Settings 把 `cycle_minutes` 改成 15，nag 会不会变 15 分钟一条？ | (a) 新起专用 daemon 线程固定 `Event.wait(300)`（与 R3 同构），不动 `cycle()` (b) 挂进 `cycle()` (c) 塞进 R3 `_scheduler_loop` (d) 只在 `/guard` 载入时判定 | **(a)** |
+| **Q4** | 同时有 3 条 open 红／黑告警，每 5 分钟发几条？重启后会不会重复轰炸？ | (a) 逐条发、每条带自己的 inline Resolve，同一条 5 分钟内不重发、ack 后立刻移除 (b) 一条汇总消息 ＋ 一组按钮 (c) 只发最严重一条 (d) 逐条发但不去重 | **(a)** |
+
+**裁定结果**：
+
+| 编号 | 问 | 裁定 | 性质 |
+|---|---|---|---|
+| **D80** | Q1 dead-man 边界 | 进程内可观测：run 失败行 ＋ 5 分钟心跳 ＋ 重启后补报；「死亡期间实时告警」归 R6 外部 watchdog；§4 R4 验收栏记口径校正、不改 D65 原文 | ✅ 取推荐 (a) |
+| **D81** | Q2 inline Resolve 跨包 | `athena_bots.register_callback(prefix, handler)`，`loop.py` 注入 `guardres` → `gv.resolve`，复用 allowlist 校验 | ✅ 取推荐 (a) |
+| **D82** | Q3 5 分钟节奏载体 | 专用 daemon 线程固定 `Event.wait(300)`，不动 `cycle()`、`cycle_minutes` 改不动它 | ✅ 取推荐 (a) |
+| **D83** | Q4 逐条发送与唯一性 | **唯一性下沉到 R2 state 层**：复用 `guardian_alerts_live` 部分唯一索引 ＋ `sync()` reconcile，不建进程内存去重表、不建新 state 表、零新迁移；另加重复 live 行自检监测；逐条发送 ＋ 每条 inline Resolve 保留 | ⚠️ **手写答复、明确偏离推荐 (a)**；补充确认问项取 (a)「复用 R2 state 唯一性」，并入本编号 |
+
+> **Q4 手写答复原文**：「要有每一個position state和portfolio state管理，state 要有 action/alert唯一性，如果還沒解決alert，那自然不需要重加新的alert。不過萬一重複了，去重也是必要的一個監測」。该答复**没有选择 Q4 的 (a)–(d) 任何一项**，且明确把唯一性放在 state 层而非发送端，故记一次**明确偏离**（与第九轮 Q2／D75 同级处理：不替操作者改回推荐、如实记录）。补充确认问项只用于确定「state 唯一性落在哪一层」，取推荐 (a)，**不另编号**。
+
+### 17.7 边界同步（✅ 已回填）
+
+- 裁定**不改变 D58–D79 任何结论**、不改 §1／§6、不改 R1–R3 交付状态、不新增数据源／迁移／Settings 字段、不产生订单／草案／门控。
+- **D 计数**：D80–D83 四条落地 ⇒ **D1–D83 / 84 个节点零待决**；00 册 §5／§6／§11／§12 与 14 册页眉页脚已同步。
+- **§4 R4 验收栏的悖论措辞**：已按 **D80** 在 §4 表后以「口径校正」注记记录归属（归 R6 外部 watchdog），**不改写 §4 历史契约原文**（沿用 §13.7「核实校正」不改写历史的惯例）。
+- `055` 仍为 R7 `regime_labels` 预留号段，D83 复用 R2 既有表 ⇒ 本节**零迁移**，不被占用。
+
+### 17.8 明确不做（R4 边界）
+
+不实现 R5 静态触发线、不实现 R6 常开机器／launchd watchdog／进程外实时心跳、不实现 R7 `regime_labels` 矩阵／`close_bias`／`evidence`／标签卡；不改 `advisor_signals` / `manage_book` / `drafts.decide()` / `advisor.py` / `wheel.py` / `guardian.py`；不新增 Settings 字段、不新增市场数据源、不新增告警通道、不改 5 分钟 `cycle()` 语义、不改 R3 的 ET 锚定调度（除 §17.5 明列的失败行补写）。
+
 ---
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ⇒ 共 22 条 / D1–D79 80 个节点零待决）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4–R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**
+## 18. R4 交付记录（2026-11-22）
+
+| 项 | 内容 |
+|---|---|
+| 状态 | ✅ **已实现并验证**。`C-20261122-4`（契约）／`C-20261122-5`（裁定）／`C-20261122-6`（交付）同批入库；裁定与实现均**零新迁移** |
+| 代码 | 新增 `guardian_nag.py`、`test_guardian_r4.py`；修改 `athena_bots/telegram.py`（`register_callback()` / `guardian_markup()` / `notify_guardian()` / `notify_guardian_once()` / `_handle_callback()` 分派）、`athena_bots/__init__.py`（导出）、`guardian_schedule.py`（`is_us_session()` / `US_CLOSE`）、`guardian_runner.py`（`failed_grade()` / `write_failed_run()` / 异常分支写失败行）、`loop.py`（注入 callback ＋ 起停 nag daemon，**两处 ops restart 均停**）、`CHANGELOG.md` / `logs/2026-11-22.md` / 00 册 / 本册。契约见 §17 |
+| 接口 | 纯核心 `due_alerts()` / `nag_text()` / `duplicate_live_keys()` / `duplicate_report()` / `expected_slots()` / `deadman_findings()` / `deadman_breach()` / `deadman_text()`；薄 SQL `touch_heartbeat()` / `load_recent_runs()` / `load_due()` / `load_duplicates()` / `insert_deadman_alert()` / `nag_tick()`；调度 `is_us_session()`；发送 `register_callback()` / `guardian_markup()` / `notify_guardian()` / `notify_guardian_once()`；生命周期 `install_guardian_callbacks()` / `start_guardian_nag()` / `stop_guardian_nag()`。R2 `sync()`／`guardian_view.py`、R1 `guardian.py`、R3 `guardian_schedule.run_moments()` 原样复用 |
+| 验证 | ① R4 单测 **63/63**；② 全量 **425/425**（`skipped=2`）；③ 台账机检 **105/105 `EXIT=0`**、`git diff --check` `EXIT=0`、`uv lock --check` / `compileall` / import smoke 全绿；④ **六组变异测试均如期 FAIL**（D82 300s、D65 10 分钟 grace、D61 红／黑过滤、D80 心跳只动 `updated_at`、D83 `WHERE NOT EXISTS`、D82 bootstrap restart 停 daemon），每组还原后 byte-compare 一致、全模块恢复 63/63；⑤ **真实 Postgres 一次性容器** `athena-r4-verify-55441`：`apply_migrations()` 应用 50 个（`001..054`），**19/19 检查通过** —— 心跳 `payload` 不变／`updated_at` 前移、`guardian_alerts_live` 部分唯一索引物理拒绝重复 live 行（`UniqueViolation`）、两次 dead-man insert 只留一行、已 resolve 的 slot 重启后不再补报、失败行幂等且 `status='failed'` ＋ tier `'unknown'` ＋ `detail='RuntimeError'`、`nag_tick` 端到端（session gating／逐条 nag／monitor 空）、`guardres` 真库 resolve；⑥ 容器已清理，未触碰既有 carevoice / unbox 容器 |
+| 实现期修复（实测发现） | ① **真实缺陷**：`loop.py` bootstrap ops-restart 分支只停 tunnel ＋ scheduler、**漏停 nag daemon** ⇒ 补 `stop_guardian_nag()`，由 `TestWiring.test_loop_starts_and_stops_the_nag_daemon` 的 `count==2` 断言捕获；② `install_guardian_callbacks()` 把 `connect` 绑在安装时、使调用期 patch 失效 ⇒ 改为 handler 内按调用解析（零环依赖不变）；③ 首轮 R4 单测 **5 failures ＋ 3 errors**：测试 `_apply` 位置参数索引写错（payload 在 `[0][2]`、decision 在 `[0][3]`）、fake conn 传 dict 而 `load_due()` 吃 DB tuple、05x 迁移清单漏 `051`／`052`、静态守卫把注释里的字面量 `cycle_minutes`／`athena_orchestrator` 当成违规 ⇒ **保留严格断言**、改写注释措辞，未放宽任何检查；④ 真库验证脚本首轮 18/19：Postgres 把 `state IN (...)` 规范化为 `state = ANY (ARRAY[...])` ⇒ 断言改为检查 `WHERE` ＋ 两个 live state，索引本身经 `UniqueViolation` 实测有效 |
+| 边界 | **未做**：R5 静态触发线、R6 常开机器／launchd watchdog／进程外实时心跳、R7 `regime_labels` 矩阵／`close_bias`／`evidence`／标签卡；不改 R1 分级、R2 状态机、`drafts.decide()` / `advisor.py` / `wheel.py` / `guardian.py` / `advisor_signals` / `manage_book`；不新增 Settings 字段／数据源／通道／迁移、不改 5 分钟 `cycle()` 语义、不改 R3 ET 锚定调度（除 §17.5 明列的失败行补写）。**零新迁移**：`055` 仍归 R7 `regime_labels`；心跳复用 `050 cycle_progress.updated_at`、dead-man 消费 `054 guardian_runs.status/detail`、D83 唯一性复用 `053 guardian_alerts` ＋ `guardian_alerts_live` |
+| 已知留白（诚实记录） | ① **D80 口径**：进程死亡期间无法从进程内实时告警，R4 只做失败行／5 分钟心跳／重启后补报；「死亡期间实时告警」归 R6 外部 watchdog（§4 验收栏已记口径校正、不改 D65 原文）；② 无 US market holiday calendar（延续 §14.5），`expected_slots()` 只看当前 ET trading day，避免 `054` 启用前的历史日期变成 phantom outage；③ `nag_tick()` 的 `deadman` 计数统计的是「检出的 finding 条数」而非「实际插入条数」—— `WHERE NOT EXISTS` 保证不重复写库，该数字只用于日志；④ R7 Run C 复用 `notify_guardian_once()` 的接口已就位，实现仍待 R7 |
+| 提交 | 本批次独立提交（`C-20261122-4`／`-5`／`-6` 同批，前两条「本条不单独提交」不改写、由本条追加说明）；hash 以 `git log -1 --format=%h` 为准，**不写入本文档**，沿用 §9／§12／§15 惯例 |
+
+---
+
+---
+
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过 ⇒ 共 26 条 / D1–D83 84 个节点零待决）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5–R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**

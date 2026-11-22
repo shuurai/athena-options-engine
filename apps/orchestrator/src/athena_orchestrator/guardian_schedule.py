@@ -24,12 +24,14 @@ __all__ = [
     "HKT",
     "UTC",
     "US_OPEN",
+    "US_CLOSE",
     "RUNS",
     "EXECUTED_RUNS",
     "RunSlot",
     "run_wall_times",
     "run_moments",
     "is_us_weekday",
+    "is_us_session",
     "next_run",
     "hk_clock",
     "hk_stamp",
@@ -40,6 +42,7 @@ HKT = ZoneInfo("Asia/Hong_Kong")
 UTC = timezone.utc
 
 US_OPEN = time(9, 30)
+US_CLOSE = time(16, 0)
 RUN_A_OFFSET = timedelta(minutes=-60)
 RUN_B_OFFSET = timedelta(minutes=5)
 RUN_C_WALL = time(12, 30)
@@ -82,6 +85,21 @@ def run_moments(day: date) -> dict[str, datetime]:
 def is_us_weekday(day: date) -> bool:
     """Mon-Fri in ET. US market holidays are NOT filtered (section 14.5)."""
     return day.weekday() < 5
+
+
+def is_us_session(now: datetime) -> bool:
+    """R4/D65: ET 09:30-16:00 on a weekday, DST-safe, zero I/O.
+
+    ``now`` must be timezone-aware; naive datetimes are rejected rather than
+    silently read as local wall clock. US market holidays remain an honest gap
+    (section 14.5): a holiday is treated as an ordinary weekday.
+    """
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("is_us_session needs an aware datetime")
+    local = now.astimezone(ET)
+    if not is_us_weekday(local.date()):
+        return False
+    return US_OPEN <= local.time() < US_CLOSE
 
 
 def next_run(now: datetime, runs=EXECUTED_RUNS) -> RunSlot | None:

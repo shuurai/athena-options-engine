@@ -14,6 +14,11 @@ from athena_exec.ops import consume_restart
 from athena_orchestrator.backfill import start_history_backfill
 from athena_orchestrator.console import start_console_server
 from athena_orchestrator.control import allowlist_from_env, start_control_server
+from athena_orchestrator.guardian_nag import (
+    install_guardian_callbacks,
+    start_guardian_nag,
+    stop_guardian_nag,
+)
 from athena_orchestrator.guardian_runner import (
     start_guardian_scheduler,
     stop_guardian_scheduler,
@@ -126,6 +131,11 @@ async def run_loop() -> None:
     start_order_watch(database_url)
     start_guardian_scheduler(database_url)
     log.info("guardian scheduler started (R3, A/B ET-anchored)")
+    # R4 (D81): the callback registry must be installed BEFORE polling starts,
+    # so an inline Resolve arriving on the first update is already routable.
+    install_guardian_callbacks(database_url)
+    start_guardian_nag(database_url)
+    log.info("guardian nag started (R4, fixed 300s, state-layer uniqueness)")
     threading.Thread(
         target=refresh_display_rates, args=(database_url,), daemon=True, name="fx-rates"
     ).start()
@@ -147,12 +157,14 @@ async def run_loop() -> None:
         log.info("ops restart")
         stop_tunnel()
         stop_guardian_scheduler()
+        stop_guardian_nag()
         return
     while cycles == 0 or completed < cycles:
         if await _sleep_interruptible(sleep_seconds):
             log.info("ops restart")
             stop_tunnel()
             stop_guardian_scheduler()
+            stop_guardian_nag()
             return
         completed += 1
         begin_running(completed)
