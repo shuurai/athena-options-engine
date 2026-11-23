@@ -1,8 +1,10 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。**
-**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 待办；R7 已裁定（D67–D73，Planning 阶段结束，实现仍待 R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4); R7 contract + ratification: §13; R5 implementation contract: §19 (✅ ratified D84–D90); delivery record: §21 (✅ implemented and verified); data-layer split: §20 (D91–D94, pre-ratified inputs for the D79 round); **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).**
+**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 ＋ 第十一轮 ＋ 2026-11-23 第十二轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过；＋ 第十二轮 **D95–D101 七条全取推荐、零偏离、零跳过**）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。** **R6 实现口径见 §22：✅ 第十二轮已裁定 D95–D101；✅ 已实现并验证，交付记录见 §23（零迁移、零运行时核心改动、§1 原文不动、§6 仅 D100 已裁定的窄 carve-out）。**
+**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；R7 已裁定（D67–D73，Planning 阶段结束，实现仍待 R4）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十、十一、十二轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4) / §21 (R5) / §23 (R6); R7 contract + ratification: §13; R5 implementation contract: §19 (✅ ratified D84–D90); delivery record: §21 (✅ implemented and verified); data-layer split: §20 (D91–D94, pre-ratified inputs for the D79 round); **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).**
 
+> **2026-11-23 R6 启动（第十二轮，裁定前回填，历史记录）**：操作者 2026-11-22 指令 `OK please keep going on R6.` 之后，先按 doc-first 纪律做只读接缝调研并合并 **§22 落地前契约（Q1–Q7、未编号）**，见 `C-20261123-1`。**本轮零代码、零迁移、零运行时改动、不提交**；R6 是 R1–R5 之后脊柱上的最后一项，R7 契约仍冻结、processor／VIX 仍归 D79 轮。
+>
 > **Origin (operator, 2026-11-21)**: during work/exam crunch weeks, execution function is consumed by work and the portfolio goes into autopilot — and autopilot only does one thing: nothing. Last week a black-swan-scale move took the book from fine to near-liquidation. The quantitative layer (per-position scoring) already works. What is missing is a layer that (a) compares every live position — including accidental ones — against the rule book, (b) tells the operator the one thing to do, at a fixed time, and (c) refuses to be ignored when it matters.
 
 ---
@@ -96,13 +98,15 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 
 > **2026-11-22 第十一轮口径校正（D84／D87／D88／D94，不改本表原文）**：R5 验收栏 `Set a line in Settings; cross it in paper; alert fires within one poll interval` 中的 `VIX > 38` 例子在**本批次无生产者**（全库 `.py`／`.sql` 零 VIX 命中；`broker.py:1036-1051` 只建 `Stock`、无 IND 合约路径），按 **D84 (a)** 记为 R5 已知留白，等「R7 数据源」裁定轮显式修订 §6 后再补；R5 v1 只支持 `market_bars` 里既有真源标的（STK）。「一个轮询间隔」＝ **R4 `nag_tick()` 固定 300s**（D87／D82）。价格取 `last_tradeable_price()`（`pricing.py:65`）：**`ib-delayed` 整点快照是主源、`ib-daily` 是回落**（D88／D94），不做真·穿越边沿检测、以「当前快照是否越线」为准。本表历史原文保留不改。
 
+> **2026-11-23 第十二轮口径校正（D95／D98，不改本表原文）**：§4 R6 验收栏「Unplug test: kill the box, get the heartbeat alert」在**单机内不可达** —— 实测心跳写在 Mac mini 本机 `050 cycle_progress`（`127.0.0.1:55432`）、唯一 Telegram 发送端是 `loop.py:143` 同进程 daemon、两个 HTTP server 绑 `127.0.0.1`、唯一公网入口是随机 URL 的 quick tunnel 且无 health 路由（§22.2 第 1／2／6／8／9／10 行）。按 **D95 (a)**：由**机箱外的 dead-man 服务**承接（Mac mini 每 5 分钟出站 check-in、服务 10 分钟静默即告警），零入站端口、零隧道改动；**不是**第三次把验收推走。「reboot, everything self-recovers without a shell」按 **D98 (a)** 限定为 Postgres ＋ `athena-orchestrator` ＋ 可选 cloudflared 由 `launchd` 自动重启；**IB Gateway 的 2FA 登录仍是操作者一次性人工步骤**（`README.md:124` 诚实留白）。另按 §22.2 第 11 行实测，00 册 §6 R6 行「exec-ib 为独立进程」措辞记口径校正（`athena-exec` 是库、`pulse.py` 是同进程线程），**不改 D64 原文**。本表历史原文保留不改。
+
 **Sequencing logic**: R1→R2→R3→R4 is the spine (each needs the previous). R5 needs R4's escalation path. R6 is infrastructure and can run in parallel with R3–R5 — but note that **R4 on an unreliable machine is a false sense of safety**, so R6 should not trail far behind. **R7 is numbered after R6 but depends on R3 (ET-anchored scheduler) + R4 (delivery), so it cannot jump the spine; it must also be separated semantically from R5's static trigger lines (§13.7).**
 
 ---
 
-## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分）
+## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分 ＋ 2026-11-23 第十二轮 R6）
 
-**三十七条全部裁定：三十四条取推荐、三条明确偏离（Q2／D75、Q4／D83、Q5／D88）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5；**D80–D83** 是 R4 实现契约的第十轮裁定（Q1–Q4 编号化，其中 Q4 手写答复偏离推荐、另补一次「state 唯一性落点」确认问项），见 §7 第十轮与 §17.6；**D84–D94** 是第十一轮 R5 实现契约与架构拆分裁定（Q1–Q7 编号化为 D84–D90，Q5 手写答复偏离推荐另补确认问项；架构四问编号化为 D91–D94），见 §7 第十一轮、§19.6 与 §20.2。
+**四十四条全部裁定：四十一条取推荐、三条明确偏离（Q2／D75、Q4／D83、Q5／D88）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5；**D80–D83** 是 R4 实现契约的第十轮裁定（Q1–Q4 编号化，其中 Q4 手写答复偏离推荐、另补一次「state 唯一性落点」确认问项），见 §7 第十轮与 §17.6；**D84–D94** 是第十一轮 R5 实现契约与架构拆分裁定（Q1–Q7 编号化为 D84–D90，Q5 手写答复偏离推荐另补确认问项；架构四问编号化为 D91–D94），见 §7 第十一轮、§19.6 与 §20.2；**D95–D101** 是第十二轮 R6 实现契约裁定（Q1–Q7 编号化，七条全取推荐、零偏离、零跳过），见 §7 第十二轮与 §22.6。
 
 | # | Decision | Options | 裁定 | 依据 |
 |---|---|---|---|---|
@@ -143,6 +147,13 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **D92** | 架构：VIX 在 universe 的落点（确认问 2） | (a) 独立 `data_symbols` 数据专用列表 (b) watchlist ＋ 非交易旗标 (c) 直接进 watchlist (d) 硬编码常量 | **✅ (a) 独立数据专用列表** | 全库无 universe 表，universe = `SettingsPayload.watchlist` ＋ `UNIVERSE_SEED`；`cycle_book()`（`model.py:347`）把 watchlist 喂进 `run_paper_cycle()` ⇒ 直接加 `VIX` 会让策略引擎**对一个指数开期权草案**并每轮烧 AI 调用；`stock_contract()` 只建 `ib_insync.Stock`，IB 无法 qualify。声明字段永不进 `cycle_book()`／drafts |
 | **D93** | 架构：processor 产物落点与 hook 位置（确认问 3） | (a) 复用 `market_bars` 既有 source (b) 新 `'ib-tick'` source (c) 新表 `056` (d) 纯进程内 | **✅ (a) 复用既有 source** | `_take_tickers()`（`pulse.py:437`）先经 `note_print()` 去重再 fan-out，挂后面会漏 tick ⇒ processor 必须挂**原始 ticker event、去重之前**；完成日线走既有 `store_ib_daily()`、日内快照走 `upsert_delayed()`。零迁移、零 `pricing.py` 改动；`market_bars` 的 `UNIQUE (symbol, ts, source)` 已够用 |
 | **D94** | 架构：「ib delayed」含义／实时数据准则（确认问 4 ＋ 补充确认） | (a) 指整点快照行 (b) 指 delayed 报价源 (c) 两者 (d) 仅是备注；**手写「I am not sure…build based on live market data as much as possible」⇒ 补一次 R5 价格源确认** | **✅ 手写答复 ＋ 补充确认取「`last_tradeable_price()` 原样」** | 实测纠正三处（§20.3）：**(i)** `ib-delayed` **不是**「没有真 tick 时的备份」—— `last_tradeable_price()`（`pricing.py:65`）**优先**取最新 `ib-delayed` 整点行、`ib-daily` 才是回落，`quote_pair()` 同序；`pendingTickersEvent` 的 tick 从不持久化，整点 `ib-delayed` 行就是唯一的日内持久表示。**(ii)** `gate.py:31` 是委托守卫、**不拦订阅**，真正无 IND 路径的是 `stock_contract()`／`_qualify_stock()`／`_quote_contract()`。**(iii)** `_merge()`（`:318-320`）丢弃没有 `ib-daily` 行的日子 ⇒ delayed-only 行**不会**污染 rails／RV20／`year_view()`。R5 v1 按补充确认**原样使用** `last_tradeable_price()`；「尽量基于实时行情构建」登记为「R7 数据源」轮的**常设要求**，§6 本批次仍冻结 |
+| **D95** | R6 Q1：外部 watchdog 落点（§22.6） | (a) 出站 dead-man 打卡 (b) 外部拉取探测 (c) 同机 launchd watchdog (d) 拆两轮 | **✅ (a) 出站 dead-man 打卡** | 案例：22:40 HKT 拔掉 Mac mini 电源，§4 验收要 22:50 收到「guardian is down」。实测心跳在本机 Postgres（`050`）、发送端在 `loop.py:143` 同进程 daemon、两个 HTTP server 绑 `127.0.0.1`、唯一公网入口随机 URL 且无 health 路由 ⇒ **D80 悖论在机器级重演，单机内无存活组件能报自己的死亡**。取 (a)：Mac mini 每 5 分钟发**出站** check-in，外部服务 10 分钟静默即告警；零入站端口、零隧道改动、整机死亡可检出。否决 (b)：须开入站路径／改隧道行为／多一台常开机；否决 (c)：只能覆盖「进程崩、机器活」，整机断电仍不可报 ⇒ 第三次 §4 口径校正；否决 (d)：把 D80 已归属 R6 的能力再推走 |
+| **D96** | R6 Q2：外部探测器看的信号（§22.6） | (a) 独立出站打卡 (b) 复用 `nag_tick()` 顺手打卡 (c) 新建 `guardian_heartbeats` 表 (d) 探 `/c/ready` | **✅ (a) 独立出站打卡** | `runtime.py:160-173` 是**第二个心跳生产者**（`cycle_minutes` 节奏），且断电时该行不可读。新增独立 launchd job 每 5 分钟打卡；R4 的 `cycle_progress.updated_at` 保持为**进程内**心跳，两个信号互不替代。否决 (b)：打卡与发送端同进程 ⇒ 回到 D80；否决 (c)：DB 行断电读不到且占 `056`；否决 (d)：URL 每次重启随机、无鉴权 health 语义、改隧道行为 |
+| **D97** | R6 Q3：down／recovered 形态与落点（§22.6） | (a) 单次推送 (b) 写 `guardian_alerts` 行进 `/guard` (c) 24/7 不门控 (d) 5 分钟催办直到 ack | **✅ (a) 单次推送** | `is_us_session()`（`guardian_schedule.py:89-99`，ET 09:30–16:00、DST-safe、无假日历）＋ **10 分钟 grace**；一条 `notify_guardian_once()`「down」＋ 恢复后一条「recovered」，**不进 5 分钟 nag、不写 `guardian_alerts`、不做 inline Resolve**；去重状态放 `var/` 本机小文件（`telegram.py:40` 先例）。否决 (b)：DB 在告警时刻可能已断电、行会迟到且造**第二套 ack**（D62／D83）；否决 (c)：违背 D65「仅 US 时段」；否决 (d)：死机无法 ack ⇒ 永久轰炸，违背 §6「maximum intrusion」 |
+| **D98** | R6 Q4：launchd 监督范围（§22.6） | (a) Postgres ＋ orchestrator ＋ 可选 cloudflared (b) 加 IBC 让 Gateway 自动登录 (c) 只给 orchestrator 一张 plist (d) 只写 runbook | **✅ (a) Postgres ＋ orchestrator ＋ 可选 cloudflared** | 实测 `athena-exec` **无 console script**、`pulse.py:265` 是同进程 daemon 线程 ⇒ 00 册 §6「exec-ib 为独立进程」措辞按实测记**口径校正**、**不改 D64 原文**。`KeepAlive`／`RunAtLoad`／`WorkingDirectory` 三件套；IB Gateway 2FA 登录记为**操作者一次性步骤**写进 runbook（诚实留白）。否决 (b)：引入第三方凭据处理面、超出 D64；否决 (c)(d)：「重启后无需 shell 自恢复」不完整／等于没交付 D64 |
+| **D99** | R6 Q5：看门狗代码落点与依赖（§22.6） | (a) `deploy/macos/` stdlib-only (b) 新建 `apps/watchdog` (c) 纯核心放 orchestrator (d) 不做 US 门控 | **✅ (a) `deploy/macos/` stdlib-only** | plist ＋ 一个 **stdlib-only** 脚本（urllib／zoneinfo／json）；复制 ET 会话规则并加一条与 `is_us_session()` 的 **parity 单测**。零新 workspace 包、零 `uv.lock` 变动、零迁移。否决 (b)：新包 ＋ lock churn ＋ 重依赖拖进部署单元；否决 (c)：仍把 orchestrator 拉进部署单元；否决 (d)：违背 D65 |
+| **D100** | R6 Q6：§6 边界处理（§22.6） | (a) 显式窄 carve-out (b) §6 零修订当范围外基建 (c) 完整修订允许第二通道 (d) 先单独裁定 §6 | **✅ (a) 显式窄 carve-out** | **本轮唯一一处真实边界修订**：§6 追加一条 R6 专用分句 ——「允许**出站** dead-man 打卡；告警仍走**既有 Telegram 通道**、不新增通知通道、**隧道行为不变**」。作为**已裁定修订**写入 §22.7，不在实现里顺手改（§13.7 纪律）。第三方托管的 bot token 只走 env、**绝不入库**；`08-ops-backup-remote.md:109` 的 Feishu＋Telegram 双通道是**未裁定旧稿**，不采纳。否决 (b)：把已裁基建藏进文档、边界失实；否决 (c)：扩大侵入面超出 D61／D80；否决 (d)：无谓拆轮 |
+| **D101** | R6 Q7：双 Gateway client id 冲突（§22.6） | (a) env 分离 (b) hostname 派生 base (c) 忽略 (d) 单开 IB 账号 | **✅ (a) env 分离** | `clients.py:20-30` 按 `IB_CLIENT_ID` base 派生 session／orders／probe／pulse／telegram；Windows 与 Mac mini 同账号同 base ⇒ Gateway 报 326。Mac mini 用不同 base 写进 `.env`／runbook，**零代码改动**，`C-20261013-34` 已验证该模式。否决 (b)：改已交付代码、要回归 R1–R5；否决 (c)：与「专用常开机」并列运行冲突；否决 (d)：超出 D64（裁的是独立 client id，不是独立账号） |
 
 ---
 
@@ -162,9 +173,11 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 - **R4（§17，第十轮 D80–D83）**：四条裁定全部落在既有接缝内 —— D80 归 R6、D81 用 `register_callback` 注入（零环依赖）、D82 专用 300s daemon、D83 复用 R2 state 唯一性 ＋ 重复自检。⇒ **本节「No new market data sources」／「5-min nag is the maximum intrusion. No email, no second channel, no phone call」与 §1「no drafts, no orders, no tactic changes」三条边界均保持原文、零修订**；零新通道、零新数据源、零订单／草案／门控、零新迁移（`055` 不动）。
 - **R5（§19，第十一轮 D84–D90）＋ 架构拆分（§20，D91–D94）**：D84 只接既有真源标的、D85 声明字段零迁移、D86 只清 grade、D87 挂 nag_tick、D88 意图登记但实现取 (a)、D89 danger、D90 `/settings` 增删表；D91 明确把 processor／VIX **拆到独立「R7 数据源」裁定轮**。⇒ **本节「No new market data sources」与 §1「no drafts, no orders, no tactic changes」两条边界仍保持原文、零修订**；零新数据源、零第二通道、零订单／草案／门控、零新迁移（`055` 仍归 R7 `regime_labels`、不建 `056`）。D92–D94 是该未来轮的**预裁定输入**，不是 R5 实现指令；该轮开工时仍须先显式修订本节。
 
+- **R6（§22，第十二轮 D95–D101，✅ 本计划首次显式边界修订）**：允许 Mac mini 发起**出站** dead-man 打卡（D95／D96）；心跳告警仍走**既有 Telegram 通道**（D97 `notify_guardian_once()` 单次推送，不进 5 分钟 nag、不写 `guardian_alerts`）。⇒ **不新增通知通道、不新增第二通道、Cloudflare quick tunnel 行为不变**；`08-ops-backup-remote.md` 的 Feishu＋Telegram 双通道与 Tailscale 仍为**未裁定旧稿**，不采纳。第三方 check-in 服务所需的 bot token 只走 env／操作者配置，**绝不写进仓库**。§1「no drafts, no orders, no tactic changes」保持原文、零修订；零新数据源、零新迁移（`055` 仍归 R7 `regime_labels`、不建 `056`）。**D100 按 §13.7 纪律显式裁定后在 §22.7 记录，不在实现里顺手改掉。**
+
 ---
 
-## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分）
+## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分 ＋ 第十二轮 R6）
 
 操作者指令：「每個問題問我一遍，我來回答」。分两轮、每条带具体案例逐条问，**8 条全取推荐、零偏离、无跳过**（第六轮 D58–D65 的原始记录；第七／八／九轮见下文各节）。
 
@@ -291,6 +304,30 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 
 > Q5／D88 手写答复原文：「athena 现在已经有ibkr 的 realtime tick 了，不会要用 ib delayed」。确认问项另两份手写原文：「应该做一些 processor 机制，会收到ticker event，该怎么处理怎么处理，比如计算 day bar，或其他需要。以后但凡需要数据的都用类似的方式去添加新的processor 就好了。」／「我希望去拿到 vix tick 数据， 就像是一个真的ticker 一样，加到universe 里，用 processor 概念去计算其他维度的 vix 数据」。
 > D94 手写答复原文：「I am not sure, because ib-delayed is only used when there is no real ticks as a back up. But you should be building based on live market data as much as possible」；补充确认问项取推荐 (a)「Use `last_tradeable_price()` 原样」，不另编号、并入 D94（沿用第十轮 Q4／D83 先例）。
+
+### 第十二轮（2026-11-23，R6 实现契约 Q1–Q7 → D95–D101）
+
+操作者 2026-11-22 指令 `OK please keep going on R6.`。按 doc-first 先只读调研 ＋ 合并落地前契约（§22 八个子节 ＋ 21 行精确行号接缝表 ＋ `C-20261123-1`，零代码、零迁移、待裁定），再按「每個問題問我一遍」分两轮（Q1–Q4／Q5–Q7）逐条带具体案例、用英文问过。**七条全取推荐、零偏离、零跳过、无手写答复**，故无需补充确认问项（与第十轮 Q4／D83、第十一轮 Q5／D88 不同）。
+
+| 轮 | 决策 | 案例（问的是什么） | 裁定 |
+|---|---|---|---|
+| 1 | **D95** | 22:40 拔 Mac mini 电源，心跳在本机 DB、发送端同进程、无外部可探端点，22:50 谁能报「down」 | ✅ (a) 出站 dead-man 打卡；整机死亡可检出、零入站端口、零隧道改动 |
+| 1 | **D96** | 10:00 orchestrator 卡住但 `cycle()` 仍写 `updated_at`，外部探测器该看什么 | ✅ (a) 独立出站打卡；与 R4 进程内心跳互不替代 |
+| 1 | **D97** | 22:50 报 down、23:10 回来要不要再报；05:00 HKT 休市时抖 20 分钟报不报 | ✅ (a) `is_us_session()` ＋ 10 分钟 grace，单次 down／recovered 推送，不进 nag／不写 `guardian_alerts` |
+| 1 | **D98** | 断电重启 Postgres 要先起、Gateway 2FA 只能人工；`athena-exec` 其实不是进程 | ✅ (a) plist 覆盖 Postgres＋orchestrator＋可选 cloudflared；Gateway 2FA 记 runbook 留白；00 册措辞口径校正 |
+| 2 | **D99** | `is_us_session()` 在 orchestrator 包里，独立脚本 import 它会拖进整条依赖链 | ✅ (a) `deploy/macos/` stdlib-only ＋ parity 单测 |
+| 2 | **D100** | Q1(a) 的第三方 check-in 不在「no second channel／tunnel unchanged」原文里 | ✅ (a) §6 **显式窄 carve-out**，作为已裁定修订记录、bot token 只走 env |
+| 2 | **D101** | Windows 与 Mac mini 同账号都用 `IB_CLIENT_ID=1`，Gateway 报 326 | ✅ (a) env 分离 base，零代码 |
+
+**裁定后的状态变化**：
+
+- 决策编号扩到 **D1–D101（102 个节点，`D4` 拆两段）**，**决策层面零待决**；§22.6 的「裁定前不编号」约定兑现为 D95–D101。累计 **44 条裁定：41 条取推荐、3 条明确偏离（D75／D83／D88）、零跳过**。
+- **§6 出现本计划首次真实边界修订（D100）**：原文三条分句（无订单／无新数据源／无第二通道）保持不动，**追加**一条 R6 专用 carve-out ——「允许出站 dead-man 打卡；告警仍走既有 Telegram 通道、不新增通知通道、隧道行为不变」。这是**显式裁定**，不是实现里顺手改（§13.7）。**§1 保持原文、零修订**。
+- **§4 R6 验收栏**：「断电测试：杀机收到心跳告警」按 D95 由**机箱外的 dead-man 服务**兑现（不再是第三次口径校正）；「重启后无需 shell 自恢复」按 D98 记为 **Postgres＋orchestrator＋cloudflared 自动重启，IB Gateway 2FA 为一次性人工步骤**的诚实留白，以注记追加、**不改写 §4 历史原文**。
+- **00 册 §6 R6 行**「exec-ib 为独立进程」按实测记口径校正（`athena-exec` 是库、`pulse.py` 是同进程线程），**不改 D64 原文**。
+- **零迁移**：`055` 仍归 R7 `regime_labels`、不建 `056`；R6 心跳复用既有 `050 cycle_progress.updated_at`，看门狗去重状态放 `var/` 本机小文件（`telegram.py:40` 先例）。
+- **「R7 数据源」裁定轮（D79）仍未开工**；R6 不建 VIX feed、不动 `pulse.py`／`quote_fields()`／`gate.py`／`reqMktData`。processor／VIX ticker 仍属 D91–D94 预裁定输入。
+- 裁定轮**零代码改动**；R6 实现、验证与交付记录另起 §23 与同日后续台账条目。
 
 ---
 
@@ -1030,5 +1067,154 @@ Q5／D88 的手写答复与两份确认手写答复，把两个性质不同的�
 
 ---
 
+## 22. R6 实现口径：常开主机、launchd 自恢复与外部心跳看门狗（2026-11-23，✅ 第十二轮已裁定 D95–D101）
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 37 条 / D1–D94 95 个节点零待决）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 待办；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、§21 R5 交付记录 ✅ 已回填；零迁移、§1／§6 边界零修订、`055` 不动**
+> **来源**：操作者 2026-11-22 指令 `OK please keep going on R6.`；2026-11-23 按 doc-first 纪律继续。本节是**落地前契约，不是交付记录**。
+> **状态**：**✅ 第十二轮已裁定（2026-11-23，Q1–Q7 → D95–D101，七条全取推荐、零偏离、零跳过）**；裁定记录见 §22.6 与 §7 第十二轮、`C-20261123-2`，交付记录见 §23（✅ 已实现并验证，2026-11-24，`C-20261124-1`）。**裁定轮零代码、零迁移、零运行时改动、不提交。**
+> **依赖**：R4 已交付（§17 契约／§18 交付记录，`guardian_nag.py` 的 300s daemon 与 `notify_guardian_once()` 已就位）；R5 已交付（§19／§21）；R6 是基础设施，可与 R3–R5 并行但不应落后太远（§4 排序说明）。
+> **相关**：§3 每日仪式、§4 R6 行、§5 D64／D65／D80、§6 边界、§17.3① dead-man 悖论、§18 已知留白①、00 册 §6 实施欠账新增组、`C-20261123-1`。
+
+### 22.1 已裁定的输入（不是新决策）
+
+| 已裁定项 | 对 R6 的约束 |
+|---|---|
+| **D64** | 主机＝**家用专用 Mac mini**；IB Gateway 同机；`launchd` 断电自恢复；单独 Gateway client id（`C-20261013-34` 模式）。否决 Windows 共用机（5090／ComfyUI 抢资源）与云 VPS（**仅指交易主机**：IB 2FA ＋ 住宅 IP 期待） |
+| **D65** | **US 时段 10 分钟无心跳 → Telegram**；否决「只在定时跑检查」（22:40 死亡直到次日盘前不可见）与 5 分钟（短抖动造假 down）。原文不改 |
+| **D80** | R4 只做进程内可观测（失败行／5 分钟心跳／重启后补报）；**「死亡期间实时告警」明确归 R6 外部 watchdog**；§4 R4 验收栏已记口径校正、D65 原文不改 |
+| **D61／§6** | 5 分钟 nag 是入侵上限；**无 email、无第二通道、无电话**。R6 的 down 通知不是 ack 告警，不得进 5 分钟 nag |
+| **D71** | `notify_guardian_once(text, markup)` 是**单次推送**接口，与 nag 循环分离 —— 外部 watchdog 的天然发送落点 |
+| **D82** | 固定 300s daemon 由代码硬编码、不受 `cycle_minutes` 影响；R6 的外部节奏另定，但不得改 R4 语义 |
+| **§14.5** | 无 US market holiday calendar；`is_us_session()` 只滤周末，假日按普通工作日处理 —— 诚实留白延续 |
+| **§6** | 「R6 covers the *machine*, not a networking overhaul. **Tunnel behaviour is unchanged.**」；「No new market data sources」 |
+| **§1** | no drafts / no orders / no tactic changes；只读 IB 与 store，除自身 alert/ack 表 |
+| **00 册 §6 R6 行** | 「orchestrator ＋ exec-ib ＋ IB Gateway 在 `launchd` 看门狗下自恢复；10 分钟无心跳即 Telegram」；验收「断电测试：杀机收到心跳告警、重启后无需 shell 自恢复」 |
+
+### 22.2 只读接缝实测（2026-11-23，精确行号；本轮零代码改动）
+
+| # | 位置 | 实测事实 | R6 相关性 |
+|---|---|---|---|
+| 1 | `guardian_nag.py:244`／`:282`／`:343`／`:440` | `_HEARTBEAT_SQL = "UPDATE cycle_progress SET updated_at = now() WHERE id = 1"`；`touch_heartbeat()` 是 `nag_tick()` **第一行、无条件**执行；daemon 固定 `_STOP.wait(300)`（D82） | 唯一既有心跳，**24/7 写入**、不区分 US 时段 ⇒ D65 的门控只能放在消费端 |
+| 2 | `050_cycle_progress.sql:1-5` | `id=1 CHECK`、`payload jsonb`、`updated_at timestamptz` 单行 | 心跳落在 **Mac mini 本机 Postgres**（`.env.example:26` `127.0.0.1:55432`）⇒ 整机断电时该行本身不可读 |
+| 3 | `runtime.py:160-173` | `bind_database.save()` 每次 `persist()` 也写同一行 `INSERT ... ON CONFLICT DO UPDATE SET payload, updated_at=now()` | **第二个心跳生产者**，节奏是 `cycle_minutes`（Settings 可改 1–60 分钟）；同一列被两条不同节奏推进 |
+| 4 | `guardian_schedule.py:89-99` | `is_us_session(now)`：ET 09:30–16:00 ＋ 工作日、DST-safe、拒 naive datetime、无假日历 | D65「US 时段」的天然门控；纯函数，但位于 `athena_orchestrator` 包内 |
+| 5 | `guardian_nag.py:69`／`:204` | `DEADMAN_GRACE = timedelta(minutes=10)` 只用于 `deadman_findings()` 的 **missed／failed scheduled runs** | 与 D65「10 分钟无心跳」是**两个不同信号**，不得混用或互相伪装 |
+| 6 | `apps/bots/.../telegram.py:73`／`:90`／`:96-114`／`:949-957` | `notify_guardian_once()`（D71）＋ `TelegramClient.call("sendMessage")`；`_live_send()` 在 `DATABASE_URL` 为空／不可读时**回落 env** `TELEGRAM_BOT_TOKEN` ＋ `_allowlist()` | 外部看门狗可**不依赖 DB** 发送，复用既有 Telegram 通道 ⇒ 不构成「第二通道」 |
+| 7 | `telegram.py:227`／`loop.py:143-145` | `start_telegram_polling()` 在 orchestrator 进程内起 daemon；`TELEGRAM_MODE=polling` 时启动 | 长轮询是**接收**路径；`sendMessage` 单向推送不需要它 |
+| 8 | `console.py:1011`／`:1126-1128`；`cockpit.py:162-173` | `/api/health` 存在，但 server 绑定 `("127.0.0.1", 8788)`；`health_report()` 五项检查**不含心跳 age**（`_orchestrator_check()` 只报 uptime／cycle） | 现有健康端点仅本机可达，且不报告心跳新鲜度 |
+| 9 | `control.py:302`／`:243-257`／`:361` | control server 也绑 `127.0.0.1`；`do_GET` 只认 `/c/<one-time-token>`，无 token ⇒ 404；**无 health／ping 路由** | 现有 Cloudflare quick tunnel 后面没有可供外部探测的活跃度端点 |
+| 10 | `tunnel.py:20-56`／`:58-70`；`loop.py:120-122` | quick tunnel 每次重启给随机 `*.trycloudflare.com`，写 `ATHENA_PUBLIC_BASE_URL`；`_wait_ready()` 探 `/c/ready`，`HTTPError < 500` 即视为就绪 | URL 不稳定、随进程生死；§6 明写「Tunnel behaviour is unchanged」 |
+| 11 | `apps/orchestrator/pyproject.toml:22`／`apps/exec-ib/pyproject.toml` | 唯一 `[project.scripts]` 是 `athena-orchestrator = "athena_orchestrator:main"`；**`athena-exec` 无 scripts** | **「exec-ib 是独立进程」不成立**：它是库，`pulse.py:265` 的 `_refresh_loop` 是同进程 daemon 线程。00 册 §6 R6 行措辞需口径校正 |
+| 12 | `loop.py:128-145` | 单进程内起 backfill／order_watch／R3 scheduler／R4 nag／R4 callbacks／fx／telegram polling／console／control／tunnel／pulse | 一次 `kill -9` 带走全部发送端（D80 已实测） |
+| 13 | `loop.py:155-168`；`__init__.py:27-40` | 两条「ops restart」分支都 `return` 出 `run_loop()` ⇒ `main()` 结束、**进程退出**；当前**无任何外部监督者**重启它 | launchd `KeepAlive` 正是缺失的那一环；但「主动退出」与「崩溃」在 launchd 下同样触发重启 |
+| 14 | `deploy/windows/athena-orchestrator.ps1`／`deploy/windows/README.md` | 3 行 sketch，明写「does not install a Windows service」；全库 Glob `**/*.{plist,service,sh,launchd}` **零命中** | D64 裁的是 Mac mini ＋ `launchd`，仓库现状仍是 Windows 草图、**零 plist** |
+| 15 | `apps/ops-agent/README.md`／`apps/control-web/README.md` | ops-agent 只有一行「Restart and health commands. Not started. See tracker P3-05.」 | `08-ops-backup-remote.md:9-19` 描述的远程 health／restart **未实现**，不得当作既有能力 |
+| 16 | `docs/athena/08-ops-backup-remote.md:89-95`／`:109-114` | 建议 Tailscale；「Alerting (ops) CRITICAL → **both Feishu and Telegram**」 | 与 §6「no second channel」及「R6 不是 networking overhaul」冲突，属**未裁定的旧稿**，R6 不得顺手采纳 |
+| 17 | `.env.example:18-22`；`clients.py:11-30`；`C-20261013-34` | `IB_CLIENT_ID=1` 为 base；`client_id(role)` 按 offset 派生 session／orders／probe／pulse／telegram；`ATHENA_GATEWAY_RESTART_CMD` 空 ⇒ `/ops gateway restart` 什么都不做 | D64「独立 client id」在**单 Gateway** 下已由 `clients.py` 满足；若 Windows 与 Mac mini 同账号并存会撞 id |
+| 18 | `.env.example:26`／`:52-55` | `DATABASE_URL` 指向 `127.0.0.1:55432`；`ATHENA_CONTROL_PORT=8787`／`ATHENA_TUNNEL=cloudflared` | 外部观察者无法读本机 DB；§6 冻结隧道行为 |
+| 19 | `packages/store/pyproject.toml:12-61`；`migrations/` | 50 个迁移 `001..054`，`force-include` 逐文件登记；**`055` 物理缺失、冻结给 R7 `regime_labels`** | R6 零迁移目标；`guardian_alerts` 在 DB 断电时写不进去，看门狗状态不应放新表 |
+| 20 | `README.md:124-126`／`:217-230` | 启动方式是手工 `uv run athena-orchestrator`；IB Gateway 需人工安装、启用 API 并 **2FA 登录** | 「重启后无需 shell 自恢复」目前完全依赖一个不存在的 supervisor；Gateway 2FA 是诚实留白 |
+| 21 | `telegram.py:40`；`var/`（`.gitignore`） | `OFFSET_PATH = Path("var/telegram.offset")` 是既有「本机小文件存状态」先例 | 外部看门狗的 down／recovered 去重状态可沿用文件形态，零迁移 |
+
+### 22.3 七个硬问题（裁定前的原始记录，不预设结论）
+
+**① 整机死亡悖论（最重要）。** §4 R6 验收写「Unplug test: kill the box, get the heartbeat alert」，D80 把「死亡期间实时告警」明确归 R6 外部 watchdog。但实测：心跳在**本机 Postgres**（`050`）、发送端在**同进程**（`loop.py:143`）、两个 HTTP server 都绑 `127.0.0.1`、唯一公网入口是随机 URL 的 quick tunnel 且**无 health 路由**。整台机器断电时，本机没有任何存活组件能观测或上报自己的死亡 —— 这是 D80 悖论在**机器级**的重演。外部观察者必须放在机箱之外，或改成「**出站打卡 ＋ 缺席即 down**」。见 Q1。
+
+**② 心跳信号本身不可从机外读取。** `cycle_progress.updated_at` 在 `127.0.0.1:55432`；外部探测器既连不上 DB，也无稳定端点可探。且 `runtime.save()` 与 `nag_tick()` 两个生产者以不同节奏推进同一列，`cycle_minutes` 可改 ⇒ 把它当唯一活跃度信号，会把「orchestrator 卡住但 cycle 仍在写」误判为存活。见 Q2。
+
+**③ D65 的「10 分钟」与 R4 的 `DEADMAN_GRACE` 同名不同物。** R4 的 10 分钟是「A/B 定时跑缺行」的 grace（`guardian_nag.py:204`），D65 的 10 分钟是「无心跳」。合并会让一次失败的定时跑伪装成整机 down，或反过来。且 D65 的 US 时段门控只能用 `is_us_session()`（ET 09:30–16:00、无假日历）；若外部看门狗不能导入该包，就须复制纯函数并做一致性断言。见 Q3／Q5。
+
+**④ 「exec-ib ＋ IB Gateway ＋ orchestrator 三个进程」措辞与代码不符。** `athena-exec` 无 console script，`pulse.py` 是同进程线程。launchd 实际要监督的是 `athena-orchestrator` ＋ Postgres ＋（可选）cloudflared；IB Gateway 的 **2FA 登录在当前代码下无法无人值守自动完成**（`README.md:124`）。「重启后无需 shell 自恢复」对 Gateway 只能是诚实留白，或引入 IBC。见 Q4。
+
+**⑤ §6 边界。** 「5-min nag is the maximum intrusion. No email, no second channel, no phone call.」「R6 covers the *machine*, not a networking overhaul. Tunnel behaviour is unchanged.」任何外部看门狗方案要么引入第三方 check-in 依赖，要么开新入站路径／改隧道行为；`08-ops-backup-remote.md` 的 Feishu＋Telegram 双通道与 Tailscale 是**未裁定旧稿**，不得顺手采纳。若 check-in 服务须代发 Telegram，bot token 会托管在第三方配置中 —— **凭据面须在 Q6 一并裁定；本仓库不得把 token 写进任何提交文件**。见 Q6。
+
+**⑥ 告警落点不能是 `guardian_alerts`。** 外部看门狗在 DB 可能已断电时告警，`053` 表写不进去；R4 的 5 分钟 nag 与 `guardres` inline Resolve 是 **ack 动作面**（D62／D83），而「机器 down」是不可 ack 的事实通知。硬写 `source='watchdog'` 行会造第二套 ack，且在重启后才迟到。见 Q3。
+
+**⑦ 零迁移与号段。** `055` 冻结给 R7 `regime_labels`；看门狗状态（上次打卡、是否已报 down、是否已报 recovered）应放本机小文件（`var/` 先例），而非新表。若裁定要用新表，须顺延 `056` 并逐文件登记 `force-include`。见 Q5。
+
+### 22.4 合规形态（✅ 第十二轮已裁定 D95–D101）
+
+R6 = **机箱外的 dead-man 服务（D95）** ＋ **Mac mini 上一条独立出站打卡 launchd job（D96）** ＋ **`deploy/macos/` 的 stdlib-only 脚本与 plist（D98／D99）** ＋ **`notify_guardian_once()` 单次推送（D97）**。
+
+分层沿用 R1–R5 纪律：**纯核心**（`is_us_session()` 等价的 ET 会话判定、10 分钟 grace、down／recovered 去重，零 IO）→ **薄 IO**（出站 HTTP 打卡、`var/` 状态文件、env-only Telegram `sendMessage`）→ **发送适配**（既有 `athena_bots` 通道，D71 单次推送）→ **launchd 生命周期**（Postgres／orchestrator／cloudflared 的 `KeepAlive`／`RunAtLoad`）。
+
+进程拓扑按实测收敛：`athena-orchestrator` 是**唯一** console script；`athena-exec`、`pulse.py`、R3 scheduler、R4 nag、Telegram polling 全在同一进程内（§22.2 第 11／12 行）。R4 的 `cycle_progress.updated_at` 继续作为**进程内**心跳（D80 已交付语义不动）；R6 的**出站打卡**是与之并列的第二个信号（D96），两者互不替代、互不改写。
+
+告警集合：**一次** down ＋ **一次** recovered，按 `(US 时段内、静默 ≥ 10 分钟)` 触发；US 时段外静默不告警、也不累计（D65／D97）。去重状态在 `var/` 本机小文件，进程重启后仍可读，避免重复轰炸。**不写 `guardian_alerts`**：那是 D62／D83 的 ack 动作面，而「机器 down」是不可 ack 的事实通知（§22.3⑥）。
+
+### 22.5 由已裁定项推导的实现口径（✅ 第十二轮已裁定 D95–D101）
+
+- **零迁移**：`055` 仍归 R7 `regime_labels`（§14.2／§16.6），不建 `056`；`packages/store/pyproject.toml` 的 `force-include` 不动。心跳读既有 `050 cycle_progress.updated_at`（只读，不改 R4 `touch_heartbeat()`）；去重状态放 `var/`（`telegram.py:40` 先例）。
+- **§6 显式窄修订（D100，本轮唯一边界改动）**：在 §6 末尾追加一条 R6 专用分句，原文三条分句不动、§1 不动。措辞见 §22.7。**第三方 check-in 服务所需的 bot token 只走 env，不写进任何提交文件**；若服务必须代发 Telegram，凭据面在 runbook 中列为操作者配置项。
+- **§1 零修订**：不产生订单／草案／门控；不新增市场数据源（D79 轮仍未开工）；不新增通知通道 —— down／recovered 走**既有** `athena_bots` Telegram 通道（`_live_send()` 在 DB 不可读时回落 env token，`telegram.py:949-957`）。
+- **隧道零改动**：不新增入站路径、不改 `tunnel.py`、不用 `/c/ready` 做健康探测（§22.2 第 9／10 行）。出站打卡是唯一新增网络行为。
+- **US 时段与诚实留白**：`is_us_session()` 等价判定为 ET 09:30–16:00 ＋ 工作日、DST-safe；**无 US market holiday calendar**（§14.5 延续），假日按普通工作日处理。`deploy/macos/` 脚本复制该规则，须有一条与 `guardian_schedule.is_us_session()` 的 **parity 单测**（D99）。
+- **只读边界**：不改 R2 `guardian_alerts`／`reconcile()`、R3 ET 调度、R4 `nag_tick()`／`guardres`／`DEADMAN_GRACE`、R5 `guardian_trigger.py`；不改 `clients.py`（D101 走 env）；不改 `drafts.decide()` / `advisor.py` / `wheel.py` / `guardian.py` / `pulse.py` / `pricing.py`。
+- **客户端号**：Mac mini 使用与 Windows 不同的 `IB_CLIENT_ID` base，写进 `.env`／runbook（D101），`C-20261013-34` 的 per-role offset 模式零代码复用。
+- **IB Gateway 2FA 留白（D98）**：`README.md:124` 的人工登录步骤无法无人值守自动化；plist 不覆盖 Gateway 的自动认证，「重启后无需 shell 自恢复」限定为 **Postgres ＋ orchestrator ＋ cloudflared**。
+
+### 22.6 裁定记录 Q1–Q7（✅ 第十二轮已裁定 D95–D101）
+
+沿用「每個問題問我一遍」惯例，每条带具体案例、用英文逐条问（两批：Q1–Q4／Q5–Q7）。下表是**裁定前**的问项与推荐（原文保留、不改写）；**裁定结果见紧随其后的结果表，并另起 `C-20261123-2`**。
+
+| 问 | 问题（带案例） | 选项 | 推荐 |
+|---|---|---|---|
+| **Q1** | 22:40 HKT 把 Mac mini 电源拔掉，§4 验收要 22:50 收到「guardian is down」。但本机 Postgres（心跳）、同进程 Telegram daemon（发送端）、两个 `127.0.0.1` server 一起消失，唯一公网入口是随机 URL 的 quick tunnel 且没有 health 路由。外部 watchdog 放在哪？ | (a) **出站打卡 ＋ 外部 dead-man 服务**：Mac mini 每 5 分钟发一次出站 check-in，服务 10 分钟收不到即告警；零入站端口、零隧道改动、整机死亡也可检出；代价是第三方 check-in 依赖，须显式修订 §6（Q6）(b) 外部拉取式探测：第二台常开机／小 VPS 经 Tailscale 或新公网 health 路由轮询；须开入站路径、改隧道行为、多一台常开机 (c) 同机 launchd watchdog 进程：第二进程读本机 `cycle_progress.updated_at`、用 env-only `notify_guardian_once()` 发 Telegram；零新基建、§6 零修订，但只能覆盖「orchestrator 崩了但机器活着」，整机断电仍不可报 ⇒ §4 验收栏第三次口径校正 (d) 拆分：本批次只交 launchd 自恢复，整机死亡告警另起一轮 | **(a)** |
+| **Q2** | 外部探测器到底看什么信号？例：22:40 整机断电、22:50 要判 down；而 10:00 只是 orchestrator 卡死、但 `cycle()` 仍在写 `updated_at`。 | (a) **独立出站打卡**：新增独立 launchd job 每 5 分钟发一次 check-in；R4 的 `cycle_progress.updated_at` 保持为进程内心跳，两个信号互不替代；零迁移 (b) 复用 `nag_tick()` 在同一 300s tick 里顺手打卡：部件最少，但「整机死」与「orchestrator 死」不可区分，打卡与发送端又同进程 ⇒ 回到 D80 悖论 (c) 新建 `guardian_heartbeats` 表（顺延 `056`）：DB 行在断电时读不到，且占 `056` (d) 探现有 quick tunnel 的 `/c/ready`：URL 每次重启随机、无鉴权 health 语义、改隧道行为 | **(a)** |
+| **Q3** | down／recovered 消息怎么发、落在哪？例：22:50 报 down；23:10 机器回来，是否再报一条？05:00 HKT（US 休市）网络抖 20 分钟要不要报？ | (a) **单次推送**：`is_us_session()` 门控（ET 09:30–16:00、DST-safe、无假日历）＋ 10 分钟 grace；一条 `notify_guardian_once()`「down」＋ 恢复后一条「recovered」，**不进** 5 分钟 nag、不写 `guardian_alerts`、不做 inline Resolve；去重状态放本机小文件 (`var/` 先例) (b) 写 `source='watchdog'` 行进 `guardian_alerts`、进 `/guard` 面板并复用 `guardres` Resolve：DB 在告警时刻可能已断电、行会迟到，且造第二套 ack (c) 24/7 不门控、抖 10 分钟就报：与 D65「仅 US 时段」及「否决假 down」冲突 (d) 像 R4 一样每 5 分钟催办直到人工 ack：机器 down 无法 ack ⇒ 永久轰炸，与 §6「maximum intrusion」冲突 | **(a)** |
+| **Q4** | launchd 实际管哪些进程？例：断电重启后 Postgres 必须先起，`main()` 从 CWD 读 `.env` 并写 `var/athena.log`；IB Gateway 的 2FA 登录目前只能人工。 | (a) **plist 覆盖 Postgres ＋ `athena-orchestrator` ＋ 可选 cloudflared**（`KeepAlive`／`RunAtLoad`／`WorkingDirectory`）；IB Gateway 2FA 记为**操作者一次性登录步骤**写进 runbook；00 册 §6「exec-ib 为进程」按实测记口径校正、**不改 D64 原文** (b) 引入 IBC／IB Controller 让 Gateway 也无人值守自动登录：多一个第三方依赖与凭据处理面，超出 D64 裁定范围 (c) 只给 orchestrator 一张 plist，Postgres／Gateway 假定由各自安装器托管：最简，但「无需 shell 自恢复」不完整 (d) 只写 runbook、不落 plist：等于没交付 D64 | **(a)** |
+| **Q5** | 看门狗代码放哪、允许依赖什么？例：`is_us_session()` 在 `athena_orchestrator.guardian_schedule`；独立脚本若 import 它，会把 bots／exec／store／strategy 一整串拖进来。 | (a) **`deploy/macos/`：plist ＋ 一个 stdlib-only 独立脚本**（urllib／zoneinfo／json），复制 ET 会话规则并加一条与 `is_us_session()` 的 parity 单测；零新 workspace 包、零 `uv.lock` 变动、零迁移 (b) 新建 `apps/watchdog` workspace 包、直接复用 `is_us_session()`：单一真源，但新增包 ＋ lock churn ＋ 重依赖 (c) 把纯核心放进 `athena_orchestrator`、脚本只 import 该模块：折中，但仍把 orchestrator 拉进部署单元 (d) 看门狗不做 US 时段门控：与 D65 冲突 | **(a)** |
+| **Q6** | §6 边界怎么处理？例：Q1(a) 的第三方 check-in 服务不在「no second channel／tunnel unchanged」原文里；`08-ops-backup-remote.md:109` 的 Feishu＋Telegram 双通道是未裁定旧稿。 | (a) **显式窄修订**：§6 增加一条 R6 专用 carve-out ——「允许**出站** dead-man 打卡；告警仍走既有 Telegram 通道、不新增通知通道、隧道行为不变」，作为**已裁定修订**写入 §22.7，不在实现里顺手改（§13.7 纪律）；第三方托管的 bot token 只走 env、不入库 (b) §6 保持零修订：把外部服务当作「计划范围外的基础设施」，只在 `deploy/` 文档登记 (c) 完整修订 §6、允许第二通知通道：扩大侵入面，超出 D61／D80 (d) 先单独裁定 §6、R6 本轮不动：把 R6 拆成两轮 | **(a)** |
+| **Q7** | 双 Gateway 的 client id 冲突怎么处理？例：Windows 训练机上的 Gateway 仍用 `IB_CLIENT_ID=1`（session／orders／probe／pulse／telegram ＝ 1..5、21），Mac mini 若同账号也用 1，`clients.py:20-30` 会撞 id、Gateway 报 326。 | (a) **env 分离**：Mac mini 用不同 `IB_CLIENT_ID` base 写进 `.env`／runbook，零代码改动；`C-20261013-34` 已验证该模式 (b) 让 `client_id()` 按 hostname 派生 base：改既有已交付代码、要回归 R1–R5 (c) 忽略，假定同一时刻只有一个 Gateway 在线：与「专用常开机器」并列运行的现实冲突 (d) 给 R6 单开一个 IB 账号：超出 D64 裁定（D64 明写「独立 client id」而非独立账号） | **(a)** |
+
+**裁定结果**：✅ **已裁定（第十二轮，2026-11-23）** —— 分两轮逐条问过（Q1–Q4／Q5–Q7），每条带具体案例、用英文问一遍；**七条全取推荐、零偏离、零跳过**；无手写偏离 ⇒ 无需补充确认问项（与第十轮 Q4／D83、第十一轮 Q5／D88 先例不同，不另补问、不另编号）。**不替操作者猜**。
+
+| 问 | 编号 | 性质 | 裁定 |
+|---|---|---|---|
+| Q1 | **D95** | ✅ 取推荐 (a) | 出站 dead-man 打卡：Mac mini 每 5 分钟出站 check-in，外部服务 10 分钟静默即告警；零入站端口、零隧道改动、整机死亡可检出 |
+| Q2 | **D96** | ✅ 取推荐 (a) | 独立 launchd job 出站打卡；R4 `cycle_progress.updated_at` 保持进程内心跳，两信号互不替代、零迁移 |
+| Q3 | **D97** | ✅ 取推荐 (a) | `is_us_session()` ＋ 10 分钟 grace；一条 down ＋ 一条 recovered `notify_guardian_once()`；不进 nag、不写 `guardian_alerts`、无 inline Resolve；去重状态放 `var/` |
+| Q4 | **D98** | ✅ 取推荐 (a) | plist 覆盖 Postgres ＋ `athena-orchestrator` ＋ 可选 cloudflared；IB Gateway 2FA 记 runbook 一次性人工步骤；00 册 §6「exec-ib 为进程」按实测口径校正、**不改 D64 原文** |
+| Q5 | **D99** | ✅ 取推荐 (a) | `deploy/macos/` 放 plist ＋ stdlib-only 脚本；复制 ET 规则并加一条与 `is_us_session()` 的 parity 单测；零新包／零 lock 变动／零迁移 |
+| Q6 | **D100** | ✅ 取推荐 (a) | §6 **显式窄 carve-out**（本轮唯一边界修订）：允许出站 dead-man 打卡；告警仍走既有 Telegram 通道、不新增通知通道、隧道行为不变；bot token 只走 env、不入库 |
+| Q7 | **D101** | ✅ 取推荐 (a) | Mac mini 用不同 `IB_CLIENT_ID` base 写进 `.env`／runbook，零代码；`C-20261013-34` 模式复用 |
+
+### 22.7 边界同步（✅ 第十二轮已回填）
+
+- 裁定**未改变 D58–D94 任何结论**；不改 R1–R5 交付状态；不新增市场数据源／迁移／Settings 字段／订单／草案／门控。
+- **D 计数**：裁定后为 **D1–D101 / 102 个节点零待决**（本轮七条 D95–D101）；14 册 §5／§7／页眉页脚与 00 册 §5／§6／§11／§12 已同步。累计 **44 条裁定：41 条取推荐、3 条明确偏离（D75／D83／D88）、零跳过**。
+- **§6 显式修订（D100）**：在 §6 末尾追加 R6 专用分句，原文三条分句与 §1 保持不动。新增文本：「**R6（§22，第十二轮 D95–D101）**：允许 Mac mini 发起**出站** dead-man 打卡；心跳告警仍走既有 Telegram 通道，**不新增通知通道、不新增第二通道、Cloudflare quick tunnel 行为不变**。第三方 check-in 服务所需的 bot token 只走 env／操作者配置，绝不写进仓库；`08-ops-backup-remote.md` 的 Feishu 双通道与 Tailscale 仍为未裁定旧稿，不采纳。」⇒ **这是本计划首次真实边界修订，按 §13.7 纪律显式裁定、不在实现里顺手改**。
+- **`055` 仍为 R7 `regime_labels` 预留号段**；零迁移路径下 R6 不占用 `055`、也不新建 `056`。`packages/store/pyproject.toml` 的 `force-include` 不动。
+- **§4 R6 验收栏**：「断电测试：杀机收到心跳告警」按 **D95** 由机箱外 dead-man 服务兑现；「重启后无需 shell 自恢复」按 **D98** 限定为 Postgres／orchestrator／cloudflared 自动重启，**IB Gateway 2FA 为一次性人工步骤**（诚实留白）。以注记追加，**不改写 §4 历史原文**（D80／D84 先例）。
+- **00 册 §6 R6 行**「exec-ib 为独立进程」按 §22.2 第 11 行实测记口径校正（`athena-exec` 无 console script、`pulse.py` 是同进程 daemon 线程），**不改 D64 原文**。
+- **「R7 数据源」裁定轮（D79）仍未开工**；R6 不得建 VIX feed、不得改 `pulse.py`／`quote_fields()`／`gate.py`／`reqMktData`。processor 机制与 VIX ticker 仍属 D91–D94 预裁定输入。
+
+### 22.8 明确不做（R6 边界）
+
+不实现 R7 `regime_labels` 矩阵／`close_bias`／`evidence`／标签卡（D67–D73），不实现 processor 机制／VIX ticker 进 universe／`data_symbols`（D91–D94 已拆到「R7 数据源」轮，须先显式修订 §6）；不建第二套 ack 状态机、不改 `guardian_alerts`／R2 `reconcile()`／R4 `nag_tick()`／`guardres`／R5 `guardian_trigger.py` 的既有语义；不改 `drafts.decide()` / `advisor.py` / `wheel.py` / `guardian.py` / `pulse.py` / `pricing.py` / `clients.py`；不新增 Settings 字段（D66 原文与 D85 口径校正均不动）、不新增市场数据源、不新增告警通道、不新增迁移（`055` 仍归 R7、不建 `056`）、不改 Cloudflare quick tunnel 行为（除非 Q6 显式裁定修订 §6）、不产生订单／草案／门控；不顺手采纳 `08-ops-backup-remote.md` 的 Feishu 双通道／Tailscale 旧稿。
+
+---
+
+## 23. R6 交付记录（2026-11-24）
+
+> **性质**：§22 已裁定契约（D95–D101）的**实现与验证记录**，不是新决策。七条全取推荐逐条落地；**D100 仍是本计划首次、也是本批次唯一的真实 §6 边界修订**（已在 §22.7 显式裁定回填，本批次不在实现里顺手改）。裁定记录见 §22.6 与 §7 第十二轮、`C-20261123-2`。
+
+| 项 | 内容 |
+|---|---|
+| 状态 | ✅ 完成并验证（全量 534/534、R6 单测 38/38、10 组变异测试全部 `BROKEN→FAIL` 且还原逐字节一致、`/usr/bin/python3` 3.9.6 `py_compile` 通过、4 张 plist `plistlib` 解析合法、台账机检 112/112） |
+| 范围 | 新增 `deploy/macos/athena_watchdog.py`、`deploy/macos/com.zeptun.athena.{watchdog,orchestrator,postgres,cloudflared}.plist`、`deploy/macos/README.md`、`apps/orchestrator/tests/test_guardian_r6.py`。文档：14 册 §23（含页眉／页脚）、00 册 §6／§11／§12、`CHANGELOG.md`、`logs/2026-11-24.md`。**零运行时核心改动**：R1–R5 的 `guardian_view.py`／`guardian_nag.py`／`guardian_trigger.py`／`guardian_schedule.py`／`loop.py`／`telegram.py`／`clients.py`／`tunnel.py` 全部未改 |
+| 动机 | 操作者 2026-11-23 指令 `Please proceed with R6`；§22 已第十二轮裁定，**不再裁定**，文档即 source of truth。跨零点后今日为 2026-11-24，交付台账另起 `C-20261124-1` |
+| 变更（按 D 编号） | **D95**：`deploy/macos/` 出站 dead-man —— `check_in()` 每 300s 向操作者配置的 URL 发出站 HTTP 打卡，零入站端口、零隧道改动；整机断电由机箱外服务检出。**D96**：`com.zeptun.athena.watchdog.plist` 为独立 launchd job（`StartInterval=300`、`RunAtLoad=true`），R4 `050 cycle_progress.updated_at` 保持进程内心跳、不被读写，两个信号互不替代。**D97**：`decide()` 纯状态机 ＋ `WatchState`／`Plan`，10 分钟 grace、一次 down ＋ 一次 recovered、`var/athena-watchdog-state.json` 原子写（`os.replace`）跨重启去重；消息无 inline Resolve、不进 5 分钟 nag、不写 `guardian_alerts`。**D98**：4 张 plist 覆盖 Postgres（`KeepAlive`）＋ `athena-orchestrator`（`KeepAlive`）＋ cloudflared（可选、**默认 `Disabled=true`**）；IB Gateway 2FA 记 runbook 一次性人工步骤。**D99**：脚本 stdlib-only（`urllib`／`zoneinfo`／`json`／`argparse`／`dataclasses`）、Python 3.9 兼容、零 `athena_*` import；`is_us_session()` 与 `guardian_schedule` 有 parity 单测覆盖 DST／周末／边界／naive rejection／UTC-ET-HKT 同一 instant；零新 workspace 包、零 `uv.lock` 变动。**D100**：告警走既有 Telegram 通道的 env-only mirror（`send_once()`）、不新增通知通道、隧道行为不变；bot token 只走 env、绝不入库或写进仓库。**D101**：`IB_CLIENT_ID` base 分离只写进 `.env`／runbook，`clients.py` 零改动（`C-20261013-34` 模式复用） |
+| 实现口径说明（非新决策） | ① **D97 点名 `notify_guardian_once()`（D71），但 D99 禁止 import `athena_bots`**（会把 bots／exec／store 拖进部署单元、破坏零新包约束）⇒ `send_once()` 是 `telegram.py:_live_send()` env fallback 的 **stdlib env-only mirror**：同一 `TELEGRAM_BOT_TOKEN`／allowlist／`api.telegram.org` endpoint／可选 `TELEGRAM_HTTPS_PROXY`，**同一通道、非第二通道**（D100）；`athena_bots.telegram` 本身零改动。② **`_session_open_utc()` clamp**：D65／D97「US 时段外静默不告警、也不累计」要求 gap 只在**当前 US session 内**累计，故 `decide()` 取 `max(last_checkin, 当日 09:30 ET)`；否则周五收盘到周一开盘的整段静默会在周一 09:31 误报 down。③ **状态机补丁**：长 gap 中第一次 `checkin_ok=True` 走 `recovered_after_silence` 立即报恢复，不必再等一个 300s tick；`down_sent=True` 且 check-in 仍失败走 `checkin_still_failing`、**不 re-arm**，避免 flapping 主机在同一事件里二次报 down。④ **cloudflared plist 默认 disabled**：`tunnel.py` 已在 orchestrator 进程内启动 cloudflared，再加载一份会改变 §6 冻结的 quick tunnel 行为（D100），故只留模板、`RunAtLoad=false`／`KeepAlive=false`／`Disabled=true`。⑤ **local-only backfill**：未配 `ATHENA_WATCHDOG_CHECKIN_URL` 时脚本仍运行、`checkin_ok=True`，只按 gap 补报 down／recovered（D80「重启后补报」口径）；**实时 down 由机箱外服务兑现**（D95），本机脚本不冒充实时告警。以上均为实现口径说明，**不改 §22 原文、不新增决策** |
+| 影响 | Mac mini 由 launchd 监督 Postgres ＋ `athena-orchestrator`（及可选 cloudflared）；每 300s 一次出站打卡；US 时段内静默 ≥ 10 分钟 → 一条 down，恢复后一条 recovered，均走既有 Telegram 通道。R1–R5 运行时、R2 `reconcile()`、R4 `nag_tick()`／`guardres`、R5 触发线、R7 契约冻结状态全部未改 |
+| 验证 | 见 `logs/2026-11-24.md` 的 `C-20261124-1` 实测验证块（命令与实测输出逐条列出） |
+| 已知留白（诚实记录） | ① **无 US market holiday calendar**（§14.5 延续），假日按普通 ET 工作日处理。② 出站 check-in URL 是**操作者配置项**，本仓库只提供打卡客户端，**不含第三方 dead-man 服务实现**；「10 分钟静默即告警」由该服务兑现。③ 实时「机器 down」告警同样在机箱外；本机脚本只做事后补报（D95／D80）。④ IB Gateway 2FA 仍为一次性人工登录（D98），plist 不覆盖。⑤ plist 用 `__ATHENA_ROOT__`／`__UV_BIN__`／`__DOCKER_BIN__` 占位符，安装须操作者替换后 `launchctl load`，**不做自动安装、不写入凭据**。⑥ cloudflared plist 默认 disabled，启用即需重评 §6 隧道边界。⑦ `pytest` 未装进本 venv，全量回归以 `python -m unittest discover` 为准（534/534）。⑧ processor 机制／VIX ticker 进 universe／`data_symbols` 仍属「R7 数据源」轮（D91–D94），本批次零代码 |
+| 回滚 | `git revert <sha>`；删除 `deploy/macos/` 与 `apps/orchestrator/tests/test_guardian_r6.py`；`launchctl unload` 4 张 plist；本机 `var/athena-watchdog-state.json` 按需删除（`.gitignore` 已忽略 `var/`）。无迁移可回滚、无 Settings 键需清理、无运行时文件需还原 |
+| 关联 | §22（契约 D95–D101）／§7 第十二轮／§22.7（D100 边界同步）／`C-20261123-1`／`C-20261123-2`／`C-20261124-1` |
+| 提交 | `C-20261123-1`（启动契约）／`C-20261123-2`（裁定）／R6 实现／§23 交付记录／`C-20261124-1` **同批次入库并推送**；跟踪分支 `guardian/r6-deadman-watchdog` 同步到本提交。hash 以 `git log -1 --format=%h` 为准，**不写入本文档**，沿用 §9／§12／§15／§18／§21 惯例 |
+
+---
+
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 44 条 / D1–D101 102 个节点零待决；＋ 第十二轮 D95–D101 七条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、§21 R5 交付记录 ✅ 已回填；零迁移、§1／§6 边界零修订、`055` 不动**；**§22 R6 落地前契约 ✅ 第十二轮已裁定 D95–D101（2026-11-23，`C-20261123-1`／`-2`）、零代码／零迁移／不提交**；**§23 R6 交付记录 ✅ 已回填（2026-11-24，`C-20261124-1`）：`deploy/macos/` stdlib-only 看门狗 ＋ 4 张 plist ＋ 38 单测；零迁移、零运行时核心改动、`055` 仍归 R7、§1 原文不动、§6 仅 D100 已裁定窄 carve-out**
+
+> **2026-11-23 R6 启动说明（裁定前回填，历史记录）**：14 册 **§22 R6 落地前契约 ⚠️ 待裁定 Q1–Q7、未编号**（`C-20261123-1`）；只读接缝实测 21 条（§22.2）、七个硬问题（§22.3）。**零代码、零迁移、不提交**；`055` 仍归 R7 `regime_labels`、不建 `056`；§1／§6 边界保持原文（Q6 若裁定修订，将在 §22.7 显式记录）。（本行为启动轮历史记录；裁定后为 **D1–D101 / 102 个节点零待决**，R6 契约 ✅ 已裁定 D95–D101、实现待办、R7 实现待 R4。）

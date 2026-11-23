@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zeptun.athena.orchestrator</string>
+
+    <!-- D98: launchd supervises the ONLY console script (athena-orchestrator).
+         athena-exec / pulse.py / R3 scheduler / R4 nag / R5 trigger / Telegram
+         polling / console / control / tunnel all live in this one process
+         (booklet 14 section 22.2 rows 11-12), so one KeepAlive covers them all.
+         loop.py's two "ops restart" branches return out of run_loop() and exit;
+         KeepAlive is exactly the missing supervisor (row 13). -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV_BIN__</string>
+        <string>run</string>
+        <string>athena-orchestrator</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__ATHENA_ROOT__</string>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__ATHENA_ROOT__/var/athena-orchestrator.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__ATHENA_ROOT__/var/athena-orchestrator.err.log</string>
+</dict>
+</plist>

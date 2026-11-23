@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zeptun.athena.postgres</string>
+
+    <!-- D98: Postgres must come up before the orchestrator (README "How to run"
+         step 1 creates the container `athena-pg` on 127.0.0.1:55432).
+         `docker start -a` stays attached while the container is alive; KeepAlive
+         re-runs it if the container exits. Docker Desktop itself must be in
+         Login Items; launchd cannot boot the daemon. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__DOCKER_BIN__</string>
+        <string>start</string>
+        <string>-a</string>
+        <string>athena-pg</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>StandardOutPath</key>
+    <string>__ATHENA_ROOT__/var/athena-postgres.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__ATHENA_ROOT__/var/athena-postgres.err.log</string>
+</dict>
+</plist>

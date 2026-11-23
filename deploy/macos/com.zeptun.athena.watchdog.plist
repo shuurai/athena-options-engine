@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zeptun.athena.watchdog</string>
+
+    <!-- D95/D96: independent OUTBOUND dead-man check-in. Never an inbound port,
+         never a tunnel change. This job does not supervise the orchestrator. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>__ATHENA_ROOT__/deploy/macos/athena_watchdog.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__ATHENA_ROOT__</string>
+    <key>StartInterval</key>
+    <integer>300</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>__ATHENA_ROOT__/var/athena-watchdog.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__ATHENA_ROOT__/var/athena-watchdog.err.log</string>
+</dict>
+</plist>

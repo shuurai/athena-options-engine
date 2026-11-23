@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.zeptun.athena.cloudflared</string>
+
+    <!-- D98 "可选 cloudflared": OPTIONAL and DISABLED BY DEFAULT.
+         Section 22.2 row 10 + section 22.5: tunnel.py:start_tunnel() already
+         starts cloudflared INSIDE the athena-orchestrator process, and section 6
+         freezes "Tunnel behaviour is unchanged". Loading this job while
+         ATHENA_TUNNEL=cloudflared would start a SECOND quick tunnel with a
+         different random URL. Do NOT load it unless you have also set
+         ATHENA_TUNNEL=off and deliberately want a standalone tunnel. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__CLOUDFLARED_BIN__</string>
+        <string>tunnel</string>
+        <string>--url</string>
+        <string>http://127.0.0.1:8787</string>
+        <string>--no-autoupdate</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>__ATHENA_ROOT__</string>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>Disabled</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>__ATHENA_ROOT__/var/athena-cloudflared.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__ATHENA_ROOT__/var/athena-cloudflared.err.log</string>
+</dict>
+</plist>
