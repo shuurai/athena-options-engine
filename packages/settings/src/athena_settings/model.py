@@ -154,8 +154,10 @@ class AdvisorSettings(BaseModel):
     """Portfolio-level take-profit / trim advisor. Advisory; drafts stay human-approved."""
 
     enabled: bool = False
+    # D110 (2026-11-24): six independent risk-on axes. dir_conf is P(r>0)
+    # per symbol, so hedge/inverse ETFs must not be averaged in here.
     guidance_symbols: list[str] = Field(
-        default_factory=lambda: ["QQQ", "NVDA", "SOXX", "AVGO", "MRVL", "MU", "TSM"]
+        default_factory=lambda: ["SPY", "QQQ", "IWM", "EEM", "SMH", "NVDA"]
     )
     close_conf_threshold: float = 0.65
     trim_conf_threshold: float = 0.55
@@ -294,6 +296,8 @@ UNIVERSE_SEED = (
     "INTC", "SMH", "GLD", "GOOGL", "AMZN", "SKHY", "GLW", "NIO", "992", "MSFT",
     "SPCX", "AVGO", "ROKU", "AMD", "CNXC", "RDW", "RARE", "IGV", "BABA", "META",
     "TSLA", "SPY", "QQQ", "9988", "9888", "KULR", "MRAM",
+    # D110: guidance-basket names that the seed can now price.
+    "IWM", "EEM",
 )
 
 

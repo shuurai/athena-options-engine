@@ -318,7 +318,7 @@ def _standing_agents() -> dict[str, AgentPrompt]:
                 "- trim: reduce exposure when risk is elevated but thesis is intact\n"
                 "- close: exit fully when the risk/reward is clearly poor\n"
                 "Weigh: price near 52w high or range high, forecast dir_conf and take_profit, upcoming earnings / "
-                "macro events, news wash, guidance basket weakness (QQQ / semis), and position PnL.\n"
+                "macro events, news wash, guidance basket weakness (broad-market risk-on proxies), and position PnL.\n"
                 "Return confidence 0-1 and a short reason. You do not place orders; you only advise.\n"
                 'Reply with JSON only: {"action":"hold","confidence":0.0,"reason":""}'
             ),

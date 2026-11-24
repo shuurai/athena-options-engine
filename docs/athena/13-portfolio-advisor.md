@@ -32,7 +32,7 @@ Replay uses the same order on the cursor day.
 
 A missing IB print is skipped. A missing headline is skipped. Yahoo is not asked for a last price.
 
-Guidance names default to `QQQ`, `NVDA`, `SOXX`, `AVGO`, `MRVL`, `MU`, `TSM`. Settings can change the list. A name that is not on the universe has no IB print until the universe update stores one.
+Guidance names default to `SPY`, `QQQ`, `IWM`, `EEM`, `SMH`, `NVDA` (D110, 2026-11-24). Settings can change the list. All six are risk-on proxies: `dir_conf` is calibrated P(r>0) (`prompts.py`), so a hedge ETF rising would be mis-averaged as a risk-on `strong` signal. A name that is not on the universe has no IB print until the universe update stores one, and `forecast_marks` are produced only for names in `settings.watchlist`.
 
 Basket tone from the average `dir_conf`:
 
@@ -94,7 +94,7 @@ The Advisor card is in the middle column of `/settings`, after Market data. Noti
 | Key | Default | Role |
 |-----|---------|------|
 | `advisor.enabled` | false | The cycle writes signals and may stage drafts |
-| `advisor.guidance_symbols` | QQQ, NVDA, SOXX, AVGO, MRVL, MU, TSM | Comma-separated tickers |
+| `advisor.guidance_symbols` | SPY, QQQ, IWM, EEM, SMH, NVDA | Comma-separated risk-on tickers |
 | `advisor.close_conf_threshold` | 0.65 | Floor for `close`. Must sit between trim and max |
 | `advisor.trim_conf_threshold` | 0.55 | Floor for `trim` and `take_profit` |
 | `advisor.max_conf` | 0.95 | Cap on stored confidence |

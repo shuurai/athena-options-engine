@@ -13,7 +13,7 @@
 | ID | Decision | Ruling |
 | --- | --- | --- |
 | **D51** | Scope | Both long stock and short options. Drafts stay pending until Approve. |
-| **D52** | Guidance | Fixed basket: QQQ, NVDA, SOXX, AVGO, MRVL, MU, TSM. Editable in Settings. |
+| **D52** | Guidance | Fixed basket: QQQ, NVDA, SOXX, AVGO, MRVL, MU, TSM. Editable in Settings. **（2026-11-24 由 D110 取代，见 §3）** |
 | **D53** | Macro feed | Price from the universe IB print. Yahoo supplies headlines only. Fed and earnings dates come from `calendar_marks`. No separate CPI feed. |
 | **D54** | Option draft | An acting signal stages CLOSE (`take_profit` or `close`) or TRIM (`trim`) even when captured premium is below the profit-take gate. |
 | **D55** | Stock size | `take_profit` and `close` sell the full share quantity. `trim` sells half, at least one share. The option contract cap does not apply. |
@@ -25,7 +25,7 @@
 | 决策 | 裁定 | 说明 |
 | --- | --- | --- |
 | D51 | 追认 | 股票与空头期权都管：持仓可被建议 CLOSE / TRIM，也可被提议 BUY 一个尚未持有的标的，一律停在你 Approve |
-| **D52** | **改** | 篮子由 `QQQ, NVDA, SOXX, AVGO, MRVL, MU, TSM` 换成 **`QQQ, SPY, IWM, TLT, GLD, SOXX, NVDA`** —— 宽基三、利率一、商品一、芯片二。原篮子名为"市场指引"、实为**芯片周期指引**（7 个里 6 个半导体） |
+| **D52** | **改** | 篮子由 `QQQ, NVDA, SOXX, AVGO, MRVL, MU, TSM` 换成 **`QQQ, SPY, IWM, TLT, GLD, SOXX, NVDA`** —— 宽基三、利率一、商品一、芯片二。原篮子名为"市场指引"、实为**芯片周期指引**（7 个里 6 个半导体）。**⚠️ 本行 basket 已于 2026-11-24 由 D110 取代，见 §3；「利率一、商品一」因 `dir_conf` 符号反转被撤销** |
 | D53 | 追认 | 价格只认 universe 的 IB 报价；Yahoo 只给标题；Fed / 财报日取 `calendar_marks`；不单开 CPI 源 |
 | **D54** | **追认 ＋ 删旋钮** | 语义不变：顾问发信号即下 CLOSE / TRIM 草案，不等普通止盈门槛。但 `profit_take_relief_pct`（默认 15）在策略层**无任何读取**，UI 却称"从止盈阈值扣除、不低于 20" —— **假旋钮**，与 D34 已推翻的同类问题相同 |
 | D55 | 追认 | `take_profit` / `close` 全量卖；`trim` = `max(1, held // 2)`。**边界已明确**：持 1 股时 trim 算出 1 股，实际是清仓但标 `TRIM` —— 这是"减到不剩"的语义，不是缺陷 |
@@ -34,7 +34,7 @@
 
 **D52 的附带收益**：`SPY` 进篮子后开始拉 SPY 日线，顺带解掉 D18 的「`market_bars` 里 SPY 为 0 行 ⇒ `REGIME_RISK_OFF` 永不触发」问题 —— 不必再单独做一次补拉。
 
-**D52 / D54 的实施欠账**（`model.py:157` 篮子的 `default_factory`、`model.py:161` 与 `pages.py:2931` 的假旋钮）记在主计划 §6 末。
+**D52 / D54 的实施欠账**（`model.py:157` 篮子的 `default_factory`、`model.py:161` 与 `pages.py:2931` 的假旋钮）记在主计划 §6 末。**其中 D52 一项已于 2026-11-24 由 D110 以不同篮子解除（§3、`C-20261124-9`）；D54 假旋钮欠账仍在。**
 
 ---
 
@@ -59,3 +59,23 @@ The operator specification is [../athena/13-portfolio-advisor.md](../athena/13-p
 - Manage reads that row. Option and stock drafts use phase `ADVISOR`.
 - Guidance prices use the same IB print as the universe row. Yahoo adds a headline when no stored Yahoo title exists. Nearby FOMC and earnings dates come from stored calendar marks. A missing print or headline is skipped.
 - `profit_take_relief_pct` stays on the Settings card and is not applied. An acting signal stages the draft directly.
+
+
+---
+
+## 3. D110：Guidance 篮子取代（2026-11-24，第十五轮，取推荐案 A）
+
+> 契约正文见 [14 册 §30](14-guardian-escalation.md)。本节只保留本册相关的裁定与差异。
+
+| 项 | D52（2026-11-05，已取代） | **D110（2026-11-24，现行）** |
+| --- | --- | --- |
+| 篮子 | `QQQ, SPY, IWM, TLT, GLD, SOXX, NVDA` | **`SPY, QQQ, IWM, EEM, SMH, NVDA`** |
+| 轴数 | 宽基三／利率一／商品一／芯片二 | 宽基／大盘成长／小盘信用／全球 EM／半导体／单股核心，共 6 轴 |
+| `TLT`／`GLD` | 保留 | **移除**：`dir_conf = P(r>0)`，`prompts.py:243`；避险标的上涨会被算术平均读成 `strong`（risk-on）⇒ 符号反转 |
+| `SOXX` | 保留 | **换 `SMH`**：同半导体因子，`SMH` 已在 `UNIVERSE_SEED` 可取 IB print，`SOXX` 不在 |
+| `IWM` | 保留 | 保留（小盘／境内信用） |
+| `SPY` | 保留 | 保留（宽基；D18 的 bar 补拉仍为独立数据任务） |
+| 新增 | — | `EEM`（全球 EM 风险偏好）、`SMH`（半导体） |
+| 生产者约束 | 未讨论 | **`forecast_marks` 只按 `settings.watchlist` 生产**（`agents.py:248/301/331/376`）；本轮**不扩活库 watchlist**，bar／mark 落地仍属 gating work |
+
+**不变量**：`advisor.py` 的 `_guidance_snapshot()` 算术平均、`0.45`／`0.60` 阈值、`_rule_fallback()` 的 `+0.35`、四份 notes 生成器 **`_dir_conf()` 一字不改**；零迁移、零新 Settings 字段、零新数据源、§1／§6 零修订。`docs/athena/04` 与 `docs/athena/13` 的默认值表已同步为新篮子。

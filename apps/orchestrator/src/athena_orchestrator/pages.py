@@ -3023,7 +3023,7 @@ def _advisor_card(current) -> str:
         '<div class="card"><h2>Advisor</h2><div class="scroll-y">'
         '<p class="card-lead">Take-profit and trim signals for the book. Drafts stay pending until you Approve.</p>'
         f"{_switch('Enabled', 'advisor_enabled', adv.enabled, 'When on, each cycle writes an advisor signal for every held symbol.')}"
-        f"{_field('Guidance symbols', 'Comma-separated symbols the advisor reads as market guidance.', f'<input class=\"input\" name=\"guidance_symbols\" value=\"{escape(symbols)}\" placeholder=\"QQQ, NVDA, SOXX\">')}"
+        f"{_field('Guidance symbols', 'Comma-separated symbols the advisor reads as market guidance.', f'<input class=\"input\" name=\"guidance_symbols\" value=\"{escape(symbols)}\" placeholder=\"SPY, QQQ, IWM, EEM, SMH, NVDA\">')}"
         f"{_limit('Close confidence', 'advisor_close_conf', adv.close_conf_threshold, 'A signal at or above this can stage a close.', '0.01')}"
         f"{_limit('Trim confidence', 'advisor_trim_conf', adv.trim_conf_threshold, 'A signal at or above this can stage a trim, or a take-profit close.', '0.01')}"
         f"{_limit('Max confidence', 'advisor_max_conf', adv.max_conf, 'Confidence is capped at this value.', '0.01')}"

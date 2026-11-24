@@ -2109,7 +2109,7 @@ class WorkflowTest(unittest.TestCase):
                 page["body"],
             )
             result = _post_universe(self.conn, ACCOUNT, {"action": ["seed"]}, "test")
-            self.assertIn("Added 37 seed symbols.", result["body"])
+            self.assertIn("Added 39 seed symbols.", result["body"])  # D110: IWM + EEM joined the seed
             saved = load_active(self.conn, ACCOUNT)
             self.assertEqual(saved.watchlist[0], SYMBOL)
             self.assertEqual(saved.watchlist[1:], list(UNIVERSE_SEED))

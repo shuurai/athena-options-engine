@@ -1,6 +1,6 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 ＋ 第十一轮 ＋ 2026-11-23 第十二轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过；＋ 第十二轮 **D95–D101 七条全取推荐、零偏离、零跳过**）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。** **R6 实现口径见 §22：✅ 第十二轮已裁定 D95–D101；✅ 已实现并验证，交付记录见 §23（零迁移、零运行时核心改动、§1 原文不动、§6 仅 D100 已裁定的窄 carve-out）。** **R7 实现口径见 §24：✅ 第十三轮已裁定 D102–D108（§6 第二次显式窄 carve-out：手动按需 VIX 同步 D108；§13.4 显式移除量能轴 D105）；✅ 已实现并验证，交付记录见 §25（`055 regime_labels` 落地、Run C 独立 daemon、`ib-vix` 惰性、`{{regime}}` 注入、98 单测）。** **§26：✅ 第十四轮已裁定 D109（明确偏离推荐）—— 退役全部 10Y 逻辑，显式修订 §13.4／§13.5／§13.9／§25；零迁移、§1／§6 零修订，交付记录见 §26。** **§27 /settings 三列布局调整（操作者指令）：两卡入左／中列、独立 POST form 不嵌套、零新裁定、零迁移、§1／§6 零修订，交付记录见 §27.6 与 `C-20261124-6`。** **§28 /settings「VIX data」卡片文案一致性（操作者指令）：删除中文派生行、State／Slope／Term 移至右下独立块、表格仍两列四行；零新裁定、零迁移、§1／§6 零修订，交付记录见 §28.6 与 `C-20261124-7`。** **§29 /settings「Trigger lines」控件布局（操作者指令）：复用 `btn ghost icon-btn` 删除图标、三输入 flex 单行、补 `gap`／`margin-top` 间距；dispatch 与空态不动，零新裁定、零迁移、§1／§6 零修订，交付记录见 §29.5 与 `C-20261124-8`。**
+**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 ＋ 第十一轮 ＋ 2026-11-23 第十二轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过；＋ 第十二轮 **D95–D101 七条全取推荐、零偏离、零跳过**）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。** **R6 实现口径见 §22：✅ 第十二轮已裁定 D95–D101；✅ 已实现并验证，交付记录见 §23（零迁移、零运行时核心改动、§1 原文不动、§6 仅 D100 已裁定的窄 carve-out）。** **R7 实现口径见 §24：✅ 第十三轮已裁定 D102–D108（§6 第二次显式窄 carve-out：手动按需 VIX 同步 D108；§13.4 显式移除量能轴 D105）；✅ 已实现并验证，交付记录见 §25（`055 regime_labels` 落地、Run C 独立 daemon、`ib-vix` 惰性、`{{regime}}` 注入、98 单测）。** **§26：✅ 第十四轮已裁定 D109（明确偏离推荐）—— 退役全部 10Y 逻辑，显式修订 §13.4／§13.5／§13.9／§25；零迁移、§1／§6 零修订，交付记录见 §26。** **§27 /settings 三列布局调整（操作者指令）：两卡入左／中列、独立 POST form 不嵌套、零新裁定、零迁移、§1／§6 零修订，交付记录见 §27.6 与 `C-20261124-6`。** **§28 /settings「VIX data」卡片文案一致性（操作者指令）：删除中文派生行、State／Slope／Term 移至右下独立块、表格仍两列四行；零新裁定、零迁移、§1／§6 零修订，交付记录见 §28.6 与 `C-20261124-7`。** **§29 /settings「Trigger lines」控件布局（操作者指令）：复用 `btn ghost icon-btn` 删除图标、三输入 flex 单行、补 `gap`／`margin-top` 间距；dispatch 与空态不动，零新裁定、零迁移、§1／§6 零修订，交付记录见 §29.5 与 `C-20261124-8`。** **§30 Guidance 篮子修正：✅ 第十五轮 D110 取推荐案 A，篮子改 `SPY, QQQ, IWM, EEM, SMH, NVDA`、取代 D52 的 `SPY/TLT/GLD/SOXX`；新增 1 个决策节点、零迁移、§1／§6 零修订，交付记录见 §30.7 与 `C-20261124-9`。**
 **R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；R7 已裁定（D67–D73），落地前契约 ✅ 第十三轮已裁定 D102–D108（§24）；✅ 已实现并验证（2026-11-24，§25 交付记录）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十、十一、十二轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4) / §21 (R5) / §23 (R6); R7 contract + ratification: §13; R5 implementation contract: §19 (✅ ratified D84–D90); delivery record: §21 (✅ implemented and verified); data-layer split: §20 (D91–D94, pre-ratified inputs for the D79 round); **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).** **Section 26 (D109, 2026-11-24): all 10Y logic retired — 4-label vocabulary, 3 read-only dimensions, `VIX hits n/3`; explicitly deviates from the recommendation; §1/§6 zero-revised.**
 
 > **2026-11-23 R6 启动（第十二轮，裁定前回填，历史记录）**：操作者 2026-11-22 指令 `OK please keep going on R6.` 之后，先按 doc-first 纪律做只读接缝调研并合并 **§22 落地前契约（Q1–Q7、未编号）**，见 `C-20261123-1`。**本轮零代码、零迁移、零运行时改动、不提交**；R6 是 R1–R5 之后脊柱上的最后一项，R7 契约仍冻结、processor／VIX 仍归 D79 轮。
@@ -1642,7 +1642,85 @@ build_axes rates lines           : ['rates=None,  # D103: no treasury feed this 
 
 **收尾**：§29 ✅ 交付 —— 删除控件复用既有 `btn ghost icon-btn` 范式并保留 a11y 文案；`.input width:100%` 导致的三行堆叠由卡片级覆写消除，`Add line` 与输入之间补齐 `gap`／`margin-top`；`trigger_add`／`trigger_remove` dispatch 与空态一字未动。与 `C-20261124-8` 同批入库并推送。
 
+
 ---
+
+## 30. Guidance 篮子修正：D110 取代 D52 的 `SPY/TLT/GLD/SOXX` 组合（2026-11-24，操作者取推荐案 A）
+
+> **来源**：操作者 `For guidance symbols, now its set to QQQ, NVDA, SOXX, AVGO, GLD, can you advise to see what might be a better list for guidance of portfolio?`。只读复核（§30.1）＋ 跨资产方法论研究后给出 A／B 两案，操作者回 `A is fine. Please continue.` ⇒ **取推荐案 A**，裁定编号 **D110**（第十五轮，单条，取推荐、零偏离）。**本轮是对已裁定 D52 篮子的显式取代**，不是 §27–§29 那类纯 UI／零裁定修订：D52 的「利率一、商品一」两条因 `dir_conf` 语义被推翻（§30.2），故必须新增决策节点并同步 §5／§6／§11／§12 与四份规格书。按 doc-first 纪律先合并本节口径再动代码；验证与交付记 `C-20261124-9`。
+
+### 30.1 只读复核事实（本轮实测）
+
+| 项 | 实测 |
+| --- | --- |
+| 活库设置（只读探测时点） | `settings_versions` active `id=5` / `DUR253115`：`advisor.guidance_symbols = ['QQQ','NVDA','SOXX','AVGO','GLD']`；`watchlist = ['NVDA','QCOM','T']`。**⚠️ 调研期间操作者在控制台并行操作**：`id=6` 13:29 自行把篮子改成新 6 元素、`id=7` 13:46 点 `seed defaults` 扩到 37 名、`id=8–10` sync、`id=11` `trading DUR253115` 成为 active。详见 §30.3 第 6 条 |
+| 数据覆盖 | `market_bars` **0 行**、`forecast_marks` **0 行**；`news_events` yahoo 仅 `NVDA` 78 行；27 个候选标的逐一 `NO ROWS` |
+| 聚合语义 | `advisor.py:67–99` `_guidance_snapshot()` 把命中行的 `dir_conf` **算术平均**成 `avg_dir_conf`，阈值 `<0.45 weak`／`<0.60 neutral`／否则 `strong` |
+| `dir_conf` 定义 | `prompts.py:243`：`dir_conf is calibrated P(r > 0) in [0, 1]` —— **单标的上涨概率** |
+| 生产者 | `agents.py:248/301/331` 三个循环均 `for symbol in settings.watchlist`；`_shadow_prediction()` 在 `:376` 按该 symbol 写 `forecast_marks`（`forecast.py:215`）。**篮子成员不在 watchlist ⇒ 永远不会产生 mark** |
+| 价格 | `advisor.py:352` `_ib_quotes()` → `pricing.quote_pair()`，读 `market_bars` 的 `ib-daily`／`ib-delayed`；无行即静默跳过 |
+| 种子池 | `model.py:292` `UNIVERSE_SEED` 37 个；含 `SPY`／`QQQ`／`SMH`／`NVDA`／`GLD`，**不含 `IWM`／`EEM`／`SOXX`／`TLT`**；`pages.py:3295` `_seed_universe()` 仅在操作者点 `seed defaults` 时把种子追加进 watchlist |
+| 既有裁定 | `docs/plan/13-portfolio-advisor.md:28` **D52（2026-11-05 改）** 篮子定为 `QQQ, SPY, IWM, TLT, GLD, SOXX, NVDA`；`00 册:312` §6 实施欠账第 3 条「改 `model.py:157` 的 `default_factory`」**从未落地** |
+| 陈旧文案 | `docs/athena/04:140`、`docs/athena/13:35/97`、`model.py:158` 均仍是 7 半导体旧默认；`prompts.py:321` 仍写 `guidance basket weakness (QQQ / semis)`；`pages.py:3026` placeholder 仍是 `QQQ, NVDA, SOXX` |
+
+### 30.2 D110 裁定口径（取推荐案 A，取代 D52 篮子）
+
+| 项 | 口径 |
+| --- | --- |
+| **篮子** | **`SPY, QQQ, IWM, EEM, SMH, NVDA`**（6 个，逗号分隔存入 `advisor.guidance_symbols`） |
+| **取代范围** | 取代 D52（2026-11-05）的 `QQQ, SPY, IWM, TLT, GLD, SOXX, NVDA`；**保留** D52 的 `SPY`／`IWM` 与「宽基＋小盘＋芯片」骨架，**移除** `TLT`／`GLD`／`SOXX`，**新增** `EEM`／`SMH` |
+| **为何移除 `TLT`／`GLD`** | `dir_conf = P(r>0)` 是**单标的上涨概率**。黄金／长债上涨是典型 **risk-off**，却会被算术平均当成 `strong`（risk-on）计入 ⇒ **符号反转**。D52 的「利率一、商品一」在现行聚合下会**把避险信号读成风险偏好信号**，属契约级缺陷。操作者现行 `GLD` 已有该问题 |
+| **为何移除 `SOXX`、改用 `SMH`** | 同为半导体 ETF，`SMH` 已在 `UNIVERSE_SEED`，`SOXX` 不在（`13:35` 明写「不在 universe 就没有 IB print」）。同因子取已可取价者，零新订阅 |
+| **为何移除 `QQQ/NVDA/SOXX/AVGO` 的四重重复** | 原篮子 5 个里 4 个是同一 AI／半导体 beta；算术平均给同一因子 4 票 ⇒ `avg_dir_conf` 实际是「半导体涨不涨」，不是组合风险状态。新篮子 6 个覆盖宽基／大盘成长／小盘信用／全球 EM／半导体／单股核心共 6 条轴 |
+| **为何不引入对冲 ETF** | 见 §30.4：需先改聚合逻辑（独立防守桶／比值），属 B 案、另起裁定轮，本轮不做 |
+| **否决 B 案** | 「独立防守桶 + `HYG/LQD`、`RSP/SPY`、`SPY/TLT` 比值」需新建聚合与数据结构，超出操作者「config only」授权，本轮不裁定、不实现 |
+| **节点计数** | D1–D110 / **111 个节点**全部有裁定；累计 **53 条**（49 取推荐、4 偏离 D75／D83／D88／D109、零跳过） |
+
+### 30.3 实现口径
+
+1. `packages/settings/src/athena_settings/model.py:157` `AdvisorSettings.guidance_symbols` 的 `default_factory` 改为 `["SPY", "QQQ", "IWM", "EEM", "SMH", "NVDA"]`。
+2. 同文件 `UNIVERSE_SEED` 追加 `"IWM"`、`"EEM"`（37 → **39**），使二者在 `seed defaults` 后可被 universe 取价；**不自动进任何账户的 watchlist**。`test_workflows.py:2112` 的 `Added 37 seed symbols.` 同步改 `39`（该字符串由 `len(added)` 生成）。
+3. `packages/settings/src/athena_settings/prompts.py:321` `guidance basket weakness (QQQ / semis)` 改为 `guidance basket weakness (broad-market risk-on proxies)` —— 去掉对具体成分的硬编码描述，篮子可在 Settings 改而 prompt 不必再改。
+4. `apps/orchestrator/src/athena_orchestrator/pages.py:3026` `placeholder="QQQ, NVDA, SOXX"` 改为新篮子字符串。
+5. 四份规格书同步：`docs/athena/04-settings-and-risk.md:140`、`docs/athena/13-portfolio-advisor.md:35`／`:97` 的默认值；`docs/plan/13-portfolio-advisor.md` D52 行加「2026-11-24 由 D110 取代」指针并新增 §3；`docs/plan/00-plan-order.md` §5 计数、§6 第 3 条标 ✅、§11 索引、§12 新增说明。
+6. **活库设置：只读校验，零写入**。调研期间操作者已在 7799 控制台自行完成同一变更 —— `id=6` 13:29:25 `saved settings` 把 `advisor.guidance_symbols` 从 `['QQQ','NVDA','SOXX','AVGO','GLD']` 改为 `['SPY','QQQ','IWM','EEM','SMH','NVDA']`（audit `id=5` 留痕），`id=7` 13:46:44 `universe seed 34` 把 watchlist 从 3 名扩到 37 名（**用的是改动前 37 名旧种子，故 `IWM`／`EEM` 仍不在 watchlist**），`id=8–10` sync，`id=11` 13:47:08 `trading DUR253115` 为当前 active。**因此本轮不再 `save_settings()`**：再写一条会与操作者并行操作竞争、且 diff 为空必然抛 `ValueError("no change")`。交付改为断言 active 版本的 `guidance_symbols` 已等于新篮子、且 `market_bars`／`forecast_marks` 仍为 0 行。**操作者的 watchlist 扩展是其自身指令，本轮代码／脚本零贡献、零回退**。
+7. `advisor.py` 的 `_guidance_snapshot()`、`_rule_fallback()`、`_ib_quotes()`、`_yahoo_notes()`、`_calendar_lines()` **`_dir_conf()` 与阈值一字不改**。零聚合逻辑变更、零新 Settings 字段、零迁移。
+
+### 30.4 显式不做（边界）
+
+- **本轮不扩展活库 watchlist**：`agents.py` 按 `settings.watchlist` 筛选并可能起草案，把 6 个 ETF 塞进去是**交易行为变更**，操作者未授权。仍列为 gating work（IB Gateway 4001 起、seed／扩 watchlist、确认 bar 与 mark 落地）。**操作者自行点 `seed defaults` 造成的 37 名扩展由其自身指令产生，与本轮代码无关**（§30.3 第 6 条）；因旧种子是 37 名，新加的 `IWM`／`EEM` 仍不在 watchlist，操作者若再点一次 `seed defaults` 才会进 2 名 —— 本轮不代点。
+- **不新建数据源／不订阅**：`IWM`／`EEM` 只进 `UNIVERSE_SEED` 字符串池，沿用既有 IB universe 取价；§1「no drafts, no orders, no tactic changes」与 §6「No new market data sources」**零修订**。
+- **不改 aggregator**：不做 B 案的防守桶／比值／z-score；不接 `HYG`／`LQD`／`RSP`／`VIXY`／`UUP`／`XLP`。
+- **不解 D18／§6 第 6 条**：`SPY` 进 `market_bars` 的补拉仍是独立数据任务（00 册:315/322 已写明「进 universe ≠ 被拉到 bar」），本轮不声称解决。
+- 零迁移（仍 51 个 `001..055`）、零 `uv.lock` 变动、零通知通道、零页面结构改动。
+
+### 30.5 验收不变量
+
+- `AdvisorSettings().guidance_symbols == ["SPY","QQQ","IWM","EEM","SMH","NVDA"]`，无重复、无 `GLD`／`TLT`／`SOXX`／`AVGO`／`VIXY` 等对冲或旧成分。
+- 六名全在 `UNIVERSE_SEED`；`UNIVERSE_SEED` 长度 39 且无重复。
+- 旧 7 半导体字面量在全仓 `.py`／`.md` **零命中**；`QQQ / semis` 零命中。
+- 五处默认／placeholder／prompt 文案一致；`docs/plan/00:312` 标 ✅；14 册 §30 与 00 册 §12 均有 D110 说明。
+- `advisor.py` 聚合函数体与阈值源码文本不变；`_shadow_prediction` 仍按 watchlist 循环。
+- 变异测试：改默认值任一元素、去掉 `IWM`／`EEM`、改回 `QQQ / semis`、改回旧默认、改 placeholder、删 §30／§12 说明、改 `Added 39`、破坏聚合阈值 ⇒ 必须 FAIL。
+
+### 30.6 回滚
+
+`git revert <sha>`；活库用 `save_settings()` 写回原 5 元素篮子生成新 active 版本（audit 留痕），**不删版本行**。零迁移、零 schema 变动、零数据删除。
+
+### 30.7 交付与验证（2026-11-24，`C-20261124-9`）
+
+| 项 | 实测 |
+| --- | --- |
+| 代码 | `model.py` 默认篮子 7→6、`UNIVERSE_SEED` 37→39；`prompts.py:321` 去 `QQQ / semis`；`pages.py:3026` placeholder 同步；`test_workflows.py:2112` `37`→`39` |
+| 文档 | 14 册 §30；00 册 §5／§6／§11／§12；13 册 §3 ＋ D52 双指针；两份 `docs/athena` 默认值 |
+| 活库 | **零写入**（操作者已于 `id=6` 自行完成、`id=11` 为 active）；只读断言 active `guidance_symbols` = 新 6 元素、`market_bars` = 0、`forecast_marks` = 0；watchlist 保持操作者的 37 名不变（`IWM`／`EEM` 仍不在其中） |
+| 测试 | 新增 `test_guidance_basket.py` **36 例**；全量 **`721/721`**（2 skipped），基线 `685/685`；`compileall` 五个改动 `.py` 通过 |
+| 变异 | **`26/26`** 组 `BROKEN → FAIL`（默认值／种子／prompt／placeholder／聚合阈值／四份文档／台账计数），源文件逐字节还原（`sha256` 前后一致） |
+| 真实控制台 | **只读 GET，未重启**：`http://127.0.0.1:7799/settings` 实测 `name="guidance_symbols" value="SPY, QQQ, IWM, EEM, SMH, NVDA"`；`/portfolio-analysis` 的 `Guidance:` 行同步。**运行中的 7799 进程仍载入改动前的 `pages.py`，故 placeholder 仍显示旧串** —— 该字段有值时 placeholder 不可见，且新代码 in-process 渲染已实测为新串。**不重启的理由**：活库 `advisor.enabled = True` 且操作者正在控制台并行操作（`id=11` `trading DUR253115`），以安全 overrides 重启会静默降级其交易状态；待操作者自然重启后 placeholder 自动同步 |
+| 台账 | `scripts/check-changelog.mjs` `120/120` |
+| 边界 | 零迁移（仍 51）、零新 Settings 字段、零新数据源、零通知通道、`uv.lock` 零变动、**§1／§6 零修订**、**新增 1 个决策节点 D110** |
+
+**收尾**：§30 ✅ 交付 —— D110 以「全 risk-on、6 条独立轴、零符号反转」的篮子取代 D52 的 `SPY/TLT/GLD/SOXX` 组合，同时清掉 `QQQ / semis` 等四处陈旧文案并关闭 00 册 §6 第 3 条。**活库 watchlist 未动**，bar／mark 的 gating work 与 B 案防守桶均显式留白。与 `C-20261124-9` 同批入库并推送。
 
 
 **主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 44 条 / D1–D101 102 个节点零待决；＋ 第十二轮 D95–D101 七条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、§21 R5 交付记录 ✅ 已回填；零迁移、§1／§6 边界零修订、`055` 不动**；**§22 R6 落地前契约 ✅ 第十二轮已裁定 D95–D101（2026-11-23，`C-20261123-1`／`-2`）、零代码／零迁移／不提交**；**§23 R6 交付记录 ✅ 已回填（2026-11-24，`C-20261124-1`）：`deploy/macos/` stdlib-only 看门狗 ＋ 4 张 plist ＋ 38 单测；零迁移、零运行时核心改动、`055` 仍归 R7、§1 原文不动、§6 仅 D100 已裁定窄 carve-out**；**§24 R7 落地前契约 ✅ 第十三轮已裁定 D102–D108（2026-11-24，`C-20261124-2`／`-3`）：只读接缝实测 15 条、§6 第二次窄 carve-out（D108 手动 VIX 同步）、§13.4 显式移除量能轴（D105）**；**§25 R7 交付记录 ✅ 已回填（2026-11-24，`C-20261124-4`）：`055_regime_labels` 落地（迁移 50→51）、`vixfeed`／`regime`／`guardian_regime` ＋ Run C 独立 daemon、`/settings` 手动 `Sync VIX Data`、`/portfolio-analysis` 午間 Regime 兄弟卡、`{{regime}}` 仅真实 label 注入；98 单测、17/17 变异、真实 Postgres 端到端；§1 原文不动**；**§26 第十四轮裁定与 10Y 退役交付记录 ✅ 已回填（2026-11-24，`C-20261124-5`）：D109 明确偏离推荐（第 4 条偏离），删三行 10Y 规则、`LABELS` 7→4、维度 4→3、`VIX hits n/3`；D1–D109 / 110 节点零待决（52 条：48 推荐、4 偏离）；零迁移、§1／§6 零修订、不接任何 feed**；**§27 /settings 三列布局调整 ✅ 已交付并验证（2026-11-24，`C-20261124-6`）：Trigger lines 左列／VIX data 中列、两卡 POST form 保持在主表单之外、零新裁定、零迁移、§1／§6 零修订**；**§28 VIX data 卡片文案一致性 ✅ 已交付并验证（2026-11-24，`C-20261124-7`）：零中文／零 CJK、派生值右下独立块、否决表格加列、零新裁定、零迁移、§1／§6 零修订**；**§29 Trigger lines 控件布局 ✅ 已交付并验证（2026-11-24，`C-20261124-8`）：图标删除、三输入单行、按钮间距、零新裁定、零迁移、§1／§6 零修订**

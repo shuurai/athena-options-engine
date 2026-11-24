@@ -137,7 +137,7 @@ Off until Enabled is on. The card is in the middle Settings column, after Market
 | Key | Default | Role |
 |-----|---------|------|
 | `advisor.enabled` | false | Write one signal per held name and allow CLOSE / TRIM drafts |
-| `advisor.guidance_symbols` | QQQ, NVDA, SOXX, AVGO, MRVL, MU, TSM | Basket. Price is the universe IB print |
+| `advisor.guidance_symbols` | SPY, QQQ, IWM, EEM, SMH, NVDA | Risk-on basket. Price is the universe IB print; `dir_conf` is P(r>0) so hedges are excluded |
 | `advisor.close_conf_threshold` | 0.65 | `close` acts at or above this |
 | `advisor.trim_conf_threshold` | 0.55 | `trim` and `take_profit` act at or above this |
 | `advisor.max_conf` | 0.95 | Confidence cap |
