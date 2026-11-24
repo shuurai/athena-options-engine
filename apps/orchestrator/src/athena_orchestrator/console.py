@@ -211,6 +211,13 @@ form.fill > .settings-cols {
 #settings-form .card,
 #settings-form .card > .scroll-y { overflow: visible; height: auto; flex: none; min-height: auto; }
 #settings-form .sim-picks { max-height: none; overflow: visible; }
+/* §27: second aligned band after </form> for the two cards that own their
+   own POST forms. Same 3-column grid, but must not stretch/clip like the
+   default .stage > .settings-cols. */
+.stage > .settings-cols.settings-extras {
+  flex: none; min-height: min-content; overflow: visible; align-items: start;
+}
+.settings-cols.settings-extras .settings-col { overflow: visible; min-height: auto; }
 .settings-col > form.card.agent.fill {
   display: flex; flex-direction: column;
 }

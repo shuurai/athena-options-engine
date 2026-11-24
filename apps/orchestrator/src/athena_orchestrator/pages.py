@@ -3130,8 +3130,14 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Wash window days', 'wash_window_days', news.wash_window_days, 'Those headlines must fall inside this many days.')}</div></div>"
         "</div></div>"
         "</form>"
-        f"{_trigger_lines_card(current)}"
-        f"{_vix_card(conn, account)}"
+        # §27: second aligned three-column band. Both cards own their POST
+        # forms, so they must stay outside #settings-form (no nested forms,
+        # no `action` hidden fields leaking into autosave FormData).
+        '<div class="settings-cols settings-extras">'
+        f'<div class="settings-col">{_trigger_lines_card(current)}</div>'
+        f'<div class="settings-col">{_vix_card(conn, account)}</div>'
+        '<div class="settings-col"></div>'
+        "</div>"
     )
     return _html(
         "Settings",
