@@ -740,7 +740,13 @@ select:focus-visible {
 .guard-account { border-top: 1px solid var(--site-border); padding-top: 9px; display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .guard-tier { flex: none; }
 .guard-tier h2 .guard-count { font-family: var(--font-mono); font-size: 12px; color: var(--site-text-4); }
-.guard-empty { color: var(--site-text-4); margin: 6px 0 0; }
+.guard-empty { color: var(--site-text-4); margin: 6px 0 0; font-size: 12.5px; line-height: 1.45; }
+.stage > .regime-card { flex: none; }
+.advisor-reason { white-space: pre-wrap; }
+@media (max-width: 1100px) {
+  .settings-cols.analysis { grid-template-columns: minmax(0, 1fr); }
+  .settings-cols.analysis .scroll-y { overflow-x: auto; }
+}
 .guard-row, .guard-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--site-border); }
 .guard-symbol { font-family: var(--font-mono); font-weight: 600; min-width: 72px; }
 .guard-flags { display: flex; flex-wrap: wrap; gap: 5px; flex: 1 1 auto; }
@@ -752,9 +758,6 @@ select:focus-visible {
 .guard-ack form { display: flex; gap: 6px; align-items: center; }
 .guard-ack .input { font-size: 11px; padding: 4px 8px; min-width: 150px; }
 .guard-ack .btn { font-size: 11px; padding: 4px 10px; }
-.guard-history { width: 100%; border-collapse: collapse; font-size: 12px; }
-.guard-history th { text-align: left; color: var(--site-text-4); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
-.guard-history td, .guard-history th { padding: 4px 8px; border-top: 1px solid var(--site-border); }
 .guard-error { border-color: #7f1d1d; }
 .guard-error pre { white-space: pre-wrap; font-size: 11px; color: var(--site-text-3); }
 """

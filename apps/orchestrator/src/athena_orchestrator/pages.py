@@ -1172,7 +1172,7 @@ def _guard_page(conn, account: str, query: dict, note: str = "", status: int = 2
         extra_cards=runs_html,
     )
     live = sum(1 for a in alerts if a.state in ("open", "skipped"))
-    chips = [("info", "read only"), ("warn" if live else "ok", f"{live} open alerts")]
+    chips = [("info", "live grading"), ("warn" if live else "ok", f"{live} open alerts")]
     return _html("Guardian", "Positions vs rules, and the one thing to do.", body, chips) | {"status": status}
 
 
@@ -1837,7 +1837,7 @@ def _advisor_actions_table(conn, account, settings, rows, signals, day) -> str:
             f'<td><span class="tag {tone}">{escape(item["action"])}</span></td>'
             f'<td class="mono">{item["confidence"]:.2f}</td>'
             f'<td class="mono">{_draft_links(item["drafts"])}</td>'
-            f'<td style="white-space:pre-wrap">{escape(item["reason"])}</td></tr>'
+            f'<td class="advisor-reason">{escape(item["reason"])}</td></tr>'
         )
     html = "".join(body_rows) or '<tr><td colspan="9">No positions.</td></tr>'
     return (
@@ -3634,10 +3634,10 @@ def _trigger_lines_card(current) -> str:
 
 
 def _vix_card(conn, account: str) -> str:
-    """D102/D108: operator-triggered VIX pull. Lives outside the main settings form.
+    """D111: automatic data-only history plus an on-demand catch-up button.
 
-    Read-only display plus one button. It deliberately has no Settings field:
-    the operator asked for a manual action, not a persisted knob (D102/D107).
+    The four series live in ``SettingsPayload.data_symbols``, isolated from the
+    tradable watchlist. This card remains outside the main settings form.
 
     §28: the three derived states are card-level conclusions, not per-series
     values, so they live in a compact right-aligned block below the table —
@@ -3680,9 +3680,10 @@ def _vix_card(conn, account: str) -> str:
     )
     return (
         '<div class="card"><h2>VIX data</h2>'
-        '<p class="card-lead">Manual, on-demand pull of VIX and its term structure from '
-        "IB. Stored as source <code>ib-vix</code>, which no other reader selects, so "
-        "rails and RV20 never see these rows. Run C reads them at 12:30 ET.</p>"
+        '<p class="card-lead">VIX and its term structure use read-only IB daily history. '
+        "History syncs automatically at engine start; this button runs the same path on "
+        "demand. New rows use source <code>ib-daily</code>; legacy <code>ib-vix</code> "
+        "rows remain a fallback. Run C reads the latest completed closes at 12:30 ET.</p>"
         '<table class="data"><thead><tr><th>Series</th><th>Latest close</th>'
         f"</tr></thead><tbody>{rows}</tbody></table>"
         '<div class="vix-foot">'
@@ -3698,7 +3699,7 @@ def _vix_card(conn, account: str) -> str:
 
 
 def _post_sync_vix(conn, account: str) -> dict:
-    """D108: spawn the pull, answer immediately. Never blocks the request."""
+    """Spawn the D111 history catch-up and answer without blocking the request."""
     database_url = os.environ.get("DATABASE_URL", "").strip()
     if not database_url:
         return _settings(
@@ -3713,43 +3714,56 @@ def _post_sync_vix(conn, account: str) -> dict:
     )
 
 
+_VIX_SYNC_LOCK = threading.Lock()
+
+
 def _sync_vix(database_url: str) -> None:
-    """Pull VIX + VIX9D + VIX3M + VIX1Y daily closes into market_bars (D103).
-
-    Mirrors ``refresh_display_rates``: same event-loop shim, same broker
-    lifecycle, disconnect in ``finally``. A per-symbol failure is logged and
-    skipped so one bad contract cannot discard the others' rows.
-    """
-    import asyncio
-
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        asyncio.set_event_loop(asyncio.new_event_loop())
-    from athena_exec.broker import IbBroker
-    from athena_marketdata import vixfeed
-    from athena_store import connect as store_connect
-
-    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
-    port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
-    broker = IbBroker()
-    if not broker.connect(host, port, 4, True):
-        log.info("vix sync skipped: gateway down")
+    """D111: manual catch-up through the same read-only IB history path."""
+    if not _VIX_SYNC_LOCK.acquire(blocking=False):
+        log.info("vix sync skipped: already running")
         return
-    written = 0
     try:
-        with store_connect(database_url) as conn:
-            for symbol in vixfeed.VIX_SYMBOLS:
-                try:
-                    candles = broker.index_history(symbol, "6 M")
-                except Exception as exc:  # noqa: BLE001 - one contract, not the batch
-                    log.info("vix sync %s failed: %s", symbol, exc.__class__.__name__)
-                    continue
-                written += vixfeed.store_vix_daily(conn, symbol, candles)
-            conn.commit()
+        import asyncio
+
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+        from athena_exec.broker import IbBroker
+        from athena_exec.clients import client_id
+        from athena_orchestrator.backfill import _stored_or_pull, configured_data_symbols
+        from athena_orchestrator.tasks import _IB_LOCK
+        from athena_store import connect as store_connect
+
+        symbols = configured_data_symbols(database_url)
+        if not symbols:
+            log.info("vix sync skipped: no data symbols configured")
+            return
+        host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+        port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
+        broker = IbBroker()
+        with _IB_LOCK:
+            if not broker.connect(host, port, client_id("probe"), True):
+                log.info("vix sync skipped: gateway down")
+                return
+            completed = 0
+            try:
+                with store_connect(database_url) as conn:
+                    for symbol in symbols:
+                        try:
+                            count, mode = _stored_or_pull(conn, broker, symbol)
+                        except Exception as exc:  # noqa: BLE001 - isolate one contract
+                            conn.rollback()
+                            log.info("vix sync %s failed: %s", symbol, exc.__class__.__name__)
+                            continue
+                        conn.commit()
+                        completed += 1
+                        log.info("vix sync symbol=%s bars=%s mode=%s", symbol, count, mode)
+            finally:
+                broker.disconnect()
+        log.info("vix sync completed %s/%s series", completed, len(symbols))
     finally:
-        broker.disconnect()
-    log.info("vix sync wrote %s rows", written)
+        _VIX_SYNC_LOCK.release()
 
 
 def _post_trigger_line(conn, account: str, payload, form: dict, actor: str, action: str) -> dict:

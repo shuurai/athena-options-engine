@@ -128,9 +128,9 @@ class Regime:
             pieces.append(f"VIX {vix}")
         gold = self.inputs.get("gold_dir")
         if gold in {"up", "down"}:
-            pieces.append("金升" if gold == "up" else "金跌")
-        detail = "、".join(pieces) if pieces else "no live inputs"
-        return f"午間 Regime：{detail} →【{self.label}】。close_bias: {self.close_bias}。"
+            pieces.append(f"Gold {gold}")
+        detail = ", ".join(pieces) if pieces else "no live inputs"
+        return f"Midday Regime: {detail} -> {self.label}. close_bias: {self.close_bias}."
 
 
 def _hit_count(axes: Axes) -> int:

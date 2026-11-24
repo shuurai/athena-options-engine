@@ -69,11 +69,11 @@ _HARD_FLAGS = frozenset(BREACH_FLAGS | BLOWUP_FLAGS)
 _LIVE_STATES = frozenset({"open", "skipped"})
 
 _TIER_META: dict[Tier, tuple[str, str, str]] = {
-    Tier.BLOWUP: ("Blowup / 暴雷", "black", "⬛"),
-    Tier.DANGER: ("Danger / 危险", "red", "🟥"),
-    Tier.BALANCED: ("Balanced / 平衡", "amber", "🟨"),
-    Tier.HEALTHY: ("Healthy / 健康", "green", "🟩"),
-    Tier.PROFIT: ("Profit / 盈利", "blue", "🟦"),
+    Tier.BLOWUP: ("Blowup", "black", "⬛"),
+    Tier.DANGER: ("Danger", "red", "🟥"),
+    Tier.BALANCED: ("Balanced", "amber", "🟨"),
+    Tier.HEALTHY: ("Healthy", "green", "🟩"),
+    Tier.PROFIT: ("Profit", "blue", "🟦"),
 }
 _TIER_ORDER = (Tier.BLOWUP, Tier.DANGER, Tier.BALANCED, Tier.HEALTHY, Tier.PROFIT)
 
@@ -691,7 +691,7 @@ def render_board(
         )
         parts.append(
             '<div class="card"><h2>Recently closed (kept, never deleted)</h2>'
-            '<table class="guard-history"><thead><tr><th>Symbol</th><th>Breach</th>'
+            '<table class="data"><thead><tr><th>Symbol</th><th>Breach</th>'
             f'<th>State</th><th>Tier</th></tr></thead><tbody>{rows_html}</tbody></table></div>'
         )
 

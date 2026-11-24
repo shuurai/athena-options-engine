@@ -61,17 +61,27 @@ def start_history_backfill(database_url: str) -> None:
     ).start()
 
 
-def history_symbols(watchlists: list[list[str]], regime_indexes: list[str]) -> list[str]:
-    """Watchlist names, then the regime index when it is not already listed."""
+def history_symbols(
+    watchlists: list[list[str]],
+    regime_indexes: list[str],
+    data_symbol_groups: list[list[str]] | None = None,
+) -> list[str]:
+    """Universe names, regime indexes, then isolated data-only instruments (D111)."""
     names: list[str] = []
+
+    def add(raw: str) -> None:
+        symbol = str(raw or "").strip().upper()
+        if symbol and symbol not in names:
+            names.append(symbol)
+
     for group in watchlists:
         for symbol in group:
-            if symbol not in names:
-                names.append(symbol)
-    for raw in regime_indexes:
-        index = raw.strip().upper()
-        if index and index not in names:
-            names.append(index)
+            add(symbol)
+    for index in regime_indexes:
+        add(index)
+    for group in data_symbol_groups or []:
+        for symbol in group:
+            add(symbol)
     return names
 
 
@@ -203,9 +213,11 @@ def _run(database_url: str) -> None:
     books = _books(database_url)
     if not books:
         return
+    data_books = _data_books(database_url)
     symbols = history_symbols(
         [names for _account, names, _index in books],
         [index for _account, _names, index in books],
+        [names for _account, names in data_books],
     )
     broker = IbBroker()
     short: list[str] = []
@@ -330,6 +342,26 @@ def _books(database_url: str) -> list[tuple[str, list[str], str]]:
                 continue
             found.append((account, list(settings.watchlist), settings.strategy.regime_index))
     return found
+
+
+def _data_books(database_url: str) -> list[tuple[str, list[str]]]:
+    """Configured data-only instruments, isolated from every tradable watchlist."""
+    found = []
+    with connect(database_url) as conn:
+        for account in active_accounts():
+            try:
+                settings = load_active(conn, account)
+            except RuntimeError:
+                continue
+            found.append((account, list(settings.data_symbols)))
+    return found
+
+
+def configured_data_symbols(database_url: str) -> list[str]:
+    """Ordered union used by both automatic backfill and the manual VIX button."""
+    return history_symbols(
+        [], [], [names for _account, names in _data_books(database_url)],
+    )
 
 
 def _as_day(value):

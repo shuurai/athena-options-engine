@@ -1,17 +1,12 @@
-"""VIX manual sync + pure state derivation (booklet 14, §13.9; D103/D104/D108).
+"""VIX daily-history compatibility + pure state derivation (D103/D104/D111).
 
-VIX is an INDEX level with **no producer anywhere in this repo**: no CBOE feed,
-no IB index subscription, and nothing in ``UNIVERSE_SEED`` (§24.2 #6). D102/D103
-and D108 therefore make it a **manual, operator-triggered** sync into
-``market_bars`` with ``source='ib-vix'``.
+D111 adds data-only IB history through the ordinary ``ib-daily`` writer. Legacy
+``ib-vix`` rows remain readable, but a trading day appears only once and the
+ordinary daily row wins. VIX never enters the tradable watchlist or streaming
+quote path. No schema migration is needed.
 
-Why the existing table: ``market_bars.source`` is plain text, so a new source
-needs no migration (D104). Why it stays inert: every existing reader filters
-``source IN ('ib-daily', 'ib-delayed')`` — see ``pricing.daily_bars`` — so VIX
-rows never leak into rails, RV20 or the 52-week band.
-
-The thresholds below are **待校準** (§13.9): they are recorded inputs, not
-ratified constants, and they are never acceptance criteria.
+The thresholds below are unratified recorded inputs (§13.9), never acceptance
+criteria.
 """
 
 from __future__ import annotations
@@ -23,7 +18,8 @@ import psycopg
 
 log = logging.getLogger("athena.marketdata.vix")
 
-SOURCE = "ib-vix"
+SOURCE = "ib-vix"  # legacy source retained for store_vix_daily compatibility
+DAILY_SOURCE = "ib-daily"
 # D103: the operator asked for the index plus its term structure.
 VIX_SYMBOLS = ("VIX", "VIX9D", "VIX3M", "VIX1Y")
 
@@ -96,20 +92,26 @@ def store_vix_daily(conn: psycopg.Connection, symbol: str, candles) -> int:
 
 
 def vix_closes(conn: psycopg.Connection, symbol: str, n: int = 30) -> list[tuple[date, float]]:
-    """Newest ``n`` closes for one VIX series, oldest first. Missing -> []."""
+    """Newest ``n`` unique daily closes; ``ib-daily`` wins over legacy ``ib-vix``."""
     if n <= 0:
         return []
     rows = conn.execute(
         """
-        SELECT ts::date, close
+        SELECT ts::date, close, source
         FROM market_bars
-        WHERE symbol = %s AND source = %s AND close > 0
+        WHERE symbol = %s AND source IN (%s, %s) AND close > 0
         ORDER BY ts
         """,
-        (str(symbol or "").strip().upper(), SOURCE),
+        (str(symbol or "").strip().upper(), DAILY_SOURCE, SOURCE),
     ).fetchall()
-    series = [(row[0], _as_float(row[1])) for row in rows]
-    return [(day, level) for day, level in series if day is not None and level is not None][-n:]
+    by_day: dict[date, float] = {}
+    for day, raw_level, source in rows:
+        level = _as_float(raw_level)
+        if day is None or level is None:
+            continue
+        if source == DAILY_SOURCE or day not in by_day:
+            by_day[day] = level
+    return sorted(by_day.items())[-n:]
 
 
 def latest_levels(conn: psycopg.Connection) -> dict[str, float]:

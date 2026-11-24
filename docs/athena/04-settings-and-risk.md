@@ -172,6 +172,7 @@ See [06-data-and-ib.md](06-data-and-ib.md).
 | Key | Role |
 |-----|------|
 | `watchlist` | Symbols Athena may draft |
+| `data_symbols` | Default `VIX, VIX9D, VIX3M, VIX1Y`. Data-only IB daily-history instruments; never enter screening, drafts, orders, pulse, or option chains |
 | `blocked_symbols` | Hard deny |
 | `tactic_flags` | Per name: `csp`, `cc`, `strangle`, `intent` (`income` / `both` / `accumulate`), `long`, and optional `may_buy` |
 | `allow_csp_adr` | Default false (delisting caution) |

@@ -417,9 +417,11 @@ class TestRenderRunHistory(unittest.TestCase):
         self.assertIn("Scheduled runs", html)
         self.assertIn("20:30 HKT", html)
 
-    def test_run_c_reservation_is_visible(self):
+    def test_run_c_location_is_visible(self):
         html = gr.render_run_history([{"trade_day": "2026-07-01", "run": "A"}])
-        self.assertIn("Run C (12:30 ET) is reserved for R7", html)
+        self.assertIn("Latest A / B grades.", html)
+        self.assertIn("Run C is the midday regime observation on Portfolio Analysis.", html)
+        self.assertNotIn("reserved for R7", html)
 
     def test_dynamic_text_is_escaped(self):
         html = gr.render_run_history([{"portfolio_tier": "<img onerror=1>", "status": "<script>"}])
@@ -427,9 +429,12 @@ class TestRenderRunHistory(unittest.TestCase):
         self.assertNotIn("<script>", html)
         self.assertIn("&lt;img", html)
 
-    def test_uses_existing_guard_history_table_class(self):
+    def test_uses_shared_table_and_footnote_classes(self):
         html = gr.render_run_history([{"run": "A"}])
-        self.assertIn('class="guard-history"', html)
+        self.assertIn('<table class="data">', html)
+        self.assertIn('<p class="slot-note">', html)
+        self.assertNotIn('class="guard-history"', html)
+        self.assertNotIn('class="guard-empty"', html)
 
     def test_note_stays_first_child_when_card_injected(self):
         html = gv.render_board(

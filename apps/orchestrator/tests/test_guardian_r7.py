@@ -2,7 +2,7 @@
 
 Covers: the two-row post-D109 matrix and its closed vocabularies, D106 per-row
 required axes, D73 unknown-with-reason, D105 volume removal, the VIX state
-derivations, D104 `ib-vix` inertness against every existing reader,
+derivations, D111 dual-source reads with legacy `ib-vix` compatibility,
 `regime_labels` writes, D107 prompt-injection gating, the read-only cards,
 migration 055, the loop/settings wiring that keeps Run C out of
 ``EXECUTED_RUNS``, and the D109 10Y retirement invariants (§26).
@@ -74,8 +74,14 @@ class _FakeStore:
         if "::date < %s" in flat:                       # _PRIOR_CLOSE_SQL
             level = self.prior.get(params[0])
             return _Cursor([(level,)] if level is not None else [])
-        if "source = %s" in flat:                       # vixfeed.vix_closes
-            return _Cursor(list(self.vix.get(params[0], [])))
+        if "source IN (%s, %s)" in flat:               # vixfeed.vix_closes
+            rows = []
+            for item in self.vix.get(params[0], []):
+                day, level = item[:2]
+                source = item[2] if len(item) > 2 else params[1]
+                if source in params[1:3]:
+                    rows.append((day, level, source))
+            return _Cursor(rows)
         if "source = 'ib-delayed'" in flat:             # _INTRADAY_SQL
             return _Cursor([(None, value) for value in self.intraday.get(params[0], [])])
         return _Cursor([])
@@ -243,7 +249,8 @@ class TestRegimeObject(unittest.TestCase):
         line = rg.evaluate(rg.Axes(stock_reversed=True, news="narrative_only")).line()
         self.assertIn("distribution_into_strength", line)
         self.assertIn("bounce_likely_fades", line)
-        self.assertIn("午間 Regime", line)
+        self.assertIn("Midday Regime", line)
+        self.assertNotIn("午間", line)
 
     def test_line_survives_string_percentages_from_jsonb(self):
         regime = rg.Regime(label="dead_cat", close_bias="bounce_likely_fades",
@@ -355,12 +362,12 @@ class TestVixStorage(unittest.TestCase):
         self.assertEqual(vixfeed.store_vix_daily(store, "  ", [{"close": 1}]), 0)
         self.assertEqual(store.calls, [])
 
-    def test_vix_closes_filters_on_the_ib_vix_source(self):
+    def test_vix_closes_reads_daily_and_legacy_sources(self):
         store = _FakeStore(vix={"VIX": _series([18.0, 19.0])})
         vixfeed.vix_closes(store, "VIX", 5)
         sql, params = store.calls[0]
-        self.assertIn("source = %s", sql)
-        self.assertEqual(params, ("VIX", "ib-vix"))
+        self.assertIn("source IN (%s, %s)", sql)
+        self.assertEqual(params, ("VIX", "ib-daily", "ib-vix"))
 
     def test_vix_closes_keeps_only_the_newest_n(self):
         store = _FakeStore(vix={"VIX": _series([1.0, 2.0, 3.0, 4.0, 5.0])})
@@ -570,9 +577,9 @@ class TestPromptLine(unittest.TestCase):
 
 class TestFillPromptRegime(unittest.TestCase):
     def test_regime_is_appended_when_the_template_lacks_a_slot(self):
-        out = ag.fill_prompt("Base prompt", {"regime": "午間 Regime：VIX 18.00。",
+        out = ag.fill_prompt("Base prompt", {"regime": "Midday Regime: VIX 18.00.",
                                              "numbers": ""})
-        self.assertTrue(out.endswith("午間 Regime：VIX 18.00。"))
+        self.assertTrue(out.endswith("Midday Regime: VIX 18.00."))
         self.assertTrue(out.startswith("Base prompt"))
 
     def test_empty_regime_appends_nothing(self):
@@ -754,9 +761,11 @@ class TestWiring(unittest.TestCase):
     def test_broker_builds_an_index_contract(self):
         """Indices are not stocks: _qualify_stock only builds Stock/Forex."""
         text = (ROOT / "apps/exec-ib/src/athena_exec/broker.py").read_text()
+        helper = text.split("def _index_contract", 1)[1].split("\ndef ", 1)[0]
         body = text.split("def index_history", 1)[1].split("\n    def ", 1)[0]
-        self.assertIn("Index(", body)
-        self.assertIn('"CBOE"', body)
+        self.assertIn("Index(", helper)
+        self.assertIn('"CBOE"', helper)
+        self.assertIn("_index_contract(", body)
         self.assertIn('"1 day"', body)
 
     def test_sync_vix_worker_uses_the_readonly_broker_path(self):
@@ -764,8 +773,12 @@ class TestWiring(unittest.TestCase):
         body = text.split("def _sync_vix", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("IbBroker()", body)
         self.assertIn("broker.disconnect()", body)
-        self.assertIn("store_vix_daily", body)
-        self.assertIn("for symbol in vixfeed.VIX_SYMBOLS", body)
+        self.assertIn("configured_data_symbols", body)
+        self.assertIn("_stored_or_pull", body)
+        self.assertIn('client_id("probe")', body)
+        self.assertIn("_IB_LOCK", body)
+        self.assertIn("_VIX_SYNC_LOCK.acquire(blocking=False)", body)
+        self.assertNotIn("store_vix_daily", body)
 
     def test_regime_daemon_never_touches_executed_runs(self):
         text = (ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_regime.py").read_text()

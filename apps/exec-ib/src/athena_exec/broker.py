@@ -10,6 +10,8 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Iterator, NamedTuple
 
+from athena_settings.model import DATA_SYMBOLS_SEED
+
 log = logging.getLogger("athena.exec")
 
 
@@ -42,6 +44,13 @@ class BrokerPosition(NamedTuple):
 
 DISPLAY_CURRENCIES = ("HKD", "USD", "AUD", "CNY", "JPY", "CAD", "EUR")
 _FX_DENIED = {162, 354, 10089, 10186}
+
+
+def _index_contract(symbol: str, exchange: str = "CBOE"):
+    """CBOE index history contract; kept out of all trading contract paths."""
+    from ib_insync import Index
+
+    return Index(str(symbol).strip().upper(), exchange, "USD")
 
 
 class _LineGate:
@@ -298,21 +307,19 @@ class IbBroker:
 
     def index_history(self, symbol: str, duration: str = "6 M",
                       exchange: str = "CBOE") -> list[dict]:
-        """Daily candles for an INDEX such as VIX (R7 manual sync, D103/D108).
+        """Daily candles for an INDEX such as VIX, using the shared contract."""
+        return self.historical(_index_contract(symbol, exchange), duration, "1 day")
 
-        Indices are not stocks: ``_qualify_stock`` builds Stock/Forex only, so
-        this constructs an ``Index`` contract explicitly. Raises RuntimeError
-        when the gateway is down or IB cannot find the index, and the caller
-        turns that into an operator-visible note rather than a silent gap.
-        """
-        from ib_insync import Index
-
-        contract = Index(str(symbol).strip().upper(), exchange, "USD")
-        return self.historical(contract, duration, "1 day")
+    def _qualify_history(self, symbol: str):
+        """D111: VIX data symbols are IND; every other history name stays unchanged."""
+        name = str(symbol or "").strip().upper()
+        if name in DATA_SYMBOLS_SEED:
+            return _index_contract(name)
+        return self._qualify_stock(name)
 
     def head_day(self, symbol: str) -> date | None:
-        """Earliest IB TRADES day for this stock. None when IB does not answer."""
-        contract = self._qualify_stock(symbol)
+        """Earliest IB TRADES day for this history instrument, if IB answers."""
+        contract = self._qualify_history(symbol)
         if contract is None:
             return None
         try:
@@ -328,7 +335,7 @@ class IbBroker:
         end is an IB endDateTime. Empty means now, so a second year can stop
         where the first year starts. Error 162 with no data returns [].
         """
-        contract = self._qualify_stock(symbol)
+        contract = self._qualify_history(symbol)
         if contract is None:
             return []
         notes: list[tuple[int, str]] = []

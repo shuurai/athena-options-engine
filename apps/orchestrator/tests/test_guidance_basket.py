@@ -195,13 +195,14 @@ class TestDecisionRecord(unittest.TestCase):
 
     def test_14_book_records_new_decision_node(self):
         doc = _text("docs/plan/14-guardian-escalation.md")
-        self.assertIn("D1–D110", doc)
-        self.assertIn("111 个节点", doc)
+        self.assertIn("D1–D110", doc)  # D110's own historical record remains intact.
+        self.assertIn("D1–D111", doc)
+        self.assertIn("112 个节点", doc)
 
     def test_00_book_count_updated(self):
         doc = _text("docs/plan/00-plan-order.md")
-        self.assertIn("D1–D110 / 111 个节点全部有裁定", doc)
-        self.assertIn("53 条：49 取推荐", doc)
+        self.assertIn("D1–D111 / 112 个节点全部有裁定", doc)
+        self.assertIn("54 条：50 取推荐", doc)
 
     def test_00_book_debt_item_3_closed(self):
         doc = _text("docs/plan/00-plan-order.md")

@@ -215,11 +215,11 @@ def render_run_history(rows: Sequence[Mapping]) -> str:
         )
     return (
         '<div class="card guard-runs"><h2>Scheduled runs</h2>'
-        '<table class="guard-history"><thead><tr>'
+        '<table class="data"><thead><tr>'
         "<th>Day (ET)</th><th>Run</th><th>Fire (HKT)</th>"
         "<th>Portfolio</th><th>Breaches</th><th>Status</th>"
         "</tr></thead><tbody>" + "".join(lines) + "</tbody></table>"
-        '<p class="guard-empty">Latest A / B grades. Run C (12:30 ET) is reserved for R7.</p>'
+        '<p class="slot-note">Latest A / B grades. Run C is the midday regime observation on Portfolio Analysis.</p>'
         "</div>"
     )
 

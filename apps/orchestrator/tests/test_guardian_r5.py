@@ -659,14 +659,13 @@ class TestBoundaries(unittest.TestCase):
         self.assertNotIn("pulse", src)
         self.assertNotIn("IND", src)
         broker = (ROOT / "apps/exec-ib/src/athena_exec/broker.py").read_text(encoding="utf-8")
-        # D108 (13th round) is the second ratified section 6 carve-out: one
-        # manual, on-demand VIX sync may construct a single Index contract. It
-        # is NOT a producer - no subscription, no streaming, no universe entry -
-        # so the assertion narrows to "exactly one, inside index_history".
+        # D111 is the third ratified section 6 carve-out: data-only VIX history
+        # uses one shared IND helper, never a quote or trading contract path.
         self.assertEqual(broker.count("Index("), 1)
-        self.assertIn("def index_history", broker)
+        self.assertIn("def _index_contract", broker)
+        self.assertIn("def _qualify_history", broker)
         body = broker.split("def index_history", 1)[1].split("\n    def ", 1)[0]
-        self.assertIn("Index(", body)
+        self.assertIn("_index_contract(", body)
         # History only: no quote line, no streaming subscription for the index.
         self.assertNotIn("reqMktData", body)
         self.assertNotIn("marketDataType", body)

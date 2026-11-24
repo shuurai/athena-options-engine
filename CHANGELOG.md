@@ -147,3 +147,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-24 | Make VIX card English-only and move derived states bottom-right | [C-20261124-7](logs/2026-11-24.md#c-20261124-7) |
 | 2026-11-24 | Use icon delete and one-row add form for trigger lines | [C-20261124-8](logs/2026-11-24.md#c-20261124-8) |
 | 2026-11-24 | Ratify D110 and replace guidance basket with six risk-on axes | [C-20261124-9](logs/2026-11-24.md#c-20261124-9) |
+| 2026-11-24 | Add D111 VIX history and English Guardian UI | [C-20261124-10](logs/2026-11-24.md#c-20261124-10) |

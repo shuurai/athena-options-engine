@@ -290,6 +290,10 @@ class StrategySettings(BaseModel):
 
 SIM_SYMBOLS = ["NVDA", "MSFT", "NOK", "AAPL", "IGV", "NIO", "AMZN", "AVGO"]
 
+# D111: read-only market-data instruments. Never merge these into the tradable
+# watchlist: that list also drives option chains, agents, and drafts (D92).
+DATA_SYMBOLS_SEED = ("VIX", "VIX9D", "VIX3M", "VIX1Y")
+
 # The paper universe, used by Seed defaults. Names already in the pool stay.
 UNIVERSE_SEED = (
     "NVDA", "QCOM", "T", "700", "1810", "MRVL", "NOK", "DRAM", "AAPL", "ORCL",
@@ -344,6 +348,7 @@ class SettingsPayload(BaseModel):
     developer: DeveloperSettings = Field(default_factory=DeveloperSettings)
     strategy: StrategySettings = Field(default_factory=StrategySettings)
     watchlist: list[str] = Field(default_factory=lambda: ["NVDA", "QCOM", "T"])
+    data_symbols: list[str] = Field(default_factory=lambda: list(DATA_SYMBOLS_SEED))
     blocked_symbols: list[str] = Field(default_factory=list)
     tactic_flags: dict[str, TacticFlags] = Field(default_factory=dict)
     agents: dict[str, AgentPrompt] = Field(default_factory=dict)

@@ -283,9 +283,9 @@ def prompt_line(conn, account: str) -> str | None:
 
 # D109 (§26.4/§13.9): 4 -> 3; ``股债背离`` needed a 10Y weekly change.
 _DIMENSION_LABELS = (
-    ("vix_slope", "VIX 斜率"),
-    ("vix_term", "期限结构"),
-    ("single_name_iv", "单股 IV"),
+    ("vix_slope", "VIX slope"),
+    ("vix_term", "Term structure"),
+    ("single_name_iv", "Single-name IV"),
 )
 
 
@@ -324,20 +324,17 @@ def render_card(conn, account: str) -> str:
 
     hits = inputs.get("vix_hits")
     day = found["trade_day"]
-    headline = Regime(
-        label=label, close_bias=bias, inputs=inputs, evidence=found["evidence"],
-    ).line()
     return (
-        '<div class="card guard-runs regime-card"><h2>午間 Regime · Run C</h2>'
+        '<div class="card guard-runs regime-card"><h2>Midday Regime · Run C</h2>'
         f'<p><span class="tag {tone}">{escape(label)}</span> '
         f'<span class="mono">close_bias: {escape(bias)}</span> '
-        f'<span class="mono">VIX hits {escape(str(hits if hits is not None else 0))}/3</span></p>'
-        f"<p>{escape(headline)}</p>"
-        '<table class="guard-history"><thead><tr>'
+        f'<span class="mono">VIX dimensions known {escape(str(hits if hits is not None else 0))}/3</span></p>'
+        '<table class="data"><thead><tr>'
         "<th>Dimension</th><th>State</th><th>Why unknown</th>"
         "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-        f'<p class="guard-empty">Observed for {escape(str(day))} (ET) at 12:30 · '
-        "read-only observation, never a gate. VIX is manual: Settings → Sync VIX Data.</p>"
+        f'<p class="slot-note">Observed for {escape(str(day))} (ET) at 12:30 · '
+        "read-only observation, never a gate. VIX history syncs at engine start; "
+        "Sync VIX Data runs the same IB history path on demand.</p>"
         "</div>"
     )
 
