@@ -14,8 +14,17 @@ scopes, one shared pure schedule module.
 
 What this batch deliberately cannot measure (D105/D106, §24.6) is recorded as
 ``unknown`` **with an in-place reason**, never guessed and never defaulted to
-zero: 10Y has no feed at all, single-name IV is unmeasured, and intraday volume
-is structurally unmeasurable because ``upsert_delayed()`` stores ``volume=0``.
+zero: single-name IV is unmeasured, and intraday volume is structurally
+unmeasurable because ``upsert_delayed()`` stores ``volume=0``.
+
+**D109 (§26)**: the 10Y / treasury-yield leg was **retired**, not left as an
+``unknown`` gap. No provider can supply a 12:30 ET intraday yield direction
+inside the §6/D108 boundary (FRED ``DGS10`` is EOD, ``^TNX`` via
+``index_history()`` is 1-day EOD, CBOE TYVIX/VXTYN was delisted in 2020), so
+the three rows requiring ``rates`` were unreachable. They, ``rates``,
+``rates_divergence`` and their display plumbing are removed. Legacy
+``regime_labels`` rows are neither rewritten nor deleted; the card ignores
+their stale ``rates_10y`` / ``rates_divergence`` keys.
 """
 
 from __future__ import annotations
@@ -191,13 +200,11 @@ def build_axes(conn, trade_day: date) -> Axes:
     return Axes(
         stock=stock,
         stock_reversed=stock_reversed,
-        rates=None,       # D103: no treasury feed this batch
         gold=gold,
         vix_state=vixfeed.vix_state(closes),
         vix_slope=vixfeed.slope_state(closes),
         vix_term=vixfeed.term_state(levels),
         single_name_iv=None,   # no measured IV (§13.9)
-        rates_divergence=None,  # needs 10Y (§13.9)
         news=_news_label(conn, trade_day),
         numbers={
             "vix_level": levels.get("VIX"),
@@ -274,11 +281,11 @@ def prompt_line(conn, account: str) -> str | None:
 
 # --- read-only card ---------------------------------------------------------
 
+# D109 (§26.4/§13.9): 4 -> 3; ``股债背离`` needed a 10Y weekly change.
 _DIMENSION_LABELS = (
     ("vix_slope", "VIX 斜率"),
     ("vix_term", "期限结构"),
     ("single_name_iv", "单股 IV"),
-    ("rates_divergence", "股债背离"),
 )
 
 
@@ -324,7 +331,7 @@ def render_card(conn, account: str) -> str:
         '<div class="card guard-runs regime-card"><h2>午間 Regime · Run C</h2>'
         f'<p><span class="tag {tone}">{escape(label)}</span> '
         f'<span class="mono">close_bias: {escape(bias)}</span> '
-        f'<span class="mono">VIX hits {escape(str(hits if hits is not None else 0))}/4</span></p>'
+        f'<span class="mono">VIX hits {escape(str(hits if hits is not None else 0))}/3</span></p>'
         f"<p>{escape(headline)}</p>"
         '<table class="guard-history"><thead><tr>'
         "<th>Dimension</th><th>State</th><th>Why unknown</th>"
@@ -343,7 +350,6 @@ def _reason_for(key: str, inputs: dict) -> str:
         "vix_slope": "vix_slope",
         "vix_term": "vix_term",
         "single_name_iv": "single_name_iv",
-        "rates_divergence": "rates",
     }
     return REASONS.get(mapping.get(key, key), "n/a")
 

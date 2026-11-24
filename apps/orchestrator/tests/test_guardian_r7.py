@@ -1,10 +1,11 @@
-"""R7 midday regime (booklet 14, §13.4/§13.9/§24; D67–D108).
+"""R7 midday regime (booklet 14, §13.4/§13.9/§24/§26; D67–D109).
 
-Covers: the five-row matrix and its closed vocabularies, D106 per-row required
-axes, D73 unknown-with-reason, D105 volume removal, the VIX state derivations,
-D104 `ib-vix` inertness against every existing reader, `regime_labels` writes,
-D107 prompt-injection gating, the read-only cards, migration 055, and the
-loop/settings wiring that keeps Run C out of ``EXECUTED_RUNS``.
+Covers: the two-row post-D109 matrix and its closed vocabularies, D106 per-row
+required axes, D73 unknown-with-reason, D105 volume removal, the VIX state
+derivations, D104 `ib-vix` inertness against every existing reader,
+`regime_labels` writes, D107 prompt-injection gating, the read-only cards,
+migration 055, the loop/settings wiring that keeps Run C out of
+``EXECUTED_RUNS``, and the D109 10Y retirement invariants (§26).
 """
 
 from __future__ import annotations
@@ -97,10 +98,11 @@ def _slot(day=date(2026, 11, 24), run="C"):
 
 
 class TestVocabulary(unittest.TestCase):
-    def test_labels_match_section_13_4(self):
+    def test_labels_match_the_d109_vocabulary(self):
+        """§26.4: 7 -> 4; three rates-dependent labels retired."""
         self.assertEqual(rg.LABELS, (
-            "liquidity_squeeze", "short_cover_bounce", "distribution_into_strength",
-            "normal_risk_off", "regime_shift", "dead_cat", "insufficient_data",
+            "distribution_into_strength", "regime_shift", "dead_cat",
+            "insufficient_data",
         ))
 
     def test_close_bias_is_the_ratified_four(self):
@@ -126,26 +128,6 @@ class TestVocabulary(unittest.TestCase):
 
 
 class TestMatrixRows(unittest.TestCase):
-    def test_liquidity_squeeze_needs_all_four(self):
-        axes = rg.Axes(stock="down", rates="up", gold="down", vix_state="high_rising")
-        self.assertEqual(rg.evaluate(axes).label, "liquidity_squeeze")
-        self.assertEqual(rg.evaluate(axes).close_bias, "risk_off_into_close")
-
-    def test_liquidity_squeeze_blocked_when_rates_unknown(self):
-        """10Y has no feed, so this row is unreachable in practice (D103/§24.6)."""
-        axes = rg.Axes(stock="down", gold="down", vix_state="high_rising")
-        self.assertEqual(rg.evaluate(axes).label, "insufficient_data")
-
-    def test_short_cover_bounce(self):
-        axes = rg.Axes(stock="up", rates="down", gold="down",
-                       vix_state="early_high_fell_above_30")
-        self.assertEqual(rg.evaluate(axes).label, "short_cover_bounce")
-
-    def test_normal_risk_off(self):
-        axes = rg.Axes(stock="down", rates="down", gold="up", vix_state="falling")
-        self.assertEqual(rg.evaluate(axes).label, "normal_risk_off")
-        self.assertEqual(rg.evaluate(axes).close_bias, "neutral")
-
     def test_dead_cat(self):
         axes = rg.Axes(stock="up", news="narrative_only", vix_state="falling")
         self.assertEqual(rg.evaluate(axes).label, "dead_cat")
@@ -161,10 +143,9 @@ class TestMatrixRows(unittest.TestCase):
     def test_regime_shift_is_unreachable_in_this_batch(self):
         """No axes combination produces it: known gap, not a silent bug (§24.6)."""
         combos = [rg.Axes()] + [
-            rg.Axes(stock=stock, rates=rates, gold=gold, vix_state=vix,
+            rg.Axes(stock=stock, gold=gold, vix_state=vix,
                     news=news, stock_reversed=rev)
             for stock in ("up", "down", "flat")
-            for rates in ("up", "down", None)
             for gold in ("up", "down", None)
             for vix in ("high_rising", "early_high_fell_above_30", "falling", "quiet", None)
             for news in ("narrative_only", "regime_shift", "none")
@@ -180,9 +161,8 @@ class TestMatrixRows(unittest.TestCase):
 
 class TestPerRowRequiredAxes(unittest.TestCase):
     def test_distribution_fires_on_two_axes_only(self):
-        """§13.4 marks 10Y/gold/VIX as '-' for this row, so they must not block it."""
+        """§13.4 marks gold/VIX as '-' for this row, so they must not block it."""
         axes = rg.Axes(stock_reversed=True, news="narrative_only")
-        self.assertIsNone(axes.rates)
         self.assertIsNone(axes.gold)
         self.assertIsNone(axes.vix_state)
         self.assertEqual(rg.evaluate(axes).label, "distribution_into_strength")
@@ -221,8 +201,8 @@ class TestReasonsAndVolume(unittest.TestCase):
         result = rg.evaluate(rg.Axes())
         self.assertEqual(result.label, "insufficient_data")
         self.assertIn(rg.REASONS["stock"], result.evidence["reasons"])
-        self.assertIn(rg.REASONS["rates"], result.evidence["reasons"])
         self.assertIn(rg.REASONS["vix_term"], result.evidence["reasons"])
+        self.assertNotIn("rates", rg.REASONS)
 
     def test_reasons_are_stable_and_deduplicated(self):
         reasons = rg._reasons(rg.Axes())
@@ -240,12 +220,12 @@ class TestReasonsAndVolume(unittest.TestCase):
         self.assertTrue(inputs["thresholds_unratified"])
 
     def test_vix_hits_counts_only_known_dimensions(self):
-        """D77: 0–4 display-only counter, never a gate."""
+        """D77/D109: 0-3 display-only counter, never a gate."""
         self.assertEqual(rg._hit_count(rg.Axes()), 0)
         axes = rg.Axes(vix_slope="flat", vix_term="contango",
-                       single_name_iv="normal", rates_divergence="aligned")
-        self.assertEqual(rg._hit_count(axes), 4)
-        self.assertEqual(rg.evaluate(axes).inputs["vix_hits"], 4)
+                       single_name_iv="normal")
+        self.assertEqual(rg._hit_count(axes), 3)
+        self.assertEqual(rg.evaluate(axes).inputs["vix_hits"], 3)
 
 
 # ---------------------------------------------------------------------------
@@ -267,10 +247,10 @@ class TestRegimeObject(unittest.TestCase):
 
     def test_line_survives_string_percentages_from_jsonb(self):
         regime = rg.Regime(label="dead_cat", close_bias="bounce_likely_fades",
-                           inputs={"vix_level": "21.5", "rates_10y": "4.25"}, evidence={})
+                           inputs={"vix_level": "21.5"}, evidence={})
         line = regime.line()
         self.assertIn("VIX 21.50", line)
-        self.assertIn("10Y 4.25%", line)
+        self.assertNotIn("10Y", line)
 
     def test_line_falls_back_when_nothing_is_known(self):
         self.assertIn("no live inputs", rg.evaluate(rg.Axes()).line())
@@ -436,9 +416,9 @@ class TestBuildAxes(unittest.TestCase):
 
     def test_unmeasured_axes_stay_none(self):
         axes = gr.build_axes(_FakeStore(), date(2026, 11, 24))
-        self.assertIsNone(axes.rates)
         self.assertIsNone(axes.single_name_iv)
-        self.assertIsNone(axes.rates_divergence)
+        self.assertFalse(hasattr(axes, "rates"))
+        self.assertFalse(hasattr(axes, "rates_divergence"))
 
     def test_news_maps_earnings_to_narrative_only(self):
         store = _FakeStore(news=["EARNINGS_RELEASE", "GENERIC"])
@@ -552,8 +532,8 @@ class TestPromptLine(unittest.TestCase):
                 {"vix_level": 18.0}, datetime(2026, 11, 24, 17, 30, tzinfo=UTC))
 
     def test_real_label_becomes_one_line(self):
-        line = gr.prompt_line(_FakeStore(label=self._row("normal_risk_off")), "U1")
-        self.assertIn("normal_risk_off", line)
+        line = gr.prompt_line(_FakeStore(label=self._row("dead_cat")), "U1")
+        self.assertIn("dead_cat", line)
         self.assertEqual(line.count("\n"), 0)
 
     def test_insufficient_data_is_not_injected(self):
@@ -639,8 +619,11 @@ class TestRenderCard(unittest.TestCase):
         )
         self.assertIn("flat", html)
 
-    def test_vix_hits_are_displayed_as_n_of_4(self):
-        self.assertIn("1/4", gr.render_card(_FakeStore(label=self._label()), "U1"))
+    def test_vix_hits_are_displayed_as_n_of_3(self):
+        """D109/§26.4: denominator follows the three registered dimensions."""
+        html = gr.render_card(_FakeStore(label=self._label()), "U1")
+        self.assertIn("1/3", html)
+        self.assertNotIn("1/4", html)
 
     def test_store_failure_renders_nothing(self):
         class _Broken:
@@ -788,6 +771,164 @@ class TestWiring(unittest.TestCase):
         text = (ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_regime.py").read_text()
         self.assertIn('runs=(RUN,)', text)
         self.assertNotIn("runs=EXECUTED_RUNS", text)
+
+
+# ---------------------------------------------------------------------------
+# D109: 10Y / treasury-yield retirement (§26)
+# ---------------------------------------------------------------------------
+
+
+class TestD109Retirement(unittest.TestCase):
+    """Every retired invariant is pinned so a future re-introduction fails."""
+
+    RETIRED = ("liquidity_squeeze", "short_cover_bounce", "normal_risk_off")
+
+    def test_labels_are_the_four_d109_values(self):
+        self.assertEqual(rg.LABELS, (
+            "distribution_into_strength", "regime_shift", "dead_cat",
+            "insufficient_data",
+        ))
+
+    def test_three_retired_labels_are_gone_from_vocabulary(self):
+        for label in self.RETIRED:
+            self.assertNotIn(label, rg.LABELS)
+
+    def test_three_retired_labels_are_gone_from_rows(self):
+        produced = {label for label, _bias, _req in rg.ROWS}
+        for label in self.RETIRED:
+            self.assertNotIn(label, produced)
+
+    def test_matrix_has_exactly_two_rows(self):
+        self.assertEqual([label for label, _b, _r in rg.ROWS],
+                         ["distribution_into_strength", "dead_cat"])
+
+    def test_no_row_requires_rates(self):
+        for _label, _bias, required in rg.ROWS:
+            self.assertNotIn("rates", required)
+
+    def test_axes_has_no_rates_or_divergence_field(self):
+        fields = set(rg.Axes.__dataclass_fields__)
+        self.assertNotIn("rates", fields)
+        self.assertNotIn("rates_divergence", fields)
+
+    def test_reasons_has_no_rates_key(self):
+        self.assertNotIn("rates", rg.REASONS)
+        for reason in rg.REASONS.values():
+            self.assertNotIn("10Y", reason)
+            self.assertNotIn("treasury", reason)
+
+    def test_reasons_loop_and_card_mapping_have_no_rates_entry(self):
+        """Both the pure in-place reasons and the card mapping must be clean."""
+        text = (ROOT / "packages/strategy-nfr/src/athena_strategy/regime.py").read_text()
+        loop = text.split("def _reasons", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn('"rates"', loop)
+        card = (ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_regime.py").read_text()
+        mapping = card.split("def _reason_for", 1)[1].split("\ndef ", 1)[0]
+        self.assertNotIn("rates_divergence", mapping)
+        self.assertNotIn('"rates"', mapping)
+
+    def test_vix_dimensions_are_three(self):
+        self.assertEqual(rg.VIX_DIMENSIONS,
+                         ("vix_slope", "vix_term", "single_name_iv"))
+        self.assertEqual(len(rg.VIX_DIMENSIONS), 3)
+
+    def test_hit_count_caps_at_three(self):
+        axes = rg.Axes(vix_slope="flat", vix_term="contango",
+                       single_name_iv="normal")
+        self.assertEqual(rg._hit_count(axes), 3)
+        self.assertEqual(rg.evaluate(axes).inputs["vix_hits"], 3)
+
+    def test_inputs_have_no_rates_keys(self):
+        inputs = rg.evaluate(rg.Axes()).inputs
+        self.assertNotIn("rates_10y", inputs)
+        self.assertNotIn("rates_divergence", inputs)
+
+    def test_line_ignores_legacy_rates_10y_key(self):
+        """§26.6: historical regime_labels rows are neither rewritten nor deleted."""
+        legacy = rg.Regime(
+            label="dead_cat", close_bias="bounce_likely_fades",
+            inputs={"vix_level": "21.5", "rates_10y": "4.25",
+                    "rates_divergence": "aligned", "vix_hits": 4},
+            evidence={},
+        )
+        line = legacy.line()
+        self.assertIn("VIX 21.50", line)
+        self.assertNotIn("10Y", line)
+        self.assertNotIn("4.25", line)
+
+    def test_build_axes_never_assigns_rates(self):
+        axes = gr.build_axes(_FakeStore(), date(2026, 11, 24))
+        self.assertFalse(hasattr(axes, "rates"))
+        self.assertFalse(hasattr(axes, "rates_divergence"))
+
+    def test_dimension_labels_have_three_rows(self):
+        self.assertEqual(len(gr._DIMENSION_LABELS), 3)
+        self.assertNotIn("股债背离", [t for _k, t in gr._DIMENSION_LABELS])
+
+    def test_card_denominator_is_three(self):
+        html = gr.render_card(
+            _FakeStore(label=self._label(inputs={"vix_hits": 2})), "U1",
+        )
+        self.assertIn("2/3", html)
+        self.assertNotIn("/4", html)
+
+    def test_card_ignores_legacy_rates_keys(self):
+        html = gr.render_card(
+            _FakeStore(label=self._label(inputs={
+                "vix_hits": 2, "rates_10y": "4.25", "rates_divergence": "aligned",
+            })), "U1",
+        )
+        self.assertNotIn("4.25", html)
+        self.assertNotIn("股债背离", html)
+        self.assertNotIn("10Y", html)
+
+    def test_close_bias_vocabulary_is_unchanged(self):
+        """§26.4: CLOSE_BIAS stays four values; two currently have no producer."""
+        self.assertEqual(rg.CLOSE_BIAS, (
+            "risk_off_into_close", "bounce_likely_fades", "neutral",
+            "insufficient_data",
+        ))
+
+    def test_no_new_market_data_source_or_migration(self):
+        """§26.5: zero migration, zero new source, §6 untouched.
+
+        Research notes in docstrings legitimately name DGS10/TYVIX; what must
+        not appear is a *source literal* or a quote/subscription call.
+        """
+        migrations = list((ROOT / "packages/store/src/athena_store/migrations").glob("0*.sql"))
+        self.assertEqual(len(migrations), 51)
+        self.assertTrue((ROOT / "packages/store/src/athena_store/migrations"
+                         / "055_regime_labels.sql").exists())
+        self.assertEqual(vixfeed.SOURCE, "ib-vix")
+        for path in (ROOT / "packages/strategy-nfr/src/athena_strategy/regime.py",
+                     ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_regime.py",
+                     ROOT / "apps/orchestrator/src/athena_orchestrator/pages.py",
+                     ROOT / "packages/marketdata/src/athena_marketdata/vixfeed.py"):
+            text = path.read_text()
+            self.assertNotIn("'ib-tnx'", text)
+            self.assertNotIn('"ib-tnx"', text)
+            self.assertNotIn("reqMktData", text)
+        pricing = (ROOT / "packages/marketdata/src/athena_marketdata/pricing.py").read_text()
+        self.assertIn("source IN ('ib-daily', 'ib-delayed')", pricing)
+        self.assertNotIn("ib-tnx", pricing)
+
+    def test_vixfeed_and_broker_are_untouched_by_d109(self):
+        """index_history() is the VIX seam, not a 10Y source; it stays."""
+        text = (ROOT / "apps/exec-ib/src/athena_exec/broker.py").read_text()
+        self.assertEqual(text.count("Index("), 1)
+        self.assertIn("def index_history", text)
+        self.assertIn('"CBOE"', text)
+
+    def test_regime_shift_is_still_a_declared_gap(self):
+        """§26.6: not 10Y logic, so it survives the retirement."""
+        self.assertIn("regime_shift", rg.LABELS)
+        self.assertNotIn("regime_shift", {l for l, _b, _r in rg.ROWS})
+
+    def _label(self, label="dead_cat", inputs=None):
+        return (date(2026, 11, 24), "C", label, "bounce_likely_fades",
+                {"matched_rule": label},
+                inputs if inputs is not None else {"vix_hits": 1},
+                datetime(2026, 11, 24, 17, 30, tzinfo=UTC))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 ＋ 第十一轮 ＋ 2026-11-23 第十二轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过；＋ 第十二轮 **D95–D101 七条全取推荐、零偏离、零跳过**）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。** **R6 实现口径见 §22：✅ 第十二轮已裁定 D95–D101；✅ 已实现并验证，交付记录见 §23（零迁移、零运行时核心改动、§1 原文不动、§6 仅 D100 已裁定的窄 carve-out）。** **R7 实现口径见 §24：✅ 第十三轮已裁定 D102–D108（§6 第二次显式窄 carve-out：手动按需 VIX 同步 D108；§13.4 显式移除量能轴 D105）；✅ 已实现并验证，交付记录见 §25（`055 regime_labels` 落地、Run C 独立 daemon、`ib-vix` 惰性、`{{regime}}` 注入、98 单测）。**
-**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；R7 已裁定（D67–D73），落地前契约 ✅ 第十三轮已裁定 D102–D108（§24）；✅ 已实现并验证（2026-11-24，§25 交付记录）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十、十一、十二轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4) / §21 (R5) / §23 (R6); R7 contract + ratification: §13; R5 implementation contract: §19 (✅ ratified D84–D90); delivery record: §21 (✅ implemented and verified); data-layer split: §20 (D91–D94, pre-ratified inputs for the D79 round); **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).**
+**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 ＋ 第十一轮 ＋ 2026-11-23 第十二轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过；＋ 第十二轮 **D95–D101 七条全取推荐、零偏离、零跳过**）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。** **R6 实现口径见 §22：✅ 第十二轮已裁定 D95–D101；✅ 已实现并验证，交付记录见 §23（零迁移、零运行时核心改动、§1 原文不动、§6 仅 D100 已裁定的窄 carve-out）。** **R7 实现口径见 §24：✅ 第十三轮已裁定 D102–D108（§6 第二次显式窄 carve-out：手动按需 VIX 同步 D108；§13.4 显式移除量能轴 D105）；✅ 已实现并验证，交付记录见 §25（`055 regime_labels` 落地、Run C 独立 daemon、`ib-vix` 惰性、`{{regime}}` 注入、98 单测）。** **§26：✅ 第十四轮已裁定 D109（明确偏离推荐）—— 退役全部 10Y 逻辑，显式修订 §13.4／§13.5／§13.9／§25；零迁移、§1／§6 零修订，交付记录见 §26。**
+**R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；R7 已裁定（D67–D73），落地前契约 ✅ 第十三轮已裁定 D102–D108（§24）；✅ 已实现并验证（2026-11-24，§25 交付记录）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十、十一、十二轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4) / §21 (R5) / §23 (R6); R7 contract + ratification: §13; R5 implementation contract: §19 (✅ ratified D84–D90); delivery record: §21 (✅ implemented and verified); data-layer split: §20 (D91–D94, pre-ratified inputs for the D79 round); **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).** **Section 26 (D109, 2026-11-24): all 10Y logic retired — 4-label vocabulary, 3 read-only dimensions, `VIX hits n/3`; explicitly deviates from the recommendation; §1/§6 zero-revised.**
 
 > **2026-11-23 R6 启动（第十二轮，裁定前回填，历史记录）**：操作者 2026-11-22 指令 `OK please keep going on R6.` 之后，先按 doc-first 纪律做只读接缝调研并合并 **§22 落地前契约（Q1–Q7、未编号）**，见 `C-20261123-1`。**本轮零代码、零迁移、零运行时改动、不提交**；R6 是 R1–R5 之后脊柱上的最后一项，R7 契约仍冻结、processor／VIX 仍归 D79 轮。
 >
@@ -104,9 +104,9 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 
 ---
 
-## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分 ＋ 第十二轮 R6 ＋ 2026-11-24 第十三轮 R7）
+## 5. Decisions — 全部已裁定（2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分 ＋ 第十二轮 R6 ＋ 2026-11-24 第十三轮 R7 ＋ 第十四轮 D109）
 
-**五十一条全部裁定：四十八条取推荐、三条明确偏离（Q2／D75、Q4／D83、Q5／D88）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5；**D80–D83** 是 R4 实现契约的第十轮裁定（Q1–Q4 编号化，其中 Q4 手写答复偏离推荐、另补一次「state 唯一性落点」确认问项），见 §7 第十轮与 §17.6；**D84–D94** 是第十一轮 R5 实现契约与架构拆分裁定（Q1–Q7 编号化为 D84–D90，Q5 手写答复偏离推荐另补确认问项；架构四问编号化为 D91–D94），见 §7 第十一轮、§19.6 与 §20.2；**D95–D101** 是第十二轮 R6 实现契约裁定（Q1–Q7 编号化，七条全取推荐、零偏离、零跳过），见 §7 第十二轮与 §22.6。
+**五十二条全部裁定：四十八条取推荐、四条明确偏离（Q2／D75、Q4／D83、Q5／D88、第十四轮 D109）、零跳过。** 前八条分两轮、每条带具体案例逐条问过（「EL/NL 8.2% 怎么显示」「考试中被 uncovered call 连发几条」「22:40 进程死了多久收到消息」），裁定记录见 §7；**D66** 是 R1 交付后的单条补裁定，见 §7 第七轮；**D67–D73** 是 R7 企划的第八轮裁定（Q1–Q7 编号化），见 §7 第八轮与 §13.6；**D74–D79** 是 R7 VIX 预警视角补充企划的第九轮裁定（Q1–Q6 编号化，其中 Q6 由 Q2 的偏离答案拆出），见 §7 第九轮与 §16.5；**D80–D83** 是 R4 实现契约的第十轮裁定（Q1–Q4 编号化，其中 Q4 手写答复偏离推荐、另补一次「state 唯一性落点」确认问项），见 §7 第十轮与 §17.6；**D84–D94** 是第十一轮 R5 实现契约与架构拆分裁定（Q1–Q7 编号化为 D84–D90，Q5 手写答复偏离推荐另补确认问项；架构四问编号化为 D91–D94），见 §7 第十一轮、§19.6 与 §20.2；**D95–D101** 是第十二轮 R6 实现契约裁定（Q1–Q7 编号化，七条全取推荐、零偏离、零跳过），见 §7 第十二轮与 §22.6；**D109** 是第十四轮 10Y 逻辑退役裁定（一问一答、**明确偏离推荐**），见 §7 第十四轮与 §26。
 
 | # | Decision | Options | 裁定 | 依据 |
 |---|---|---|---|---|
@@ -161,6 +161,7 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 | **D106** | R7 Q5：`insufficient_data` 判定粒度 | (a) 按候选行必需轴 (b) 全局任一轴 | **✅ (a) 按候选行必需轴** | §13.4 第 4 行对 10Y／金／VIX 写「—」即非必需；全局读法会让该行永远不可达，与矩阵自相矛盾 |
 | **D107** | R7 Q6：`agents._context()` 注入何时出现 | (a) 仅真实 label 注入 (b) 总是注入 (c) Settings 开关默认关 | **✅ (a) 仅 label ≠ `insufficient_data` 注入** | `_context()` 是逐标的 prompt 构造（§24.2 #14）；注入 `insufficient_data` 会污染所有 agent 输出。无 Settings 字段，feed 就绪后自动生效 |
 | **D108** | R7 Q7：手动 VIX 同步是否修订 §6 | (a) §6 显式窄 carve-out (b) 视为 §6 之外 (c) 推到数据源轮 | **✅ (a) §6 显式窄 carve-out** | §6「No new market data sources」与 D79 明确要独立轮；操作者指令即授权 ⇒ 记一条**手动、按需、无自动 feed** 的窄分句，按 §13.7 显式裁定而非实现里顺手改 |
+| **D109** | 第十四轮 Q1：无 provider 能给 12:30 的 10Y，相关逻辑怎么处置（§26.1–26.3） | (a) 保留 honest gap、只删死显示分支 (**推荐**) (b) 退役全部 10Y 逻辑 (c) 现在接 10Y feed | **✅ (b) 退役全部 10Y 逻辑 —— 明确偏离推荐** | FRED `DGS10` 16:15 ET 才发布、`^TNX` 经 `index_history()` 只有 1-day EOD、TYVIX／VXTYN 已 2020 退市 ⇒ 12:30 盘中方向结构性不可得。显式修订 §13.4（删三行）／§13.5（词表 7→4）／§13.9（维度 4→3、`n/3`）／§25；零迁移、§1／§6 零修订。否决 (c)：昨收臆造违反 D68／D73 且需第三次 §6 carve-out＋流式订阅（越过 D108） |
 
 ---
 
@@ -184,7 +185,7 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 
 ---
 
-## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分 ＋ 第十二轮 R6）
+## 7. 裁定记录（2026-11-21，第六轮 ＋ 第七轮补裁定 ＋ 第八轮 R7 ＋ 第九轮 R7 VIX ＋ 第十轮 R4 ＋ 第十一轮 R5／架构拆分 ＋ 第十二轮 R6 ＋ 第十四轮 D109）
 
 操作者指令：「每個問題問我一遍，我來回答」。分两轮、每条带具体案例逐条问，**8 条全取推荐、零偏离、无跳过**（第六轮 D58–D65 的原始记录；第七／八／九轮见下文各节）。
 
@@ -357,6 +358,21 @@ PORTFOLIO  ● 危险   EL/NL 8.2%   1 breach, 2 proximity
 - **§13.4 显式修订（D105）**：量能轴移除并记缺口，其余列与 D67–D73 结论不变。
 - **`055` 首次落地**：`regime_labels`；**四处**「055 absent」断言随实现更新（`test_guardian_r3/r4/r5/r6` —— 实现时实测发现 §24.2 原写「三处」漏了 r3，已订正）。
 - 裁定轮**零代码**；实现与交付记录另起 §25。
+
+### 第十四轮（2026-11-24，10Y 数据源研究 → D109）
+
+操作者贴出 R6／R7 交付状态后问「i think its missing 10Y VIX? Can you research to see what can provide this? If we can't, can we not use 10Y VIX or remove logic related to this since its unused or never reachable」。按 doc-first：先只读研究（§26.1 五类 provider 逐一核实 ＋ §26.2 纯矩阵探针实测），合并 §26 契约，再**一问一答**用英文问过。**手写答复选 (b)「Retire all 10Y logic」，明确偏离推荐 (a)**；按「每個問題問我一遍」不再追问。
+
+| 轮 | 决策 | 案例（问的是什么） | 裁定 |
+|---|---|---|---|
+| 1 | **D109** | FRED `DGS10` 16:15 ET 才发、`^TNX` 只有 1-day EOD、TYVIX 已退市 ⇒ 5 行里 3 行永不可达、`VIX hits` 恒封顶 2/4，是留着 honest gap 还是删 | ✅ **(b) 退役全部 10Y 逻辑**（偏离推荐 (a)）：删三行、`LABELS` 7→4、维度 4→3、`n/3` |
+
+**裁定后的状态变化**：
+
+- 决策编号扩到 **D1–D109 / 110 个节点**；累计 **52 条裁定：48 取推荐、4 偏离（D75／D83／D88／D109）、零跳过**。
+- **§13.4／§13.5／§13.9／§25 四处显式修订**（D109），均不改写历史原文；**§1／§6 零修订**（删逻辑不是加源，第三次 carve-out 未发生）。
+- **零迁移、零 schema、零配置**：`055` 仍是唯一 R7 迁移、仍 51 个；`ib-vix` 与 Run C daemon 不动。
+- 裁定轮零代码；实现、验证与交付记录另起 §26.5 与 `C-20261124-5`。
 
 ---
 
@@ -545,6 +561,8 @@ for each position:
 
 ### 13.4 建议的规则形态：三轴联合矩阵
 
+> **⚠️ 2026-11-24 第十四轮 D109 显式修订（见 §26.4）**：本节**历史原文不改**，但「股 × 10Y 收益率 × 金」联合矩阵的 **`rates` 列与依赖它的三行已整体退役** —— `liquidity_squeeze`／`short_cover_bounce`／`normal_risk_off` 不再是有效规则；`ROWS` 由 5 行缩为 2 行（`distribution_into_strength`／`dead_cat`）。理由：无 provider 能在 12:30 ET 给盘中 10Y 方向（§26.1），三行永不可达。D105（量能轴移除）与 D106（按候选行必需轴）**均不变**。封顶 2/4 的 `VIX hits` 同步改为 2/3（§13.9）。
+
 > **2026-11-22 第九轮补登记**：`VIX 水位` 一栏已按 **D74** 扩为四个只读维度，清单与封闭词表见 **§13.9**；本矩阵其余列与 D67–D73 结论不变。
 
 把 5 条独立规则改成「**股 × 債(收益率) × 金**」方向矩阵 ＋ VIX 水位 ＋ 量能 ＋ 消息标签，一次判定一个标签：
@@ -566,7 +584,7 @@ for each position:
 
 - **一行推送**（12:30 ET 示例形）：`🟠 11/21 午間：VIX 34（早高 40 回落）、NVDA 抽 +3% 無量、10Y 4.94%↓、金跌 →【空頭回補反抽】。close_bias: bounce_likely_fades。`
 - **降級形（D73）**：`⚪ … VIX n/a (no intraday-high feed in store)、10Y n/a (no ^TNX feed)、金 n/a (no gold feed) →【insufficient_data】。close_bias: insufficient_data。` —— 每个 `unknown` 就地给原因，推送与面板卡同带。
-- **标签词表**（封闭，禁止 `risks[].code` 那种自由串）：`liquidity_squeeze / short_cover_bounce / distribution_into_strength / normal_risk_off / regime_shift / dead_cat / insufficient_data`。
+- **标签词表**（封闭，禁止 `risks[].code` 那种自由串）：`liquidity_squeeze / short_cover_bounce / distribution_into_strength / normal_risk_off / regime_shift / dead_cat / insufficient_data`。**⚠️ D109（§26.4）显式修订**：现行为 **4 值** `distribution_into_strength / regime_shift / dead_cat / insufficient_data`；前三值随 10Y 三行退役而删除，历史原文保留。`CLOSE_BIAS` 四值不变。
 - **存贮**：独立 append-only `regime_labels(account_id, day, run, label, close_bias, evidence jsonb, inputs jsonb, created_at)`，一跑一行；`evidence` 存「哪个输入 → 哪条规则命中 → 得出什么」，用于复核。**不复用 `guardian_alerts`**（它是 `open/skipped/resolved/auto_cleared` ack 去重语义，部分唯一索引会挡掉同键历史）。**号段口径已由 R3 修正（§14.2）**：`054` 已归 `054_guardian_runs.sql`，R7 的 `regime_labels` 顺延到 `055`；此处仍仅为预留，未落地、未 apply。该修正只动号段登记，D67–D73 七条裁定与 §1／§6 边界均不变。
 - **喂给打分表（✅ D69 组合级存一次）**：全库无字面叫「打分表」的表；最贴近的是 `indicators.py` 的 `Indicators`（14 字段、落 `symbol_phases.indicators`，被 `phases.evaluate_symbol()` / `agents.py` prompt / `wheel.py` 开门控 / `screener.py` 消费），另有 `advisor.py:_rule_fallback()` 字面 `score = 0.0` 写 `advisor_signals`。注意 `Indicators` 已有 `regime_unknown`（基于 `regime_index = "SPY"` 日线的**跨日** regime）—— R7 是**当日盘中**状态，**必须换名字**（`session_regime`），不可覆盖。市场级标签是组合级，逐标的写进 JSONB 会复制 N 份 ⇒ **裁定存一行 `regime_labels`、在 `agents.py:_context()` 注入一行全局上下文**；`wheel.py` 不做逐标的读取（D67 不 gate）。
 - **面板（✅ D70）**：`pages.py:1698-1699` 的 `/portfolio-analysis` 已有一张展示态 `RISK OFF / CAUTION / RISK ON` 卡（由 `advisor_signals` 推导、无时序）。**裁定在此扩一张「午間 Regime」卡**，不新开页；`/guard` 保持纯 ack 动作面（D62 语义不动）。
@@ -627,6 +645,7 @@ for each position:
 - **`label` 词表不变**：仍为 §13.5 的 7 个封闭值；四个维度是 `inputs` 的观测状态，不新增 `label` 值、不改 `close_bias` 词表、不新增 `source`（`'trigger'` 仍留给 R5）。
 - **存贮不变**：仍是一行 `regime_labels`（§13.5，号段 `055` 预留）；四个维度与命中数进 `inputs jsonb` / `evidence jsonb`，**不加列、不加迁移**。
 - **D75／D79 的 interim**：操作者要「新增行情源／用 IBKR 建」的意图已记录，但 §6 未修订、下一轮才定 feeds ⇒ **本批次四个维度全部按上表 `unknown` 呈现**，不得用叙述里的 11/13 数字补位。下一轮显式修订 §6 后，才把对应维度从 `unknown` 切到真值；届时须同步更新本表原因字符串。
+- **⚠️ 2026-11-24 D109 显式修订（§26.4）**：上表 `rates_divergence` 行**退役**，四个只读维度缩为 **三个**（`vix_slope`／`vix_term`／`single_name_iv`）；`VIX hits n/4` 改为 **`n/3`**，`REASONS["rates"]` 与卡片的「股债背离」行同步删除。`single_name_iv` 仍恒 `None`（D79 轮）⇒ 实际封顶 **2/3**，见 §26.7。历史原文保留。
 
 ---
 
@@ -1345,6 +1364,8 @@ R7 = **Run C 单次 12:30 ET 判定** ＋ **纯核心联合矩阵** ＋ **`regim
 ## 25. R7 交付记录（2026-11-24）
 
 > **性质**：§24 已裁定契约（D102–D108）的**实现与验证记录**，不是新决策。七条全取推荐逐条落地；**D108 是本计划第二次真实 §6 边界修订**（第一次是 R6 的 D100），**D105 是 §13.4 的显式修订**（移除量能轴）。裁定记录见 §24.7 与 §7 第十三轮、`C-20261124-2`／`-3`。
+>
+> **⚠️ 2026-11-24 第十四轮 D109 已修订本节**：「已知留白」②（10Y 无 feed ⇒ 三行不可达）与 ④（`rates_divergence` 依赖 10Y）**已关闭** —— 10Y 逻辑整体退役，`LABELS` 7→4、维度 4→3、`VIX hits n/4`→`n/3`。本表其余交付事实（迁移、daemon、`ib-vix` 惰性、注入、98 单测）**一字不改**。见 §26。
 
 | 项 | 内容 |
 |---|---|
@@ -1362,7 +1383,105 @@ R7 = **Run C 单次 12:30 ET 判定** ＋ **纯核心联合矩阵** ＋ **`regim
 
 ---
 
+## 26. 第十四轮裁定与 10Y 逻辑退役交付记录（2026-11-24，D109）
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 44 条 / D1–D101 102 个节点零待决；＋ 第十二轮 D95–D101 七条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、§21 R5 交付记录 ✅ 已回填；零迁移、§1／§6 边界零修订、`055` 不动**；**§22 R6 落地前契约 ✅ 第十二轮已裁定 D95–D101（2026-11-23，`C-20261123-1`／`-2`）、零代码／零迁移／不提交**；**§23 R6 交付记录 ✅ 已回填（2026-11-24，`C-20261124-1`）：`deploy/macos/` stdlib-only 看门狗 ＋ 4 张 plist ＋ 38 单测；零迁移、零运行时核心改动、`055` 仍归 R7、§1 原文不动、§6 仅 D100 已裁定窄 carve-out**；**§24 R7 落地前契约 ✅ 第十三轮已裁定 D102–D108（2026-11-24，`C-20261124-2`／`-3`）：只读接缝实测 15 条、§6 第二次窄 carve-out（D108 手动 VIX 同步）、§13.4 显式移除量能轴（D105）**；**§25 R7 交付记录 ✅ 已回填（2026-11-24，`C-20261124-4`）：`055_regime_labels` 落地（迁移 50→51）、`vixfeed`／`regime`／`guardian_regime` ＋ Run C 独立 daemon、`/settings` 手动 `Sync VIX Data`、`/portfolio-analysis` 午間 Regime 兄弟卡、`{{regime}}` 仅真实 label 注入；98 单测、17/17 变异、真实 Postgres 端到端；§1 原文不动**
+> **性质**：本小节是**一次新裁定（D109）＋ 其实现与验证记录**，不是口径校正、也不是实现里顺手改掉的边界修订。来源：操作者 2026-11-24 贴出 R6／R7 交付状态后提问「i think its missing 10Y VIX? Can you research to see what can provide this? If we can't, can we not use 10Y VIX or remove logic related to this since its unused or never reachable」。按 doc-first：先只读研究 → 合并本契约 → **一问一答裁定** → 再实现。
+> **D109 明确偏离推荐**（第 4 条偏离，前三条 D75／D83／D88）：助手推荐 (a)「保留 honest gap、只删 3 行不可达的显示分支」，操作者选 **(b)「退役全部 10Y 逻辑」**。裁定记录见 §26.3 与 §7 第十四轮；实现、验证与台账见 §26.5 与 `C-20261124-5`。
+
+### 26.1 名词厘清与 provider 研究（只读，2026-11-24）
+
+库里**没有「10Y VIX」这个标的**，三个说法指向同一条缺失输入：
+
+| 操作者口语 | 实际所指 | 代码落点 |
+|---|---|---|
+| 「10Y VIX」字面 | CBOE **TYVIX／VXTYN**（10-Year Treasury Note **Volatility** Index，10Y 期债期货期权的隐含波动率） | 全库零命中；且它度量的是**波动率不是收益率**，永远填不了 `rates` 轴 |
+| 10Y 收益率 | `^TNX`／FRED `DGS10` | `rates` 轴（§13.4 矩阵第 2 列）、`rates_10y` 数值（`Regime.line()`） |
+| 股债背离 | 10Y 周变动 × 股指方向 | `rates_divergence`（§13.9 第 4 个只读维度） |
+
+§13.3 早已实测「10Y 美债收益率 / `^TNX` / 债券价：无」；D79／§16.6 把 10Y 排到独立「R7 数据源」轮；D103 在第十三轮明确否掉「期限＋10Y」选项。本轮外部检索 ＋ 本地接缝实测结论：
+
+| 候选 provider | 能给 12:30 ET 的「当日 10Y 方向」吗 | 依据 |
+|---|---|---|
+| FRED `DGS10` / Fed H.15 | ❌ | 官方**日度收盘**，H.15 每工作日约 **16:15 ET** 发布（部分口径 18:00 ET 前）、仅工作日、无盘中更新；12:30 时当日值根本不存在，用昨收即臆造（D68／D73） |
+| CBOE `^TNX` 实时指数 | ⚠️ 指数本身实时，**当前取不到** | Yahoo／Investing 的 `^TNX` 确有日内区间；但库内唯一 IND 入口 `broker.index_history()` 调 `historical(contract, duration, "1 day")` ⇒ **只有 EOD 日线**，12:30 最新一根是昨收 |
+| IBKR `Index("TNX","CBOE")` | ⚠️ 契约＋权限两道门槛 | 需**第三次 §6 carve-out**、CBOE index 行情 entitlement（未验证）、`gate.py` 的 `{STK, OPT}` 硬限；要日内值还须 `reqMktData` 流式订阅，而 D108 明确「无流式订阅」。当前 IB Gateway 4001/4002 未启 |
+| CBOE TYVIX / VXTYN | ❌ 已退市 | CFE-2020-013：**2020-04-03** 停止挂牌 VXTY 期货、**2020-06-08** 删除 Rulebook Chapter 14；FRED `VXTYN` 标记 DISCONTINUED、末笔 **2020-05-15** |
+| TLT / 债券 ETF 代理 | ❌ | 不在 `guidance_symbols`；且债券**价格**与收益率方向符号相反，§13.4 已专门统一口径避免该反转 |
+
+**决定性结论**：在既有 §1／§6／D108 边界内，**没有任何 provider 能给出 12:30 的盘中 10Y 收益率方向**；`index_history()` 是 1-day EOD，不是没接，是语义上不可得。`rates_divergence` 是周变动／展示用（D77），EOD 日线理论上可点亮，但仍属新数据源 ⇒ 归 D79 轮，本批不碰。
+
+### 26.2 现状实测：哪些是「永不可达」，哪些是 honest gap
+
+以纯矩阵探针实测（非推测）：
+
+```
+ROWS total                       : 5
+rows requiring 'rates'           : ['liquidity_squeeze', 'short_cover_bounce', 'normal_risk_off']
+LABELS with no ROWS entry        : ['insufficient_data', 'regime_shift']
+max observable vix_hits (no 10Y) : 2 / 4
+build_axes writes 'rates_10y'    : False
+build_axes rates lines           : ['rates=None,  # D103: no treasury feed this batch']
+```
+
+- **5 行里 3 行结构性不可达**（必需 `rates`），`VIX hits` 恒封顶 **2/4**；`Regime.line()` 的 `10Y {n}%` 分支是**真死代码**（`build_axes()` 从不写 `numbers["rates_10y"]`，只有单测手喂 `Regime` 才能走到）。
+- 但 `REASONS["rates"] = "10Y n/a (no treasury-yield feed in store)"` 由 `_reasons()` 就地展示、`_reason_for("rates_divergence")` 映射到卡片 ⇒ 属 **D73 honest gap**，不是死代码。
+- **既有先例冲突**：D105 把量能「从必需轴移除并记永久缺口」（移除模式）；`regime_shift` 同样不可达却被**刻意保留**为带就地原因的已知留白（保留模式）。两种模式并存 ⇒ 必须显式裁定，不能静默删。
+
+### 26.3 第十四轮裁定 Q1 → D109（一问一答，2026-11-24）
+
+| 问 | 选项 | 裁定 |
+|---|---|---|
+| **Q1**：既然无 provider 能在 12:30 给 10Y，D109 怎么处置 10Y 相关逻辑？ | (a) 保留 honest gap、只删 3 行死显示分支（**推荐**）<br>(b) 退役全部 10Y 逻辑<br>(c) 现在就接 10Y feed | **✅ (b) 退役全部 10Y 逻辑 —— 明确偏离推荐** |
+
+**推荐 (a) 的理由与偏离记录**：(a) 零契约改动、与 D79「下一轮显式修订 §6 才切真值」一致、`regime_shift` 已有「词表保留、就地说明」先例，将来接 feed 时零词表churn。操作者仍选 (b)，理由是该逻辑「unused or never reachable」。按「每個問題問我一遍」与「手寫偏离须补确认」纪律，本问只问一次、答复即为裁定，不再追问。**明确否决 (c)**：FRED 16:15 ET 才发布 ⇒ 12:30 只有昨收，违反 D68／D73；且需第三次 §6 carve-out ＋ entitlement ＋ 流式订阅（越过 D108），等同提前启动 D79 轮。
+
+**裁定后的状态变化**：决策编号扩到 **D1–D109 / 110 个节点**，决策层面零待决；累计 **52 条裁定：48 取推荐、4 偏离（D75／D83／D88／D109）、零跳过**。
+
+### 26.4 显式契约修订（D109，四节，均不改写历史原文）
+
+| 节 | 修订内容 |
+|---|---|
+| **§13.4** | 「股 × **10Y 收益率** × 金」联合矩阵删去 `rates` 列；`liquidity_squeeze`／`short_cover_bounce`／`normal_risk_off` **三行整体退役**。`ROWS` 由 5 行缩为 **2 行**：`distribution_into_strength`（股反转＋消息）、`dead_cat`（股涨＋消息＋VIX 回落）。D105 的量能轴移除、D106 的按候选行必需轴判定**均不变** |
+| **§13.5** | 封闭 `label` 词表由 **7 值缩为 4 值**：`distribution_into_strength`／`regime_shift`／`dead_cat`／`insufficient_data`。`CLOSE_BIAS` 四值**保持原文**（它是封闭输出枚举、不是规则；`risk_off_into_close`／`neutral` 当前无生产者，见 §26.7） |
+| **§13.9** | 四个只读维度缩为 **三个**：`vix_slope`／`vix_term`／`single_name_iv`；`rates_divergence` 退役。`VIX hits n/4` → **`n/3`**（D77 展示口径同步） |
+| **§25** | 「已知留白」②（10Y 无 feed ⇒ 三行结构性不可达）与 ④（`rates_divergence` 依赖 10Y）**由 D109 关闭**；其余留白不变。§25 其余交付事实（迁移、daemon、惰性、注入）一字不改 |
+
+**§6「No new market data sources」零修订**：本批**不接**任何 feed，是**删**逻辑不是**加**源 ⇒ 第三次 carve-out 未发生，D100／D108 两条既有分句原文不动。**§1「no drafts, no orders, no tactic changes」零修订**。
+
+### 26.5 实现与验证（2026-11-24，`C-20261124-5`）
+
+| 文件 | 改动 |
+|---|---|
+| `packages/strategy-nfr/src/athena_strategy/regime.py` | `LABELS` 7→4；`ROWS` 5→2（删三行 10Y 依赖）；`VIX_DIMENSIONS` 4→3；`Axes` 删 `rates`／`rates_divergence` 字段；`REASONS` 删 `rates`；`Regime.line()` 删 10Y 分支与 `number()` 的 `suffix` 形参；`_hit_count()`／`_reasons()`／`evaluate()`／`_inputs()` 同步 |
+| `apps/orchestrator/src/athena_orchestrator/guardian_regime.py` | `build_axes()` 删 `rates=None`／`rates_divergence=None`；`_DIMENSION_LABELS` 4→3；`_reason_for()` 删 `rates_divergence` 映射；卡片 `VIX hits n/4`→`n/3`；模块 docstring 改写 |
+| `apps/orchestrator/tests/test_guardian_r7.py` | 词表／行数／维度／分母断言改写；新增 `TestD109Retirement` 退役不变量（含**旧 `regime_labels` 行仍带 `rates_10y` 时 `line()` 必须忽略**的向后兼容测试）；删除已退役行的单测 |
+| 文档与台账 | 14 册 §26（本小节）＋ 页眉／页脚／§5／§7；00 册 §5／§6／§11／§12；`CHANGELOG.md`／`logs/2026-11-24.md` 的 `C-20261124-5`；`.workbuddy/memory/2026-11-24.md` |
+
+**不受影响（零改动）**：`vixfeed.py`、`broker.index_history()`（VIX 用，非 10Y）、`pages.py`、`agents.py`（`{{regime}}` 注入）、`loop.py`、Run C daemon、`guardian_schedule.EXECUTED_RUNS`、`055_regime_labels.sql`、`market_bars source='ib-vix'`、`packages/store/pyproject.toml`。**零迁移**（仍 51 个）、**零 Settings 字段**、**零 `uv.lock` 变动**。
+
+**验证链**（命令与实测输出逐条见 `logs/2026-11-24.md` 的 `C-20261124-5` 实测验证块）：全量 `unittest discover`、R7 单测、编译、store wheel 内 51 migrations、真实 Postgres 端到端（卡片三维／`n/3`／旧行 `rates_10y` 被忽略）、`scripts/check-changelog.mjs` 双向闭合、变异测试逐组 `BROKEN→FAIL` 且还原逐字节一致。
+
+### 26.6 明确不做
+
+- 不新增／不启用任何 10Y 或 VIX 之外的行情源；不修订 §6；不引入 `ib-tnx`；不动 `gate.py`／`reqMktData`。
+- 不退役 `regime_shift`（它的阻塞是 Fed 讲话／SEC 抓取／`score_title()` 粗码，属 §24.6 **非 10Y** 留白，仍由穷举单测固定）、不退役 `single_name_iv`（D79 真 IV Rank 轮）、不退役 `volume`（D105 已裁）。
+- 不改 `CLOSE_BIAS` 四值、不改 7 值之外的任何封闭词表、不改 `close_bias` 语义、不 gate `wheel.py`、不产订单／草案、不新增推送或 Settings 旋钮。
+- 不回写或删除历史 `regime_labels` 行：`inputs jsonb` 里的旧 `rates_10y`／`rates_divergence` 键**保留原样**，只保证渲染层忽略它们（向后兼容）。
+
+### 26.7 已知留白（订正 §25）
+
+① `regime_shift` 仍不可达（非 10Y，§24.6）。② `single_name_iv` 恒 `None`（D79 轮）⇒ **`VIX hits` 实际封顶 2/3**，不是 3/3；这是 honest gap，不臆造。③ `CLOSE_BIAS` 的 `risk_off_into_close`／`neutral` 当前无生产者（三行退役的连带结果），保留为封闭枚举值、不是规则；若要收缩须另起裁定。④ VIX 仍是手动 `Sync VIX Data`（D102／D108）。⑤ `concurrent_subscriptions=2` 不保证 12:30 有当日延迟快照。⑥ 无 US 假日日历（§14.5）。⑦ 阈值全部**待校準**、只作 `evidence` 留痕（D72）。⑧ IB Gateway 4001/4002 未启，10Y feed 与真实 VIX 同步能力均未做运行时验证。⑨ processor 机制／`data_symbols` 仍属「R7 数据源」轮（D91–D94／D79）。
+
+### 26.8 回滚
+
+`git revert <sha>`；恢复 `regime.py` 的 `LABELS`／`ROWS`／`VIX_DIMENSIONS`／`Axes`／`REASONS`／`line()`／`_inputs()` 与 `guardian_regime.py` 的 `_DIMENSION_LABELS`／`build_axes()`／分母，并还原 `test_guardian_r7.py` 与本文 §26.4 四节修订。**无需 `DROP TABLE`、无需清理 `market_bars`、无需回滚迁移或 Settings**：本批零 schema、零配置、零数据写入。
+
+---
+
+
+---
+
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 44 条 / D1–D101 102 个节点零待决；＋ 第十二轮 D95–D101 七条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、§21 R5 交付记录 ✅ 已回填；零迁移、§1／§6 边界零修订、`055` 不动**；**§22 R6 落地前契约 ✅ 第十二轮已裁定 D95–D101（2026-11-23，`C-20261123-1`／`-2`）、零代码／零迁移／不提交**；**§23 R6 交付记录 ✅ 已回填（2026-11-24，`C-20261124-1`）：`deploy/macos/` stdlib-only 看门狗 ＋ 4 张 plist ＋ 38 单测；零迁移、零运行时核心改动、`055` 仍归 R7、§1 原文不动、§6 仅 D100 已裁定窄 carve-out**；**§24 R7 落地前契约 ✅ 第十三轮已裁定 D102–D108（2026-11-24，`C-20261124-2`／`-3`）：只读接缝实测 15 条、§6 第二次窄 carve-out（D108 手动 VIX 同步）、§13.4 显式移除量能轴（D105）**；**§25 R7 交付记录 ✅ 已回填（2026-11-24，`C-20261124-4`）：`055_regime_labels` 落地（迁移 50→51）、`vixfeed`／`regime`／`guardian_regime` ＋ Run C 独立 daemon、`/settings` 手动 `Sync VIX Data`、`/portfolio-analysis` 午間 Regime 兄弟卡、`{{regime}}` 仅真实 label 注入；98 单测、17/17 变异、真实 Postgres 端到端；§1 原文不动**；**§26 第十四轮裁定与 10Y 退役交付记录 ✅ 已回填（2026-11-24，`C-20261124-5`）：D109 明确偏离推荐（第 4 条偏离），删三行 10Y 规则、`LABELS` 7→4、维度 4→3、`VIX hits n/3`；D1–D109 / 110 节点零待决（52 条：48 推荐、4 偏离）；零迁移、§1／§6 零修订、不接任何 feed**
 
 > **2026-11-23 R6 启动说明（裁定前回填，历史记录）**：14 册 **§22 R6 落地前契约 ⚠️ 待裁定 Q1–Q7、未编号**（`C-20261123-1`）；只读接缝实测 21 条（§22.2）、七个硬问题（§22.3）。**零代码、零迁移、不提交**；`055` 仍归 R7 `regime_labels`、不建 `056`；§1／§6 边界保持原文（Q6 若裁定修订，将在 §22.7 显式记录）。（本行为启动轮历史记录；裁定后为 **D1–D101 / 102 个节点零待决**，R6 契约 ✅ 已裁定 D95–D101、实现待办、R7 实现待 R4。）
