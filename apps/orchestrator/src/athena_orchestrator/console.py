@@ -218,6 +218,23 @@ form.fill > .settings-cols {
   flex: none; min-height: min-content; overflow: visible; align-items: start;
 }
 .settings-cols.settings-extras .settings-col { overflow: visible; min-height: auto; }
+/* §28: VIX card footer — raw closes stay in the table, card-level derived
+   states sit in a compact right-aligned block. */
+.vix-foot {
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 14px; flex-wrap: wrap; margin-top: 12px;
+}
+.vix-foot-main { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.vix-derived-wrap { text-align: right; margin-left: auto; }
+.vix-derived {
+  margin: 0; display: grid; grid-template-columns: auto auto;
+  gap: 4px 10px; align-items: center; justify-content: end;
+}
+.vix-derived dt {
+  color: var(--site-text-3); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.vix-derived dd { margin: 0; text-align: right; }
 .settings-col > form.card.agent.fill {
   display: flex; flex-direction: column;
 }

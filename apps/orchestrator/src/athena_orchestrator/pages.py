@@ -3623,6 +3623,10 @@ def _vix_card(conn, account: str) -> str:
 
     Read-only display plus one button. It deliberately has no Settings field:
     the operator asked for a manual action, not a persisted knob (D102/D107).
+
+    §28: the three derived states are card-level conclusions, not per-series
+    values, so they live in a compact right-aligned block below the table —
+    English-only, matching the rest of /settings.
     """
     from athena_marketdata import vixfeed
 
@@ -3649,6 +3653,16 @@ def _vix_card(conn, account: str) -> str:
     stamp = ""
     if series:
         stamp = f"Newest close {series[-1][0]} · {len(series)} sessions stored."
+    stamp_note = f'<p class="slot-note">{escape(stamp)}</p>' if stamp else ""
+    derived = (
+        '<div class="vix-derived-wrap">'
+        '<p class="slot-note">Derived from the closes above</p>'
+        '<dl class="vix-derived">'
+        f"<dt>State</dt><dd>{cell(state)}</dd>"
+        f"<dt>Slope</dt><dd>{cell(slope)}</dd>"
+        f"<dt>Term</dt><dd>{cell(term)}</dd>"
+        "</dl></div>"
+    )
     return (
         '<div class="card"><h2>VIX data</h2>'
         '<p class="card-lead">Manual, on-demand pull of VIX and its term structure from '
@@ -3656,13 +3670,15 @@ def _vix_card(conn, account: str) -> str:
         "rails and RV20 never see these rows. Run C reads them at 12:30 ET.</p>"
         '<table class="data"><thead><tr><th>Series</th><th>Latest close</th>'
         f"</tr></thead><tbody>{rows}</tbody></table>"
-        '<p class="slot-note">'
-        f"VIX 水位 {cell(state)} · 斜率 {cell(slope)} · 期限 {cell(term)}"
-        f"{' · ' + escape(stamp) if stamp else ''}</p>"
+        '<div class="vix-foot">'
+        '<div class="vix-foot-main">'
+        f"{stamp_note}"
         '<form method="post" action="/settings">'
         '<input type="hidden" name="action" value="sync_vix">'
         '<button class="btn" type="submit">Sync VIX Data</button>'
         "</form></div>"
+        f"{derived}"
+        "</div></div>"
     )
 
 

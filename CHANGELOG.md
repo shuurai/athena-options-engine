@@ -144,3 +144,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-24 | 实现 R7 午间 Regime 并补齐交付记录 | [C-20261124-4](logs/2026-11-24.md#c-20261124-4) |
 | 2026-11-24 | Retire R7 10Y logic and ratify D109 | [C-20261124-5](logs/2026-11-24.md#c-20261124-5) |
 | 2026-11-24 | Place settings trigger lines left and VIX data middle | [C-20261124-6](logs/2026-11-24.md#c-20261124-6) |
+| 2026-11-24 | Make VIX card English-only and move derived states bottom-right | [C-20261124-7](logs/2026-11-24.md#c-20261124-7) |

@@ -1,9 +1,13 @@
-"""§27 / C-20261124-6: /settings three-column layout.
+"""§27 / C-20261124-6 and §28 / C-20261124-7: /settings layout + VIX card copy.
 
 The `Trigger lines` and `VIX data` cards each own an independent POST form.
 They must stay OUTSIDE `#settings-form` (no nested forms, no `action` hidden
 fields leaking into autosave ``FormData(settingsForm)``) while being placed in
 the left / middle columns of a second aligned three-column band.
+
+§28: the VIX card must be English-only (like the rest of /settings), and its
+three derived states are card-level conclusions — not a second copy of the
+closes table — so they live in a distinct bottom-right block.
 
 No new decision node, no migration, no Settings field, no §1/§6 revision.
 """
@@ -12,7 +16,9 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from athena_marketdata import vixfeed
 from athena_orchestrator import pages as pg
 from athena_settings.model import SettingsPayload, TriggerLine, standard_payload
 
@@ -153,6 +159,85 @@ class TestSettingsLayout(unittest.TestCase):
         migrations = list((ROOT / "packages/store/src/athena_store/migrations").glob("*.sql"))
         self.assertEqual(len(migrations), 51)
         self.assertIn("trigger_lines", SettingsPayload.model_fields)
+
+
+class TestVixCardConsistency(unittest.TestCase):
+    """§28: English-only copy, derived states separated from the closes table."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.empty = pg._vix_card(_FakeConn(), "U1")
+        series = [("2026-11-18", 18.0), ("2026-11-19", 19.0),
+                  ("2026-11-20", 20.0), ("2026-11-21", 21.0),
+                  ("2026-11-24", 22.0)]
+        levels = {"VIX": 22.0, "VIX9D": 23.0, "VIX3M": 20.0, "VIX1Y": 19.0}
+        with patch.object(vixfeed, "vix_closes", return_value=series), \
+             patch.object(vixfeed, "latest_levels", return_value=levels):
+            cls.loaded = pg._vix_card(_FakeConn(), "U1")
+        cls.css = CONSOLE.read_text(encoding="utf-8")
+
+    # -- language ----------------------------------------------------------
+    def test_card_has_no_cjk_characters(self):
+        for html in (self.empty, self.loaded):
+            for ch in html:
+                self.assertFalse("\u4e00" <= ch <= "\u9fff",
+                                 f"CJK character {ch!r} leaked into the VIX card")
+
+    def test_chinese_derived_strip_is_gone(self):
+        for token in ("水位", "斜率", "期限", "VIX 水位"):
+            self.assertNotIn(token, self.empty)
+            self.assertNotIn(token, self.loaded)
+
+    def test_derived_labels_are_state_slope_term(self):
+        for label in ("<dt>State</dt>", "<dt>Slope</dt>", "<dt>Term</dt>"):
+            self.assertIn(label, self.empty)
+            self.assertIn(label, self.loaded)
+
+    def test_derived_caption_explains_the_relationship(self):
+        self.assertIn("Derived from the closes above", self.empty)
+
+    # -- no duplication of the table ---------------------------------------
+    def test_table_is_still_two_columns_and_four_series(self):
+        table = self.empty.split("<table", 1)[1].split("</table>", 1)[0]
+        self.assertIn("<th>Series</th>", table)
+        self.assertIn("<th>Latest close</th>", table)
+        self.assertNotIn("<th>State</th>", table)
+        self.assertEqual(table.count("<tr>"), 5)  # header + 4 series rows
+        for symbol in vixfeed.VIX_SYMBOLS:
+            self.assertIn(f"<td>{symbol}</td>", table)
+
+    def test_derived_values_are_outside_the_table(self):
+        table = self.empty.split("<table", 1)[1].split("</table>", 1)[0]
+        self.assertNotIn("vix-derived", table)
+        self.assertLess(self.empty.index("</table>"),
+                        self.empty.index('<dl class="vix-derived">'))
+
+    def test_derived_block_is_bottom_right_after_the_sync_form(self):
+        self.assertIn('<div class="vix-foot">', self.empty)
+        self.assertLess(self.empty.index("</form>"),
+                        self.empty.index('<div class="vix-derived-wrap">'))
+        self.assertIn(".vix-derived-wrap { text-align: right; margin-left: auto; }", self.css)
+        self.assertIn(".vix-foot {", self.css)
+
+    # -- unchanged behaviour ----------------------------------------------
+    def test_sync_form_and_action_are_untouched(self):
+        for html in (self.empty, self.loaded):
+            self.assertIn('name="action" value="sync_vix"', html)
+            self.assertIn("Sync VIX Data", html)
+            self.assertIn('<form method="post" action="/settings">', html)
+
+    def test_unknown_and_known_cells_keep_their_semantics(self):
+        self.assertIn('<span class="tag amber">unknown</span>', self.empty)
+        self.assertEqual(self.loaded.count('<span class="mono">'), 7)  # 4 closes + 3 derived
+        self.assertIn("high_rising", self.loaded)
+
+    def test_stamp_is_an_english_slot_note_on_the_left(self):
+        self.assertIn("Newest close 2026-11-24 · 5 sessions stored.", self.loaded)
+        foot = self.loaded.split('<div class="vix-foot">', 1)[1]
+        self.assertLess(foot.index("Newest close"), foot.index("vix-derived-wrap"))
+
+    def test_section_27_extras_band_css_is_untouched(self):
+        self.assertIn(".stage > .settings-cols.settings-extras", self.css)
 
 
 if __name__ == "__main__":
