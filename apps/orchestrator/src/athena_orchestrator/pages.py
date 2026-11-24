@@ -3580,10 +3580,23 @@ def _post_risk(conn, account: str, form: dict, actor: str) -> dict:
 
 
 def _trigger_lines_card(current) -> str:
-    """D90: operator add/remove table. Lives outside the main settings form."""
+    """D90: operator add/remove table. Lives outside the main settings form.
+
+    §29: icon-only delete buttons (same `btn ghost icon-btn` convention as the
+    rest of the console) and a single-row add form; see _EXTRA_CSS.
+    """
     def _direction(op: str) -> str:
         return "below" if op == "<" else "above"
 
+    def _remove_label(line) -> str:
+        level = format(Decimal(str(line.level)).normalize(), "f")
+        return escape(f"Remove {line.symbol} {_direction(line.op)} {level}", quote=True)
+
+    x_icon = (
+        '<svg viewBox="0 0 12 12" aria-hidden="true">'
+        '<path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" '
+        'stroke-width="1.4"/></svg>'
+    )
     rows = "".join(
         "<tr>"
         f"<td>{escape(line.symbol)}</td>"
@@ -3593,7 +3606,9 @@ def _trigger_lines_card(current) -> str:
         '<form method="post" action="/settings" class="trigger-remove">'
         '<input type="hidden" name="action" value="trigger_remove">'
         f'<input type="hidden" name="trigger_index" value="{index}">'
-        '<button class="btn ghost" type="submit">Remove</button></form>'
+        f'<button class="btn ghost icon-btn trigger-x" type="submit" '
+        f'aria-label="{_remove_label(line)}" title="Remove line">{x_icon}</button>'
+        "</form>"
         "</td></tr>"
         for index, line in enumerate(current.trigger_lines)
     )

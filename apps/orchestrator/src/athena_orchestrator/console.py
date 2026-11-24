@@ -235,6 +235,19 @@ form.fill > .settings-cols {
   letter-spacing: .06em; text-transform: uppercase;
 }
 .vix-derived dd { margin: 0; text-align: right; }
+/* §29: Trigger lines — one-row add form and icon-only delete buttons.
+   .input is width:100% in the shared stylesheet, so override it here. */
+.trigger-add {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 14px;
+}
+.trigger-add .input { width: auto; min-width: 0; }
+.trigger-add [name="trigger_symbol"] { flex: 1 1 90px; }
+.trigger-add [name="trigger_op"] { flex: 0 1 100px; }
+.trigger-add [name="trigger_level"] { flex: 1 1 90px; }
+.trigger-add .btn { flex: 0 0 auto; }
+.trigger-x { color: var(--site-text-4); }
+.trigger-x:hover { color: #f87171; border-color: #7f1d1d; background: #260f0f; }
 .settings-col > form.card.agent.fill {
   display: flex; flex-direction: column;
 }

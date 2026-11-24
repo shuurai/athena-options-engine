@@ -1,6 +1,6 @@
 # 14 — Guardian & Escalation Layer（风险监测层与任务告知）
 
-**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 ＋ 第十一轮 ＋ 2026-11-23 第十二轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过；＋ 第十二轮 **D95–D101 七条全取推荐、零偏离、零跳过**）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。** **R6 实现口径见 §22：✅ 第十二轮已裁定 D95–D101；✅ 已实现并验证，交付记录见 §23（零迁移、零运行时核心改动、§1 原文不动、§6 仅 D100 已裁定的窄 carve-out）。** **R7 实现口径见 §24：✅ 第十三轮已裁定 D102–D108（§6 第二次显式窄 carve-out：手动按需 VIX 同步 D108；§13.4 显式移除量能轴 D105）；✅ 已实现并验证，交付记录见 §25（`055 regime_labels` 落地、Run C 独立 daemon、`ib-vix` 惰性、`{{regime}}` 注入、98 单测）。** **§26：✅ 第十四轮已裁定 D109（明确偏离推荐）—— 退役全部 10Y 逻辑，显式修订 §13.4／§13.5／§13.9／§25；零迁移、§1／§6 零修订，交付记录见 §26。** **§27 /settings 三列布局调整（操作者指令）：两卡入左／中列、独立 POST form 不嵌套、零新裁定、零迁移、§1／§6 零修订，交付记录见 §27.6 与 `C-20261124-6`。** **§28 /settings「VIX data」卡片文案一致性（操作者指令）：删除中文派生行、State／Slope／Term 移至右下独立块、表格仍两列四行；零新裁定、零迁移、§1／§6 零修订，交付记录见 §28.6 与 `C-20261124-7`。**
+**状态**：**Ratified 2026-11-21 ＋ 2026-11-22 第九轮 ＋ 第十轮 ＋ 第十一轮 ＋ 2026-11-23 第十二轮**（D58–D65 八条 ＋ D66 单条补裁定 ＋ D67–D73 七条，全取推荐、零偏离；＋ D74–D79 六条：五条取推荐、**一条明确偏离 D75**、零跳过；＋ D80–D83 四条：三条取推荐、**一条明确偏离 D83**、零跳过；＋ 第十一轮 **D84–D94 十一条**：十条取推荐、**一条明确偏离 D88**、零跳过；＋ 第十二轮 **D95–D101 七条全取推荐、零偏离、零跳过**）。Side track. Not on the signal critical path (steps 1–9). **R4 实现契约见 §17：✅ 第十轮已裁定 D80–D83；✅ 已实现并验证，交付记录见 §18。** **R5 实现契约见 §19：✅ 第十一轮已裁定 D84–D90（Q1–Q7），架构拆分 D91–D94 见 §20；✅ 已实现并验证，交付记录见 §21（零迁移、§1／§6 边界零修订）。** **R6 实现口径见 §22：✅ 第十二轮已裁定 D95–D101；✅ 已实现并验证，交付记录见 §23（零迁移、零运行时核心改动、§1 原文不动、§6 仅 D100 已裁定的窄 carve-out）。** **R7 实现口径见 §24：✅ 第十三轮已裁定 D102–D108（§6 第二次显式窄 carve-out：手动按需 VIX 同步 D108；§13.4 显式移除量能轴 D105）；✅ 已实现并验证，交付记录见 §25（`055 regime_labels` 落地、Run C 独立 daemon、`ib-vix` 惰性、`{{regime}}` 注入、98 单测）。** **§26：✅ 第十四轮已裁定 D109（明确偏离推荐）—— 退役全部 10Y 逻辑，显式修订 §13.4／§13.5／§13.9／§25；零迁移、§1／§6 零修订，交付记录见 §26。** **§27 /settings 三列布局调整（操作者指令）：两卡入左／中列、独立 POST form 不嵌套、零新裁定、零迁移、§1／§6 零修订，交付记录见 §27.6 与 `C-20261124-6`。** **§28 /settings「VIX data」卡片文案一致性（操作者指令）：删除中文派生行、State／Slope／Term 移至右下独立块、表格仍两列四行；零新裁定、零迁移、§1／§6 零修订，交付记录见 §28.6 与 `C-20261124-7`。** **§29 /settings「Trigger lines」控件布局（操作者指令）：复用 `btn ghost icon-btn` 删除图标、三输入 flex 单行、补 `gap`／`margin-top` 间距；dispatch 与空态不动，零新裁定、零迁移、§1／§6 零修订，交付记录见 §29.5 与 `C-20261124-8`。**
 **R1 已交付并经 D66 修订、R2 已交付并验证（均 2026-11-21）；R3 已交付并验证（2026-11-22）；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；R7 已裁定（D67–D73），落地前契约 ✅ 第十三轮已裁定 D102–D108（§24）；✅ 已实现并验证（2026-11-24，§25 交付记录）。** Every rule below is a **ratified** decision node; rulings recorded in §7（含第八、九、十、十一、十二轮）. Implementation contracts: §8 (R1) / §11 (R2) / §14 (R3); delivery records: §9 (R1) / §12 (R2) / §15 (R3) / §18 (R4) / §21 (R5) / §23 (R6); R7 contract + ratification: §13; R5 implementation contract: §19 (✅ ratified D84–D90); delivery record: §21 (✅ implemented and verified); data-layer split: §20 (D91–D94, pre-ratified inputs for the D79 round); **§16 VIX-view proposal is now ✅ RATIFIED (D74–D79): four read-only dimensions registered in §13.9; §1／§6 boundaries zero-revised.** **R4 implementation contract: §17 (✅ ratified D80–D83 in the 10th round); delivery record: §18 (✅ implemented and verified).** **Section 26 (D109, 2026-11-24): all 10Y logic retired — 4-label vocabulary, 3 read-only dimensions, `VIX hits n/3`; explicitly deviates from the recommendation; §1/§6 zero-revised.**
 
 > **2026-11-23 R6 启动（第十二轮，裁定前回填，历史记录）**：操作者 2026-11-22 指令 `OK please keep going on R6.` 之后，先按 doc-first 纪律做只读接缝调研并合并 **§22 落地前契约（Q1–Q7、未编号）**，见 `C-20261123-1`。**本轮零代码、零迁移、零运行时改动、不提交**；R6 是 R1–R5 之后脊柱上的最后一项，R7 契约仍冻结、processor／VIX 仍归 D79 轮。
@@ -1592,7 +1592,59 @@ build_axes rates lines           : ['rates=None,  # D103: no treasury feed this 
 
 ---
 
+## 29. /settings「Trigger lines」卡片控件布局修订（2026-11-24，操作者指令，零新裁定）
 
-**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 44 条 / D1–D101 102 个节点零待决；＋ 第十二轮 D95–D101 七条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、§21 R5 交付记录 ✅ 已回填；零迁移、§1／§6 边界零修订、`055` 不动**；**§22 R6 落地前契约 ✅ 第十二轮已裁定 D95–D101（2026-11-23，`C-20261123-1`／`-2`）、零代码／零迁移／不提交**；**§23 R6 交付记录 ✅ 已回填（2026-11-24，`C-20261124-1`）：`deploy/macos/` stdlib-only 看门狗 ＋ 4 张 plist ＋ 38 单测；零迁移、零运行时核心改动、`055` 仍归 R7、§1 原文不动、§6 仅 D100 已裁定窄 carve-out**；**§24 R7 落地前契约 ✅ 第十三轮已裁定 D102–D108（2026-11-24，`C-20261124-2`／`-3`）：只读接缝实测 15 条、§6 第二次窄 carve-out（D108 手动 VIX 同步）、§13.4 显式移除量能轴（D105）**；**§25 R7 交付记录 ✅ 已回填（2026-11-24，`C-20261124-4`）：`055_regime_labels` 落地（迁移 50→51）、`vixfeed`／`regime`／`guardian_regime` ＋ Run C 独立 daemon、`/settings` 手动 `Sync VIX Data`、`/portfolio-analysis` 午間 Regime 兄弟卡、`{{regime}}` 仅真实 label 注入；98 单测、17/17 变异、真实 Postgres 端到端；§1 原文不动**；**§26 第十四轮裁定与 10Y 退役交付记录 ✅ 已回填（2026-11-24，`C-20261124-5`）：D109 明确偏离推荐（第 4 条偏离），删三行 10Y 规则、`LABELS` 7→4、维度 4→3、`VIX hits n/3`；D1–D109 / 110 节点零待决（52 条：48 推荐、4 偏离）；零迁移、§1／§6 零修订、不接任何 feed**；**§27 /settings 三列布局调整 ✅ 已交付并验证（2026-11-24，`C-20261124-6`）：Trigger lines 左列／VIX data 中列、两卡 POST form 保持在主表单之外、零新裁定、零迁移、§1／§6 零修订**；**§28 VIX data 卡片文案一致性 ✅ 已交付并验证（2026-11-24，`C-20261124-7`）：零中文／零 CJK、派生值右下独立块、否决表格加列、零新裁定、零迁移、§1／§6 零修订**
+> **来源**：操作者 `In Trigger lines table, Use a delete icon instead of Remove button when a line is added. Also move the 3 inputs (symbol, operator, price) into one row instead of 3 rows. The Add line button is stuck with the input which is weird, please add adequate spacing.`。本轮只改**控件呈现与卡片内 CSS**：不改 `trigger_add`／`trigger_remove` dispatch、不改 Settings 字段、不改数据 ⇒ **不新增决策节点**，D1–D109 / 110 节点与 52 条裁定计数不变，**§1／§6 零修订**。按 doc-first 纪律先合并本节口径再动代码；验证与交付记 `C-20261124-8`。
+
+### 29.1 只读复核事实
+
+| 项 | 实测 |
+| --- | --- |
+| `pages.py:3582–3618` `_trigger_lines_card()` | 每行第四列是 `<button class="btn ghost" type="submit">Remove</button>`；卡片尾部 `.trigger-add` form 内依次是 3 个 `.input` ＋ `Add line` 按钮 |
+| `design/shared/console.css:529` | `.input { width: 100% }` ⇒ 3 个输入在块级 form 里**各占一整行**，即操作者看到的「3 rows」 |
+| `.trigger-add` / `.trigger-remove` | **无任何 CSS 规则**，因此 form 紧贴表格、控件之间零间距，`Add line` 与最后一个输入「stuck」 |
+| `console.py:591–592` | 已有 `button.icon-btn { width:32px; height:32px; padding:0; flex:none }` 与 `button.icon-btn svg { width:15px; height:15px }`；`btn ghost icon-btn` 是既有图标按钮范式（如 `Refresh health`） |
+| `console.py:270–275 / pages.py:6485` | `.sim-x` 用同一个 12×12 `M3 3l6 6M9 3L3 9` X 路径 ⇒ 删除图标可复用，保持视觉一致 |
+| `console.py:750–755` | `_styles()` ＝ `tokens.css` ＋ `design/shared/console.css` ＋ `_EXTRA_CSS`；§27／§28 的卡片级覆写均落在 `_EXTRA_CSS`，本轮沿用同一位置 |
+
+### 29.2 实现口径
+
+1. **删除图标**：每行的 `Remove` 文案按钮改为 `class="btn ghost icon-btn trigger-x"` 的 `type="submit"`，内嵌与 `.sim-x` 相同的 12×12 X SVG；补 `aria-label="Remove {symbol} {direction} {level}"` 与 `title="Remove line"`（图标按钮的可访问性与 hover 提示），`.trigger-x:hover` 转红（`color:#f87171`／`border-color:#7f1d1d`／`background:#260f0f`）。`trigger_remove` hidden、`trigger_index` hidden、`class="trigger-remove"` POST form **一字不改**。
+2. **单行输入**：`.trigger-add` 改 `display:flex; align-items:center; gap:10px; flex-wrap:wrap`；覆写 `.trigger-add .input { width:auto; min-width:0 }` 抵消 `width:100%`；三个输入分别给 `flex:1 1 90px`（symbol）／`flex:0 1 100px`（op）／`flex:1 1 90px`（level）；按钮 `flex:0 0 auto`。窄窗口由 `flex-wrap:wrap` 兜底，不产生横向溢出。
+3. **间距**：`.trigger-add` 加 `margin-top:14px` 与表格分离；控件之间 `gap:10px`，按钮不再是「贴着输入」。`Add line` 文案与 `trigger_add` hidden 保持原样。
+4. 空态 `<tr><td colspan="4">No trigger lines yet.</td></tr>`、表头四列、卡片标题与 `card-lead` **一字不改**。
+5. `console.py` 只在 `_EXTRA_CSS` **新增** `.trigger-add`／`.trigger-x` 规则；既有选择器、`design/shared/console.css`、§27 `.settings-cols.settings-extras`、§28 `.vix-foot`／`.vix-derived`、**VIX 卡片全部零改动**。
+6. 零迁移、零 Settings 字段、零行情源、零通知通道、`uv.lock` 零变动。
+
+### 29.3 验收不变量
+
+- 卡片内无可见 `>Remove<` 文案；删除按钮含 `icon-btn`／`trigger-x`／`<svg`／`aria-label=`，且仍是 `type="submit"` 并携带两个 hidden 字段。
+- `.trigger-add` 的三个输入（`trigger_symbol`／`trigger_op`／`trigger_level`）与 `Add line` 按钮仍在同一 form 内；CSS 为 flex 单行并含 `gap:10px`／`margin-top:14px`／`flex-wrap:wrap`／`.input width:auto`／三个 per-input flex 规则／按钮 `flex:0 0 auto`。
+- 空态 `colspan="4"`、R5 既有单测、§27／§28 单测全部保持通过。
+- 变异测试：改回 `Remove` 文案、删 `aria-label`／SVG／`icon-btn`、破坏 `trigger_remove`、去掉 flex／gap／margin／`width:auto`／任一 per-input 规则、改空态 `colspan` ⇒ 必须 FAIL。
+
+### 29.4 回滚
+
+`git revert <sha>`；恢复 `pages.py` `_trigger_lines_card()` 与 `console.py` `_EXTRA_CSS` 新增块。**零迁移、零配置、零数据写入**。
+
+### 29.5 交付与验证（2026-11-24，`C-20261124-8`）
+
+| 项 | 实测 |
+| --- | --- |
+| 代码 | `pages.py` `_trigger_lines_card()` 的 `Remove` 文案按钮改为 `btn ghost icon-btn trigger-x` ＋ 12×12 X SVG ＋ `aria-label`／`title`；`console.py` `_EXTRA_CSS` 新增 12 行（`.trigger-add` flex 单行、`.input` 宽度覆写、三个 per-input flex、按钮 `flex:0 0 auto`、`.trigger-x:hover` 转红） |
+| 测试 | `test_settings_layout.py` 由 25 例扩到 **37 例**（新增 12 例，覆盖图标按钮、a11y、POST 字段、单行 CSS、间距、空态、§27／§28 回归）；R5 既有 `71/71` 不变 |
+| 全量 | `685/685`（2 skipped），基线 `673/673` |
+| 变异 | `18/18` 组 `BROKEN → FAIL`，源文件逐字节还原（`sha256` 前后一致） |
+| 编译 | `compileall` 三个改动文件通过 |
+| 真实控制台 | 引擎以新代码重启于 `http://127.0.0.1:7799`；`/settings` 实测无可见 `>Remove<`、`icon-btn trigger-x` 与 X SVG 齐备、`aria-label`／`title` 齐备、`trigger_remove`／`trigger_index` hidden 保留、三输入＋`Add line` 同 form；页面内联 CSS 含 flex／`gap:10px`／`margin-top:14px`／`width:auto`；§27 extras band 与 §28 VIX 卡均回归通过。真实库已有 1 行 `NVDA below 150` ⇒ 空态未触发，图标按钮在真实数据行上验证 |
+| 台账 | `scripts/check-changelog.mjs` `119/119` |
+| 边界 | 零迁移（仍 51）、零 Settings 字段、零行情源、零通知通道、`uv.lock` 零变动、§1／§6 零修订、**零新决策节点**（D1–D109 / 110 节点、52 条裁定不变） |
+
+**收尾**：§29 ✅ 交付 —— 删除控件复用既有 `btn ghost icon-btn` 范式并保留 a11y 文案；`.input width:100%` 导致的三行堆叠由卡片级覆写消除，`Add line` 与输入之间补齐 `gap`／`margin-top`；`trigger_add`／`trigger_remove` dispatch 与空态一字未动。与 `C-20261124-8` 同批入库并推送。
+
+---
+
+
+**主计划**：[00-plan-order.md](00-plan-order.md) ｜ **状态**：**已裁定（2026-11-21，D58–D73 共 16 条全取推荐、零偏离；＋ 2026-11-22 第九轮 D74–D79 六条，五取推荐、一条明确偏离 D75、零跳过 ；＋ 第十轮 D80–D83 四条，三取推荐、一条明确偏离 D83、零跳过；＋ 第十一轮 D84–D94 十一条，十取推荐、一条明确偏离 D88、零跳过 ⇒ 共 44 条 / D1–D101 102 个节点零待决；＋ 第十二轮 D95–D101 七条全取推荐）**；**R1 已交付并经 D66 修订（2026-11-21）**；**R2 已交付并验证（2026-11-21，§11 契约／§12 交付记录）**；**R3 已交付并验证（2026-11-22，§14 契约／§15 交付记录）**；R4 已交付并验证（2026-11-22，§17 契约／§18 交付记录）；R5 已交付并验证（2026-11-22，§19 契约／§21 交付记录）、R6 已交付并验证（2026-11-24，§22 契约／§23 交付记录）；**R7 已裁定、契约冻结（D67–D73，§13），实现待 R4**；**§16 R7 VIX 预警视角补充企划 ✅ 已裁定（D74–D79，§16.5），四个只读维度登记进 §13.9；§1／§6 边界零修订、零代码、零迁移；「R7 数据源」另起裁定轮（D79）**；**§17 R4 实现契约 ✅ 已裁定（D80–D83）、零迁移、`055` 不被占用；§18 交付记录 ✅ 已回填**；**§19 R5 实现契约 ✅ 已裁定（D84–D90）、§20 架构拆分 ✅ 已裁定（D91–D94）、§21 R5 交付记录 ✅ 已回填；零迁移、§1／§6 边界零修订、`055` 不动**；**§22 R6 落地前契约 ✅ 第十二轮已裁定 D95–D101（2026-11-23，`C-20261123-1`／`-2`）、零代码／零迁移／不提交**；**§23 R6 交付记录 ✅ 已回填（2026-11-24，`C-20261124-1`）：`deploy/macos/` stdlib-only 看门狗 ＋ 4 张 plist ＋ 38 单测；零迁移、零运行时核心改动、`055` 仍归 R7、§1 原文不动、§6 仅 D100 已裁定窄 carve-out**；**§24 R7 落地前契约 ✅ 第十三轮已裁定 D102–D108（2026-11-24，`C-20261124-2`／`-3`）：只读接缝实测 15 条、§6 第二次窄 carve-out（D108 手动 VIX 同步）、§13.4 显式移除量能轴（D105）**；**§25 R7 交付记录 ✅ 已回填（2026-11-24，`C-20261124-4`）：`055_regime_labels` 落地（迁移 50→51）、`vixfeed`／`regime`／`guardian_regime` ＋ Run C 独立 daemon、`/settings` 手动 `Sync VIX Data`、`/portfolio-analysis` 午間 Regime 兄弟卡、`{{regime}}` 仅真实 label 注入；98 单测、17/17 变异、真实 Postgres 端到端；§1 原文不动**；**§26 第十四轮裁定与 10Y 退役交付记录 ✅ 已回填（2026-11-24，`C-20261124-5`）：D109 明确偏离推荐（第 4 条偏离），删三行 10Y 规则、`LABELS` 7→4、维度 4→3、`VIX hits n/3`；D1–D109 / 110 节点零待决（52 条：48 推荐、4 偏离）；零迁移、§1／§6 零修订、不接任何 feed**；**§27 /settings 三列布局调整 ✅ 已交付并验证（2026-11-24，`C-20261124-6`）：Trigger lines 左列／VIX data 中列、两卡 POST form 保持在主表单之外、零新裁定、零迁移、§1／§6 零修订**；**§28 VIX data 卡片文案一致性 ✅ 已交付并验证（2026-11-24，`C-20261124-7`）：零中文／零 CJK、派生值右下独立块、否决表格加列、零新裁定、零迁移、§1／§6 零修订**；**§29 Trigger lines 控件布局 ✅ 已交付并验证（2026-11-24，`C-20261124-8`）：图标删除、三输入单行、按钮间距、零新裁定、零迁移、§1／§6 零修订**
 
 > **2026-11-23 R6 启动说明（裁定前回填，历史记录）**：14 册 **§22 R6 落地前契约 ⚠️ 待裁定 Q1–Q7、未编号**（`C-20261123-1`）；只读接缝实测 21 条（§22.2）、七个硬问题（§22.3）。**零代码、零迁移、不提交**；`055` 仍归 R7 `regime_labels`、不建 `056`；§1／§6 边界保持原文（Q6 若裁定修订，将在 §22.7 显式记录）。（本行为启动轮历史记录；裁定后为 **D1–D101 / 102 个节点零待决**，R6 契约 ✅ 已裁定 D95–D101、实现待办、R7 实现待 R4。）

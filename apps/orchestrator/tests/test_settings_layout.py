@@ -1,4 +1,4 @@
-"""§27 / C-20261124-6 and §28 / C-20261124-7: /settings layout + VIX card copy.
+"""§27 / C-20261124-6, §28 / C-20261124-7, §29 / C-20261124-8: /settings cards.
 
 The `Trigger lines` and `VIX data` cards each own an independent POST form.
 They must stay OUTSIDE `#settings-form` (no nested forms, no `action` hidden
@@ -8,6 +8,9 @@ the left / middle columns of a second aligned three-column band.
 §28: the VIX card must be English-only (like the rest of /settings), and its
 three derived states are card-level conclusions — not a second copy of the
 closes table — so they live in a distinct bottom-right block.
+
+§29: the Trigger lines card uses icon-only delete buttons and a single-row
+add form (`.input` is width:100% in the shared stylesheet, so it is overridden).
 
 No new decision node, no migration, no Settings field, no §1/§6 revision.
 """
@@ -237,6 +240,88 @@ class TestVixCardConsistency(unittest.TestCase):
         self.assertLess(foot.index("Newest close"), foot.index("vix-derived-wrap"))
 
     def test_section_27_extras_band_css_is_untouched(self):
+        self.assertIn(".stage > .settings-cols.settings-extras", self.css)
+
+
+class TestTriggerLinesCardLayout(unittest.TestCase):
+    """§29: icon-only delete, one-row add form, adequate spacing."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.card = pg._trigger_lines_card(_payload())
+        cls.empty = pg._trigger_lines_card(standard_payload())
+        cls.css = CONSOLE.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _css_block(selector: str) -> str:
+        css = CONSOLE.read_text(encoding="utf-8")
+        return css.split(selector, 1)[1].split("}", 1)[0]
+
+    # -- icon-only delete --------------------------------------------------
+    def test_remove_has_no_visible_text_label(self):
+        self.assertNotIn(">Remove<", self.card)
+        self.assertIn(">Add line<", self.card)  # the add button keeps its label
+
+    def test_remove_uses_the_shared_icon_button_convention(self):
+        self.assertIn('class="btn ghost icon-btn trigger-x"', self.card)
+        self.assertIn('<svg viewBox="0 0 12 12"', self.card)
+        self.assertIn("M3 3l6 6M9 3L3 9", self.card)
+
+    def test_icon_button_stays_accessible(self):
+        self.assertIn('aria-label="Remove NVDA below 118"', self.card)
+        self.assertIn('title="Remove line"', self.card)
+
+    def test_remove_still_posts_trigger_remove(self):
+        row = self.card.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+        self.assertIn('class="trigger-remove"', row)
+        self.assertIn('value="trigger_remove"', row)
+        self.assertIn('name="trigger_index" value="0"', row)
+        self.assertIn('type="submit"', row)
+
+    def test_delete_hover_turns_red(self):
+        self.assertIn(".trigger-x:hover", self.css)
+        block = self._css_block(".trigger-x:hover")
+        self.assertIn("#f87171", block)
+        self.assertIn("#7f1d1d", block)
+
+    # -- one row + spacing -------------------------------------------------
+    def test_add_form_keeps_all_three_inputs_and_the_button(self):
+        form = self.card.split('class="trigger-add">', 1)[1].split("</form>", 1)[0]
+        for name in ("trigger_symbol", "trigger_op", "trigger_level"):
+            self.assertIn(f'name="{name}"', form)
+        self.assertIn('value="trigger_add"', form)
+        self.assertIn("Add line", form)
+
+    def test_add_form_is_a_single_flex_row(self):
+        block = self._css_block(".trigger-add {")
+        self.assertIn("display: flex", block)
+        self.assertIn("align-items: center", block)
+        self.assertIn("gap: 10px", block)
+        self.assertIn("flex-wrap: wrap", block)
+
+    def test_shared_input_full_width_is_overridden(self):
+        self.assertIn(".trigger-add .input { width: auto; min-width: 0; }", self.css)
+
+    def test_each_input_has_its_own_flex_rule(self):
+        for name, flex in (("trigger_symbol", "flex: 1 1 90px"),
+                           ("trigger_op", "flex: 0 1 100px"),
+                           ("trigger_level", "flex: 1 1 90px")):
+            self.assertIn(f'.trigger-add [name="{name}"] {{ {flex}; }}', self.css)
+
+    def test_add_button_is_not_stuck_to_the_inputs(self):
+        self.assertIn("margin-top: 14px", self._css_block(".trigger-add {"))
+        self.assertIn(".trigger-add .btn { flex: 0 0 auto; }", self.css)
+
+    # -- unchanged behaviour ----------------------------------------------
+    def test_empty_state_keeps_the_four_column_row(self):
+        self.assertIn('colspan="4"', self.empty)
+        self.assertIn("No trigger lines yet.", self.empty)
+
+    def test_card_is_english_and_vix_card_is_untouched(self):
+        for ch in self.card:
+            self.assertFalse("\u4e00" <= ch <= "\u9fff")
+        vix = pg._vix_card(_FakeConn(), "U1")
+        self.assertIn("<dt>State</dt>", vix)
         self.assertIn(".stage > .settings-cols.settings-extras", self.css)
 
 
