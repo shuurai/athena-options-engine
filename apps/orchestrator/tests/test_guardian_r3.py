@@ -506,9 +506,11 @@ class TestMigration054(unittest.TestCase):
         self.assertIn("CREATE TABLE", parts[0])
         self.assertIn("CREATE INDEX", parts[1])
 
-    def test_055_is_not_yet_taken(self):
+    def test_055_belongs_to_r7(self):
+        # R3 (054) never took 055; R7 consumes it for regime_labels (D69 / D104).
         folder = ROOT / "packages/store/src/athena_store/migrations"
-        self.assertEqual([p.name for p in folder.glob("055_*.sql")], [])
+        self.assertEqual([p.name for p in folder.glob("055_*.sql")],
+                         ["055_regime_labels.sql"])
 
 
 class TestWiring(unittest.TestCase):

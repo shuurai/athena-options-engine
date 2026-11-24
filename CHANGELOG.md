@@ -118,6 +118,8 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-23 | 启动 R6：合并常开主机与心跳落地前契约 | [C-20261123-1](logs/2026-11-23.md#c-20261123-1) |
 | 2026-11-23 | 裁定 R6 契约七条 D95–D101 并修订 §6 边界 | [C-20261123-2](logs/2026-11-23.md#c-20261123-2) |
 | 2026-11-24 | 实现 R6 出站看门狗并补齐交付记录 | [C-20261124-1](logs/2026-11-24.md#c-20261124-1) |
+| 2026-11-24 | 启动 R7：合并午间 Regime 落地前契约 | [C-20261124-2](logs/2026-11-24.md#c-20261124-2) |
+| 2026-11-24 | 裁定 R7 契约七条 D102–D108 并修订 §6／§13.4 | [C-20261124-3](logs/2026-11-24.md#c-20261124-3) |
 
 ## Notes
 
@@ -139,3 +141,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
   `reqHistoricalData: Timeout for Stock(conId=323608988, symbol='1810', exchange='SEHK' ...)`, and the
   regenerated `__pycache__` timestamps show the edited modules were executed afterwards. **Still
   unindexed** — no entry, no commit. Revert path: `git checkout -- <file>`.
+| 2026-11-24 | 实现 R7 午间 Regime 并补齐交付记录 | [C-20261124-4](logs/2026-11-24.md#c-20261124-4) |

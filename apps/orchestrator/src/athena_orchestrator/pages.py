@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import math
 import os
 import re
@@ -57,6 +58,10 @@ from athena_strategy.news import dismiss_event, ingest_url
 from athena_strategy.pool import clean_symbol
 from athena_strategy.types import NEWS_TYPE_BADGE, NEWS_TYPE_MEANING
 from athena_strategy.phases import calendar_offset
+
+# R7 uses this for the two degrade paths (VIX card, sync worker). Kept local
+# rather than imported so pages stays a leaf module.
+log = logging.getLogger("athena")
 
 PROFILE_LIMITS = (
     "max_symbol_pct_nav",
@@ -1679,11 +1684,16 @@ def _portfolio_analysis_page(conn, account: str, query: dict) -> dict:
     signals = today_signals(conn, account, day)
     report = _advisor_report(conn, account, settings, rows, signals, day)
     actions = _advisor_actions_table(conn, account, settings, rows, signals, day)
+    # R7 (D69): a sibling card, never a third column. Read-only observation.
+    from athena_orchestrator.guardian_regime import render_card as _regime_card
+
+    regime = _regime_card(conn, account)
     body = (
         '<div class="settings-cols analysis">'
         f'<div class="settings-col">{report}</div>'
         f'<div class="settings-col">{actions}</div>'
         "</div>"
+        f"{regime}"
     )
     enabled = settings.advisor.enabled
     chips = [("info", "ADVISORY" if enabled else "ADVISOR OFF")]
@@ -3121,6 +3131,7 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         "</div></div>"
         "</form>"
         f"{_trigger_lines_card(current)}"
+        f"{_vix_card(conn, account)}"
     )
     return _html(
         "Settings",
@@ -3601,6 +3612,109 @@ def _trigger_lines_card(current) -> str:
     )
 
 
+def _vix_card(conn, account: str) -> str:
+    """D102/D108: operator-triggered VIX pull. Lives outside the main settings form.
+
+    Read-only display plus one button. It deliberately has no Settings field:
+    the operator asked for a manual action, not a persisted knob (D102/D107).
+    """
+    from athena_marketdata import vixfeed
+
+    levels: dict = {}
+    series: list = []
+    try:
+        levels = vixfeed.latest_levels(conn)
+        series = vixfeed.vix_closes(conn, "VIX", vixfeed.SLOPE_WINDOW)
+    except Exception as exc:  # noqa: BLE001 - /settings must render without R7
+        log.info("vix card skipped: %s", exc.__class__.__name__)
+
+    def cell(value) -> str:
+        if value is None:
+            return '<span class="tag amber">unknown</span>'
+        return f'<span class="mono">{escape(str(value))}</span>'
+
+    rows = "".join(
+        f"<tr><td>{escape(symbol)}</td><td>{cell(levels.get(symbol))}</td></tr>"
+        for symbol in vixfeed.VIX_SYMBOLS
+    )
+    slope = vixfeed.slope_state(series)
+    term = vixfeed.term_state(levels)
+    state = vixfeed.vix_state(series)
+    stamp = ""
+    if series:
+        stamp = f"Newest close {series[-1][0]} · {len(series)} sessions stored."
+    return (
+        '<div class="card"><h2>VIX data</h2>'
+        '<p class="card-lead">Manual, on-demand pull of VIX and its term structure from '
+        "IB. Stored as source <code>ib-vix</code>, which no other reader selects, so "
+        "rails and RV20 never see these rows. Run C reads them at 12:30 ET.</p>"
+        '<table class="data"><thead><tr><th>Series</th><th>Latest close</th>'
+        f"</tr></thead><tbody>{rows}</tbody></table>"
+        '<p class="slot-note">'
+        f"VIX 水位 {cell(state)} · 斜率 {cell(slope)} · 期限 {cell(term)}"
+        f"{' · ' + escape(stamp) if stamp else ''}</p>"
+        '<form method="post" action="/settings">'
+        '<input type="hidden" name="action" value="sync_vix">'
+        '<button class="btn" type="submit">Sync VIX Data</button>'
+        "</form></div>"
+    )
+
+
+def _post_sync_vix(conn, account: str) -> dict:
+    """D108: spawn the pull, answer immediately. Never blocks the request."""
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    if not database_url:
+        return _settings(
+            conn, account, {}, "DATABASE_URL is not set, so VIX cannot be synced."
+        ) | {"status": 400}
+    threading.Thread(
+        target=_sync_vix, args=(database_url,), daemon=True, name="vix-sync"
+    ).start()
+    return _settings(
+        conn, account, {},
+        "VIX sync started. Give it a minute, then refresh.",
+    )
+
+
+def _sync_vix(database_url: str) -> None:
+    """Pull VIX + VIX9D + VIX3M + VIX1Y daily closes into market_bars (D103).
+
+    Mirrors ``refresh_display_rates``: same event-loop shim, same broker
+    lifecycle, disconnect in ``finally``. A per-symbol failure is logged and
+    skipped so one bad contract cannot discard the others' rows.
+    """
+    import asyncio
+
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+    from athena_exec.broker import IbBroker
+    from athena_marketdata import vixfeed
+    from athena_store import connect as store_connect
+
+    host = os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    port = int(os.environ.get("IB_GATEWAY_PORT", "4002"))
+    broker = IbBroker()
+    if not broker.connect(host, port, 4, True):
+        log.info("vix sync skipped: gateway down")
+        return
+    written = 0
+    try:
+        with store_connect(database_url) as conn:
+            for symbol in vixfeed.VIX_SYMBOLS:
+                try:
+                    candles = broker.index_history(symbol, "6 M")
+                except Exception as exc:  # noqa: BLE001 - one contract, not the batch
+                    log.info("vix sync %s failed: %s", symbol, exc.__class__.__name__)
+                    continue
+                written += vixfeed.store_vix_daily(conn, symbol, candles)
+            conn.commit()
+    finally:
+        broker.disconnect()
+    log.info("vix sync wrote %s rows", written)
+
+
 def _post_trigger_line(conn, account: str, payload, form: dict, actor: str, action: str) -> dict:
     """D90: add/remove one line via save_settings(), so settings_audits records it."""
     def fail(message: str) -> dict:
@@ -3643,6 +3757,11 @@ def _post_settings(conn, account: str, form: dict, actor: str) -> dict:
     # knobs that the main settings form posts. Handle it early.
     if action in {"trigger_add", "trigger_remove"}:
         return _post_trigger_line(conn, account, payload, form, actor, action)
+    # D102/D108: a manual, on-demand VIX pull. Same reason as D90 above — this
+    # form posts one button, not the dozen numeric knobs, so it must short-circuit
+    # before the knob validation below. It writes market_bars, not settings.
+    if action == "sync_vix":
+        return _post_sync_vix(conn, account)
     if action == "link":
         from athena_bots.telegram import issue_link_code
 

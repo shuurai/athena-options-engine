@@ -23,6 +23,10 @@ from athena_orchestrator.guardian_runner import (
     start_guardian_scheduler,
     stop_guardian_scheduler,
 )
+from athena_orchestrator.guardian_regime import (
+    start_regime_scheduler,
+    stop_regime_scheduler,
+)
 from athena_orchestrator.paper import run_paper_cycle
 from athena_orchestrator.runtime import (
     begin_running,
@@ -131,6 +135,10 @@ async def run_loop() -> None:
     start_order_watch(database_url)
     start_guardian_scheduler(database_url)
     log.info("guardian scheduler started (R3, A/B ET-anchored)")
+    # R7 (D71): Run C is a separate daemon on the same pure schedule module.
+    # EXECUTED_RUNS stays ("A", "B") so the two threads never claim each other's slot.
+    start_regime_scheduler(database_url)
+    log.info("regime scheduler started (R7, C at 12:30 ET)")
     # R4 (D81): the callback registry must be installed BEFORE polling starts,
     # so an inline Resolve arriving on the first update is already routable.
     install_guardian_callbacks(database_url)
@@ -157,6 +165,7 @@ async def run_loop() -> None:
         log.info("ops restart")
         stop_tunnel()
         stop_guardian_scheduler()
+        stop_regime_scheduler()
         stop_guardian_nag()
         return
     while cycles == 0 or completed < cycles:
@@ -164,6 +173,7 @@ async def run_loop() -> None:
             log.info("ops restart")
             stop_tunnel()
             stop_guardian_scheduler()
+            stop_regime_scheduler()
             stop_guardian_nag()
             return
         completed += 1

@@ -630,19 +630,20 @@ class TestSettingsTriggerActions(unittest.TestCase):
 
 
 class TestBoundaries(unittest.TestCase):
-    def test_no_new_migration_and_055_still_reserved(self):
+    def test_r5_adds_no_migration_and_055_is_r7s(self):
+        # R5 added no migration; 055 is R7's regime_labels (D69 / D104).
         folder = ROOT / "packages/store/src/athena_store/migrations"
         self.assertEqual(sorted(p.name for p in folder.glob("05*.sql")),
                          ["050_cycle_progress.sql", "051_advisor_signals.sql",
                           "052_order_events.sql", "053_guardian_alerts.sql",
-                          "054_guardian_runs.sql"])
-        self.assertFalse((folder / "055_regime_labels.sql").exists())
+                          "054_guardian_runs.sql", "055_regime_labels.sql"])
         self.assertEqual([p for p in folder.glob("056*")], [])
 
-    def test_force_include_registry_is_unchanged(self):
+    def test_force_include_registry_has_no_056(self):
+        # R5 added no registry entry; R7 adds 055 (D104). 056 must stay absent.
         text = (ROOT / "packages/store/pyproject.toml").read_text(encoding="utf-8")
         self.assertIn("054_guardian_runs.sql", text)
-        self.assertNotIn("055_", text)
+        self.assertIn("055_regime_labels.sql", text)
         self.assertNotIn("056_", text)
 
     def test_last_tradeable_price_is_the_only_price_reader(self):
@@ -653,13 +654,23 @@ class TestBoundaries(unittest.TestCase):
         self.assertNotIn("reqMktData", src)
         self.assertNotIn("pendingTickersEvent", src)
 
-    def test_no_new_data_source_and_vix_has_no_producer(self):
+    def test_no_new_data_source_and_the_vix_carve_out_is_narrow(self):
         src = (ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_trigger.py").read_text(encoding="utf-8")
         self.assertNotIn("pulse", src)
         self.assertNotIn("IND", src)
         broker = (ROOT / "apps/exec-ib/src/athena_exec/broker.py").read_text(encoding="utf-8")
-        self.assertNotIn("VIX", broker)
-        self.assertNotIn("Index(", broker)
+        # D108 (13th round) is the second ratified section 6 carve-out: one
+        # manual, on-demand VIX sync may construct a single Index contract. It
+        # is NOT a producer - no subscription, no streaming, no universe entry -
+        # so the assertion narrows to "exactly one, inside index_history".
+        self.assertEqual(broker.count("Index("), 1)
+        self.assertIn("def index_history", broker)
+        body = broker.split("def index_history", 1)[1].split("\n    def ", 1)[0]
+        self.assertIn("Index(", body)
+        # History only: no quote line, no streaming subscription for the index.
+        self.assertNotIn("reqMktData", body)
+        self.assertNotIn("marketDataType", body)
+        self.assertIn("historical(", body)
 
     def test_due_sql_does_not_filter_source(self):
         self.assertNotIn("source", gn._DUE_SQL)

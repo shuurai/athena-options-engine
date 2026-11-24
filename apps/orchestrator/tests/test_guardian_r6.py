@@ -535,10 +535,10 @@ class TestDeployArtifacts(unittest.TestCase):
         self.assertFalse(list(MACOS.glob("*.sql")))
         self.assertFalse(list(MACOS.glob("pyproject.toml")))
         self.assertFalse(list(MACOS.glob("requirements*.txt")))
-        # 055 stays frozen for R7 regime_labels; R6 adds no migration.
+        # R6 adds no migration; 055 is R7's regime_labels (D69 / D104).
         migrations = ROOT / "packages" / "store" / "src" / "athena_store" / "migrations"
-        self.assertEqual(len(list(migrations.glob("0*.sql"))), 50)
-        self.assertFalse(list(migrations.glob("055*")))
+        self.assertEqual(len(list(migrations.glob("0*.sql"))), 51)
+        self.assertTrue((migrations / "055_regime_labels.sql").exists())
 
     def test_readme_documents_every_decision_and_the_2fa_gap(self):
         text = (MACOS / "README.md").read_text(encoding="utf-8")

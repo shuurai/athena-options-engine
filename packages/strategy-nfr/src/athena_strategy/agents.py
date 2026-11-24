@@ -22,6 +22,7 @@ from athena_strategy.dsh import chat
 from athena_strategy.indicators import Indicators, indicators_enabled, read_indicators, store_reading
 from athena_strategy.iv import tags_from_iv
 from athena_strategy.phases import _load
+from athena_strategy.regime import Regime
 from athena_strategy.schemas import parse_response, schema_line
 from athena_strategy.tags import (
     CHANNEL_RISING,
@@ -222,6 +223,12 @@ def fill_prompt(template: str, values: dict[str, Any]) -> str:
     numbers = values.get("numbers")
     if isinstance(numbers, str) and numbers and "{{numbers}}" not in template and "Numbers:" not in text:
         text = text.rstrip() + "\nNumbers: " + numbers
+    # D107: the regime line is appended only when Run C produced a real label,
+    # so an empty value is indistinguishable from "not injected" — which is the
+    # point. Existing stored templates need no edit to receive it.
+    regime = values.get("regime")
+    if isinstance(regime, str) and regime and "{{regime}}" not in template:
+        text = text.rstrip() + "\n" + regime
     return text
 
 
@@ -1068,8 +1075,40 @@ def _context(conn, settings: SettingsPayload, account_id: str, symbol: str, flag
         "cash_reserve": str(risk.cash_reserve_pct),
         "flags": f"csp={'on' if flags.csp else 'off'} cc={'on' if flags.cc else 'off'} strangle={'on' if flags.strangle else 'off'}",
         "proposals": "none",
+        "regime": _regime_line(conn, account_id),
         **range_names(_range_sessions(conn, symbol, bars)),
     }
+
+
+def _regime_line(conn, account_id: str) -> str:
+    """D107: one line from Run C, only when the label is real.
+
+    Read straight from ``regime_labels`` rather than importing the orchestrator
+    adapter: strategy-nfr must not depend on the web layer. Any store problem
+    degrades to an empty string so prompt assembly can never fail on R7.
+    """
+    try:
+        row = conn.execute(
+            """
+            SELECT label, close_bias, inputs
+            FROM regime_labels
+            WHERE account_id = %s
+            ORDER BY trade_day DESC, created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (account_id,),
+        ).fetchone()
+        if row is None or str(row[0]) == "insufficient_data":
+            return ""
+        return Regime(
+            label=str(row[0]),
+            close_bias=str(row[1]),
+            inputs=dict(row[2] or {}),
+            evidence={},
+        ).line()
+    except Exception as exc:  # noqa: BLE001 - a prompt must build without R7
+        log.info("regime line skipped: %s", exc.__class__.__name__)
+        return ""
 
 
 def _range_sessions(conn, symbol: str, bars: list[Bar]) -> int:

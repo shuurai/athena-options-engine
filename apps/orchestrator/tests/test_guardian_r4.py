@@ -569,13 +569,14 @@ class TestWiring(unittest.TestCase):
         src = (ROOT / "apps/bots/src/athena_bots/telegram.py").read_text(encoding="utf-8")
         self.assertNotIn("athena_orchestrator", src)
 
-    def test_055_is_still_reserved_not_taken_by_r4(self):
+    def test_055_belongs_to_r7_not_r4(self):
+        # R4 never took 055; R7 consumes it for regime_labels (D69 / D104).
         folder = ROOT / "packages/store/src/athena_store/migrations"
-        self.assertFalse((folder / "055_regime_labels.sql").exists())
+        self.assertTrue((folder / "055_regime_labels.sql").exists())
         self.assertEqual(sorted(p.name for p in folder.glob("05*.sql")),
                          ["050_cycle_progress.sql", "051_advisor_signals.sql",
                           "052_order_events.sql", "053_guardian_alerts.sql",
-                          "054_guardian_runs.sql"])
+                          "054_guardian_runs.sql", "055_regime_labels.sql"])
 
     def test_no_new_settings_field(self):
         src = (ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_nag.py").read_text(encoding="utf-8")

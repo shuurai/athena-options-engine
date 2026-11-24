@@ -296,6 +296,20 @@ class IbBroker:
             bars = self._ib.reqHistoricalData(contract, "", "60 D", "1 day", "TRADES", True, 1)
         return list(bars or [])
 
+    def index_history(self, symbol: str, duration: str = "6 M",
+                      exchange: str = "CBOE") -> list[dict]:
+        """Daily candles for an INDEX such as VIX (R7 manual sync, D103/D108).
+
+        Indices are not stocks: ``_qualify_stock`` builds Stock/Forex only, so
+        this constructs an ``Index`` contract explicitly. Raises RuntimeError
+        when the gateway is down or IB cannot find the index, and the caller
+        turns that into an operator-visible note rather than a silent gap.
+        """
+        from ib_insync import Index
+
+        contract = Index(str(symbol).strip().upper(), exchange, "USD")
+        return self.historical(contract, duration, "1 day")
+
     def head_day(self, symbol: str) -> date | None:
         """Earliest IB TRADES day for this stock. None when IB does not answer."""
         contract = self._qualify_stock(symbol)
