@@ -618,13 +618,6 @@ def _telegram_check(conn) -> dict:
     return {"name": "Telegram", "ok": False, "text": "not configured"}
 
 
-def _money(value) -> str:
-    if value is None:
-        return DASH
-    amount = Decimal(value)
-    return f"{amount:,.2f}"
-
-
 def _whole(value) -> str:
     amount = Decimal(value)
     if amount == amount.to_integral():

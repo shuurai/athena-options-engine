@@ -13,6 +13,7 @@
 > **状态推进（2026-11-25，第九笔）**：固定顺序的 **Step 3 / V2-P3 第三批（N3 canonical read model）已实现、验证并独立交付，记录见 §27（`C-20261125-9`）**。新增 `news_read.py`：以 `WITH news_events AS (...)` CTE 把 `057` 三表投影为 legacy 九列，17 处非测试 reader 全部经 `render()` / `score_sql()` 包装、SQL 主体逐字节不变；R1 保留 ET 日界、R2 只对 canonical `news_score` 加 `ORDER BY ts, sentiment` tie-break。**本批是 DARK LAUNCH，`SOURCE = LEGACY`**：§26.2 两项数据面前置条件未满足——§25 六项对账是事务内 dry-run（`ROLLBACK` 后 live canonical 仍为 `0/0/0`），§26.4 禁止启动 engine 观察运行期 N2 双写收敛；直接切 `CANONICAL` 会让 17 处 reader 全部读到空表。故零行为变化、零持久写入。真实 PG **17/17 逐处对账 `parity diffs = 0`**、六项门禁 `unexplained=0 / blocks_n3=False`、全量 `1006/1006`、`19/19` mutation traps、wheel 含新模块且 53 迁移。**N3 真正激活（持久 backfill ＋ `SOURCE = CANONICAL` ＋ 运行期收敛确认）须操作者单独 go/no-go**；N4 另需裁定；P4–P7 未开始。上行第八笔「live 库 canonical 仍是空的」依然成立，原句保留不改写。
 > **状态推进（2026-11-25，第十笔）**：操作者裁定 **N3 激活 defer**（Task #123 open），固定顺序进入 **Step 4 / V2-P4**。落地前契约 §28（`C-20261125-10`，R1–R7）与交付记录 §29（`C-20261125-11`）先后入库：四个 pure 模块（ET 会话日历、六类日线缺口审计、ISO 周聚合、Strategy 3 shadow 信号子集）＋ Iris 只读接线，§22.3 第 1–6/14 项全部落地、第 7–13 项按 R6 留给 P5/P6。**零迁移、零持久写入、零 drafts / orders**；live `market_bars` 为空 ⇒ 数据面诚实 `unknown / no_data`，数据到位即自动产出真实值。全量 `1056/1056`、`27/27` mutation traps、真实 PG 事务内只读 + `ROLLBACK`、wheel 含四新模块。**P4 shadow 不等于 Strategy 3 可交易**：工具 / 入场窗口 / TP / NAV / 连止均未实现，`instrument_availability=deferred_p5`；P5（`eval-v1` 执行）以真实历史数据可用性为硬门禁。上行第九笔「N3 激活须操作者单独 go/no-go」依然成立。
 > **状态推进（2026-11-25，第十一笔）**：固定顺序 **Step 5 / V2-P5（`eval-v1` 执行）已按 §22.5 硬门禁实测并裁定**，记录见 §30（`C-20261125-12`）。只读实测：live 库 `market_bars=0`、`sim_bars=0`、`calendar_marks` 54 条仅 FED（无 EARNINGS）、`iv_marks/chain_marks=0`、`drafts/orders=0` ⇒ §22.4 最低证据量四项**全部不达标**（52W 数据覆盖率 0%、holdout 完成周 0、有效 candidate 0、覆盖 symbol 0），bootstrap 区间不可计算。**裁定：`insufficient_evidence / no-go / 继续 shadow`**——这正是 §22.5 预言的默认路径；`eval-v1` 阈值零回改，holdout 未被触碰（无从触碰）。**P6 不自动启动**（仅 P5=go 才进入）；P7 不受 P5 no-go 阻塞，按固定顺序继续。本批 doc-only：零代码、零迁移、零持久写入。再运行前置条件见 §30.5。上行第十笔「P4 shadow 不等于 Strategy 3 可交易」依然成立。
+> **状态推进（2026-11-25，第十二笔）**：固定顺序 **Step 6 跳过（P6 不启动，仅 P5=go 进入）→ Step 7 / V2-P7 已实现、验证并独立交付**，记录见 §32（`C-20261125-14`）。函数级死代码清理（6 个函数 + 1 处冗余调用，共 150 行：`_contract_line` / `pages._secret` / `cockpit._money` / `note_step` / `note_cycle` / `_audit_result_tag` / `_advisor_actions_table` ＋ `_decimal_or_none` ＋ 不可达包装 `_portfolio_analysis_page`）＋ 文档收口；实现期纠正一处契约口径（`.advisor-reason` CSS 为 live 代码，保留）。**固定顺序 `Q7–Q12/Q14 → P2 → P3 → P4 → P5 → (P6 跳过) → P7` 全部走完**。全量 1055/1055（−1 个仅钉住已删包装的测试）、零迁移（仍 53）、零 news SQL 变更、零 `SOURCE` 变更。**仍 open 的独立裁定：N3 激活 go/no-go（Task #123）、N4、§30.5 五项数据批次**。上行第十一笔「P6 不自动启动」已由本批执行为「跳过」。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1748,3 +1749,65 @@ IB Gateway（7497/4001/4002）关闭，无外部数据源在拉取；7799 关闭
 - 不碰 `news_events` / canonical 三表的任何 SQL；不切 `SOURCE`；不做 N4。
 - 不删 `method_switch_note` 等有记录意图的占位；不降级任何测试覆盖（W4 覆盖反而增加）。
 - 两个启动阻塞（`load_active()` 早于 `apply_migrations()`、`var/backups` 996 快照 prune）仍属独立运维轮。
+
+## 32. V2-P7 交付记录（已完成范围死代码清理与文档收口，2026-11-25，`C-20261125-14`）
+
+### 32.1 状态与范围
+
+固定顺序 **Step 6 跳过（P6 不启动）→ Step 7 / V2-P7 已实现、验证并独立交付**。函数级死代码清理 ＋ 文档收口；**零迁移、零持久写入、零 news SQL 变更、零 `SOURCE` 变更**。§31 契约 W1–W7 全部按冻结口径落地，其中 W4 有一处实现期纠正（§32.3）。
+
+### 32.2 已删除（6 个函数 ＋ 1 处冗余调用，共 150 行）
+
+| 符号 | 判定依据 | 测试同步 |
+|---|---|---|
+| `pages._contract_line` | 全仓库零引用 | 无需 |
+| `pages._secret` | 零引用（`_masked_secret` 是另一活函数，未动） | 无需 |
+| `cockpit._money` | 零引用（bots 的 `_fill_money` 是另一活函数，未动） | 无需 |
+| `runtime.note_step` | 零引用（`mark()`/`finish()` 保留） | 无需 |
+| `runtime.note_cycle` | 生产死亡（cycle 一律经 `begin()` 设置；模块级 `cycle = 0` 初始化与 `apply_snapshot` 恢复路径完好） | `test_rules.py` 移除 import 与一处调用（该调用被紧随的 `begin(4)` 覆盖） |
+| `pages._audit_result_tag` | 生产死亡薄包装（= `_audit_result_html({"result":…, "status":…})` 逐字） | `test_rules.py` 5 处调用改写为直接构造 dict，断言语义逐字不变 |
+| `pages._advisor_actions_table` ＋ `pages._decimal_or_none` | P1 已把旧 Advisor 行动表从页面退役；两者互相引用、对外零调用者 | `test_d111_vix.py` XSS 转义测试**改写到 live `_draft_card`**（`<script>` 转义、`draft&lt;1&gt;` 转义、`white-space:pre-wrap` 内联样式）；live 渲染路径此前无专门转义测试，覆盖不降级反而增加 |
+| `pages._portfolio_analysis_page` | 不可达薄包装（路由表直映射 `_iris_page`） | 删除其专属 P1 钉住测试；`test_route_map_points_both_paths_at_iris_page` 继续覆盖别名语义 |
+
+### 32.3 实现期纠正：`.advisor-reason` CSS 不是死代码
+
+§31 W4 原列「死 CSS `.advisor-reason { white-space: pre-wrap; }`」——实现期复核发现 **`iris_view.render_draft_rail()`（live Iris draft rail，P1 交付物）仍在发射该类**，CSS 是活代码。纠正：**保留 CSS 与其断言原样**（`console.py` 与 `test_d111_vix.py` 净零改动）；只删真正的死发射者 `pages._advisor_actions_table`。§31 W4 原句 verbatim 保留，本节为 supersession 说明。
+
+### 32.4 明确保留（有记录意图，非死代码）
+
+`pages.method_switch_note`（docstring 自述 future chain_bs switch 占位 + 测试钉住）；`iris_events.listener_count / detach`（测试 API 面）；全部 news legacy 读写路径（N3 dark launch 生效中，N4 retirement 另需裁定）；`news_backfill.py` / `news_reconcile.py`（N3 激活前提工具）；`_pending_drafts` / `_draft_links`（live 多处引用）。
+
+### 32.5 验证链汇总
+
+```
+compileall                                       OK
+unittest discover（全量）                        1055/1055 OK (skipped=2)
+  （1056 → 1055：删除 1 个仅钉住已删包装的 P1 测试；test_news_p3_n3 AST
+    reader 包装断言、test_iris_p1 单一行动入口与路由映射断言全部保持绿）
+uv lock --check                                   29 packages（零新依赖）
+git diff --check                                  clean
+变更台账机检                                     136/136
+删除符号残留引用                                  0（全仓库 grep 复核；仅测试名与 live iris_view 用法属预期）
+wheel                                             不受影响（packages/ 零改动，git diff 仅 apps/）
+迁移数                                            53（无 058）
+运行时进程                                        none（7799 closed, Gateway closed, no engine launched）
+```
+
+### 32.6 退出条件核验（§31.4 逐项）
+
+1. **单一行动入口** ✅ draft rail 唯一（`test_iris_page_has_exactly_one_action_rail` 绿）。
+2. **适用范围内单一 news read model** ✅ 17 处 reader 全部经 `news_read` 包装（AST 断言绿，零 reader SQL 改动）。
+3. **旧链接仍可达** ✅ `/portfolio-analysis` 直映射、`/orchestration` ↔ `/strategy` 双别名、导航无孤儿（路由映射测试绿）。
+4. **无未登记状态表** ✅ 零新表、零迁移。
+5. 全量绿 + 台账机检绿 + `git diff --check` clean ✅。
+
+### 32.7 文档收口终态
+
+- 15 册：P1–P5 全部有交付记录（§18/§23/§24/§25/§27/§29）、P5 no-go 裁定（§30）、P7 交付（本节）；P6 显式「不启动（仅 P5=go 进入）」。
+- **固定顺序 `Q7–Q12/Q14 → P2 → P3 → P4 → P5 → (P6 跳过) → P7` 全部走完**。
+- 仍 open 的独立裁定：**N3 激活 go/no-go**（Task #123：持久 backfill ＋ `SOURCE = CANONICAL` ＋ 运行期收敛确认）、N4 legacy retirement、§30.5 五项数据批次（`eval-v1` 重跑前提）、两个启动阻塞运维轮。
+
+### 32.8 关联
+
+- 上游：§31 契约（`C-20261125-13`）、§30（P5 no-go）、§29（P4）、§18（P1 别名设计，其「alias 经由该包装」句由 §32.2 W5 行 supersede，原句 verbatim 保留）。
+- 下游：Task #123（N3 激活，操作者裁定）；§30.5 数据批次；N4。

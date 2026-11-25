@@ -15,7 +15,7 @@ from athena_exec.options import choose_expiry, choose_strikes, expiry_band, stri
 from athena_exec.slots import cash_open, draft_allowed, observe_allowed, slot_state
 from athena_marketdata.pricing import Bar
 from athena_orchestrator.money import DASH, cash_rows, convert, ledger, marked, report_currency, show
-from athena_orchestrator.pages import PROFILES, _audit_result_tag, _audit_status_tag, _audit_tr, _position_nlv_stat, sim_targets
+from athena_orchestrator.pages import PROFILES, _audit_result_html, _audit_status_tag, _audit_tr, _position_nlv_stat, sim_targets
 from athena_orchestrator.runtime import (
     begin,
     bind_progress,
@@ -24,7 +24,6 @@ from athena_orchestrator.runtime import (
     install_activity_log,
     mark,
     note_activity,
-    note_cycle,
     note_loop,
     restore,
     wait,
@@ -1115,11 +1114,11 @@ class AgentsTest(unittest.TestCase):
             "simulated": False,
         })
         self.assertIn("tag green", quiet_row)
-        self.assertIn(">QUIET<", _audit_result_tag("Quiet", "ok"))
-        self.assertIn(">NEWS_WASH<", _audit_result_tag("News wash", "ok"))
-        self.assertIn(">INVALID_SCHEMA<", _audit_result_tag("invalid schema", "invalid"))
-        self.assertIn(">CHANNEL_RISING,UPPER_RAIL<", _audit_result_tag("CHANNEL_RISING, UPPER_RAIL", "ok"))
-        budget = _audit_result_tag("cycle_order=5 prob_source=delta_proxy cycle margin", "dropped")
+        self.assertIn(">QUIET<", _audit_result_html({"result": "Quiet", "status": "ok"}))
+        self.assertIn(">NEWS_WASH<", _audit_result_html({"result": "News wash", "status": "ok"}))
+        self.assertIn(">INVALID_SCHEMA<", _audit_result_html({"result": "invalid schema", "status": "invalid"}))
+        self.assertIn(">CHANNEL_RISING,UPPER_RAIL<", _audit_result_html({"result": "CHANNEL_RISING, UPPER_RAIL", "status": "ok"}))
+        budget = _audit_result_html({"result": "cycle_order=5 prob_source=delta_proxy cycle margin", "status": "dropped"})
         self.assertIn(">CYCLE MARGIN<", budget)
         self.assertIn(">ORDER 5<", budget)
         self.assertNotIn("DELTA", budget)
@@ -1763,7 +1762,6 @@ class SimMathAndRuntimeTest(unittest.TestCase):
 
     def test_cycle_view_moves_from_running_to_waiting(self) -> None:
         bind_progress(None, None)
-        note_cycle(3)
         note_loop(60)
         begin(4)
         running = cycle_view()

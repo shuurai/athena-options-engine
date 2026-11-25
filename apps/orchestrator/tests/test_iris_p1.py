@@ -649,12 +649,6 @@ class TestCopySynchronisation(unittest.TestCase):
         self.assertIn('"/iris": _iris_page,', text)
         self.assertIn('"/portfolio-analysis": _iris_page,', text)
 
-    def test_alias_helper_is_a_thin_backward_compatible_wrapper(self):
-        body = PAGES_SRC.read_text().split("def _portfolio_analysis_page", 1)[1].split("\ndef ", 1)[0]
-        self.assertIn("Backward-compatible alias", body)
-        self.assertIn("return _iris_page(conn, account, query)", body)
-        self.assertNotIn("_regime_card", body)
-
     def test_iris_page_owns_the_regime_card(self):
         body = PAGES_SRC.read_text().split("def _iris_page", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("_regime_card(conn, account)", body)

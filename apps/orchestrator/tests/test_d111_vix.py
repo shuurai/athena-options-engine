@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 import unittest
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -380,18 +380,26 @@ class TestEnglishConsistentUI(unittest.TestCase):
         self.assertIn("Gold up", line)
 
     def test_dynamic_business_reason_is_preserved_and_escaped(self):
-        pending = [{"id": "draft<1>", "symbol": "NVDA", "tactic": "BUY",
-                    "reason": "继续持有 <script>alert(1)</script>"}]
-        with patch.object(pages, "_pending_drafts", return_value=pending):
-            html = pages._advisor_actions_table(
-                _RecordingConn(), "U1", standard_payload(), [], {}, date(2026, 11, 24),
-            )
+        # Live action rail: the single draft card must keep the business
+        # reason readable and escape it (V2-P7 moved this coverage from the
+        # retired advisor actions table onto the live renderer).
+        row = ("draft<1>", "NVDA", "BUY", "pending",
+               "继续持有 <script>alert(1)</script>", datetime.now(UTC) - timedelta(hours=1),
+               1, None, None, None, None, None, None, "100", False)
+        with patch.object(pages, "load_active",
+                          return_value=SimpleNamespace(notify=SimpleNamespace(draft_ttl_minutes=240))), \
+             patch.object(pages, "_symbol_tags", return_value=[]), \
+             patch.object(pages, "_live_link", return_value=""), \
+             patch.object(pages, "amend_view", return_value=None), \
+             patch.object(pages, "_draft_moneyness_badge", return_value=""), \
+             patch.object(pages, "_draft_sub", return_value=""), \
+             patch.object(pages, "_draft_risk", return_value=""):
+            html = pages._draft_card(_RecordingConn(), "U1", row, hot=False)
         self.assertIn("继续持有", html)
         self.assertNotIn("<script>", html)
         self.assertIn("&lt;script&gt;", html)
         self.assertIn("draft&lt;1&gt;", html)
-        self.assertIn('<td class="advisor-reason">', html)
-        self.assertNotIn('style="white-space:pre-wrap"', html)
+        self.assertIn('style="white-space:pre-wrap"', html)
 
     def test_shared_css_covers_empty_states_flex_and_narrow_layout(self):
         from athena_orchestrator.console import _EXTRA_CSS

@@ -32,13 +32,6 @@ _loader: Callable[[], dict | None] | None = None
 log = logging.getLogger("athena")
 
 
-def note_cycle(count: int) -> None:
-    global cycle
-    with _LOCK:
-        cycle = count
-    persist()
-
-
 def note_loop(seconds: int) -> None:
     global _loop_seconds
     with _LOCK:
@@ -81,10 +74,6 @@ def mark(index: int, status: str, detail: str = "") -> None:
             _lines[index] = detail
         if index > _step:
             _step = index
-
-
-def note_step(index: int, skipped: bool = False) -> None:
-    mark(index, "skipped" if skipped else "running")
 
 
 def finish(index: int, detail: str) -> None:

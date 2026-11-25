@@ -1724,11 +1724,6 @@ def _iris_page(conn, account: str, query: dict) -> dict:
     )
 
 
-def _portfolio_analysis_page(conn, account: str, query: dict) -> dict:
-    """Backward-compatible alias. Iris is the canonical product name."""
-    return _iris_page(conn, account, query)
-
-
 def _advisor_report(conn, account, settings, rows, signals, day) -> str:
     adv = settings.advisor
     if not adv.enabled:
@@ -1794,94 +1789,6 @@ def _draft_links(drafts: list[dict]) -> str:
         f'<a href="/drafts">{escape(item["id"])}</a>'
         for item in drafts
     )
-
-
-def _advisor_actions_table(conn, account, settings, rows, signals, day) -> str:
-    del settings, day
-    pending = _pending_drafts(conn, account)
-    by_symbol: dict[str, list[dict]] = {}
-    for draft in pending:
-        by_symbol.setdefault(draft["symbol"], []).append(draft)
-    lines = []
-    held = set()
-    for row in rows:
-        symbol = row["symbol"]
-        signal = signals.get(symbol) or {}
-        action = signal.get("action") or "hold"
-        confidence = float(signal.get("confidence") or 0.0)
-        reason = signal.get("reason") or "—"
-        urgency = {"close": 0, "take_profit": 1, "trim": 2, "hold": 3}.get(action, 4)
-        captured = ""
-        if row["sec_type"] == "OPT" and row["qty"] < 0:
-            mark = _decimal_or_none(row.get("mark"))
-            if mark is not None and row["avg"] > 0:
-                from athena_strategy.draft_facts import premium_captured_pct
-                pct = premium_captured_pct(row["avg"], mark)
-                captured = f"{pct:.0f}%" if pct is not None else ""
-        kind = "stock" if row["sec_type"] == "STK" else ("put" if row["right"] == "P" else "call")
-        held.add(symbol)
-        lines.append({
-            "symbol": symbol,
-            "kind": kind,
-            "moneyness": row.get("moneyness") or "",
-            "dte": row.get("dte") or "",
-            "captured": captured,
-            "action": action,
-            "confidence": confidence,
-            "reason": reason,
-            "urgency": urgency,
-            "drafts": by_symbol.get(symbol, []),
-        })
-    for draft in pending:
-        if draft["tactic"] not in {"BUY", "OPEN_CSP"} or draft["symbol"] in held:
-            continue
-        lines.append({
-            "symbol": draft["symbol"],
-            "kind": "buy" if draft["tactic"] == "BUY" else "csp",
-            "moneyness": "",
-            "dte": "",
-            "captured": "",
-            "action": "buy" if draft["tactic"] == "BUY" else "long",
-            "confidence": 0.0,
-            "reason": draft["reason"] or draft["tactic"],
-            "urgency": 5,
-            "drafts": [draft],
-        })
-        held.add(draft["symbol"])
-    lines.sort(key=lambda item: (item["urgency"], -float(item["captured"].rstrip("%") or 0)))
-    body_rows = []
-    for item in lines:
-        tone = {"close": "red", "take_profit": "amber", "trim": "amber", "hold": "green", "buy": "teal", "long": "teal"}.get(item["action"], "")
-        body_rows.append(
-            f'<tr><td><b><a href="/positions">{escape(item["symbol"])}</a></b></td>'
-            f'<td>{escape(item["kind"])}</td>'
-            f'<td>{escape(item["moneyness"])}</td>'
-            f'<td class="mono">{escape(item["dte"])}</td>'
-            f'<td class="mono">{escape(item["captured"])}</td>'
-            f'<td><span class="tag {tone}">{escape(item["action"])}</span></td>'
-            f'<td class="mono">{item["confidence"]:.2f}</td>'
-            f'<td class="mono">{_draft_links(item["drafts"])}</td>'
-            f'<td class="advisor-reason">{escape(item["reason"])}</td></tr>'
-        )
-    html = "".join(body_rows) or '<tr><td colspan="9">No positions.</td></tr>'
-    return (
-        '<div class="card fill"><h2>Advisor actions</h2><div class="scroll-y">'
-        '<table class="data"><thead><tr>'
-        "<th>Symbol</th><th>Kind</th><th>Money</th><th>DTE</th><th>Captured</th><th>Action</th><th>Conf</th><th>Draft</th><th>Reason</th>"
-        f"</tr></thead><tbody>{html}</tbody></table>"
-        "</div></div>"
-    )
-
-
-def _decimal_or_none(value):
-    if not value:
-        return None
-    try:
-        return Decimal(str(value).replace(",", ""))
-    except (InvalidOperation, ValueError):
-        return None
-
-
 def _positions_page(conn, account: str, query: dict) -> dict:
     kind = (query.get("kind") or ["all"])[0]
     if kind not in {"all", "stock", "option"}:
@@ -4456,10 +4363,6 @@ def _audit_result_html(row: dict) -> str:
     return f'<span class="badges">{tags}</span>' if tags else ""
 
 
-def _audit_result_tag(result: str, status: str) -> str:
-    return _audit_result_html({"result": result, "status": status})
-
-
 def _result_legend() -> str:
     """Slide-in glossary for the audit Result and Status columns."""
     status = [
@@ -4713,14 +4616,6 @@ def _html(title: str, lead: str, body: str, chips: list[tuple[str, str]], action
 
 def _account() -> str:
     return current_view()
-
-
-def _contract_line(conn, draft_id: str) -> dict:
-    from athena_strategy.drafts import draft_facts
-
-    lines = draft_facts(conn, draft_id)
-    kept = [line for line in lines if line.startswith(("Expiry ", "Put ", "Call ", "Limit ", "Class ", "Cancels"))]
-    return {"contract": ", ".join(kept) if kept else "No contract line yet", "lines": lines}
 
 
 def _minutes_left(created: datetime, ttl: int) -> int:
@@ -6215,10 +6110,6 @@ def _limit(label: str, name: str, value: int | float, note: str = "", step: str 
         f'<input class="input" name="{name}" type="number" min="0" step="{step}" required value="{shown}"{marker}>'
         "</div>"
     )
-
-
-def _secret(name: str) -> str:
-    return "set" if os.environ.get(name, "").strip() else "empty"
 
 
 def _tag(text: str, kind: str = "") -> str:
