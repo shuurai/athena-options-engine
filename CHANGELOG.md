@@ -160,3 +160,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-25 | Ship V2-P3 N3 canonical read model as a dark launch | [C-20261125-9](logs/2026-11-25.md#c-20261125-9) |
 | 2026-11-25 | Freeze the V2-P4 shadow contract with R1-R7 conventions | [C-20261125-10](logs/2026-11-25.md#c-20261125-10) |
 | 2026-11-25 | Implement V2-P4 gap audit, weekly SMA and Strategy 3 shadow | [C-20261125-11](logs/2026-11-25.md#c-20261125-11) |
+| 2026-11-25 | Execute V2-P5 eval-v1 hard gate and record no-go verdict | [C-20261125-12](logs/2026-11-25.md#c-20261125-12) |

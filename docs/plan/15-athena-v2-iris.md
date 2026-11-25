@@ -12,6 +12,7 @@
 > **状态推进（2026-11-25，第八笔）**：固定顺序的 **Step 3 收尾 / V2-P3 第二批（N1 backfill ＋ §6.3 六项对账）已实现、验证并独立交付**，记录见 §25（`C-20261125-8`）。新增 `news_backfill.py`（幂等、可重导、`ingest_fallback` 诚实标注）与 `news_reconcile.py`（`six_item_gate()`，把差异机械分为 registered / unexplained）。真实库事务内 dry-run：**2,529 legacy rows → 1,873 articles / 2,529 associations / 2,529 map**，六项 **全 PASS、unexplained = 0、`blocks_n3 = False`**，二次 backfill `maps_inserted = 0`，`ROLLBACK` 后 legacy 仍 `2529`、canonical 归零。全量 `959/959`、`40/40` mutation traps、wheel 含两个新模块。**本批只证明「六项对账通过」，不等于 N3 已切换**：reader 仍读 `news_events`、`news_events` 未删（N4 另需裁定），且 live 库的 canonical 表仍是空的（对账是 dry-run，不是持久回填）。上行第七笔「N3 / N4 仍是受六项对账硬门禁约束的后续阶段」依然成立，本批只解除了门禁本身；§24.6「未跑 news backfill」一句由本节取代，原句保留不改写。
 > **状态推进（2026-11-25，第九笔）**：固定顺序的 **Step 3 / V2-P3 第三批（N3 canonical read model）已实现、验证并独立交付，记录见 §27（`C-20261125-9`）**。新增 `news_read.py`：以 `WITH news_events AS (...)` CTE 把 `057` 三表投影为 legacy 九列，17 处非测试 reader 全部经 `render()` / `score_sql()` 包装、SQL 主体逐字节不变；R1 保留 ET 日界、R2 只对 canonical `news_score` 加 `ORDER BY ts, sentiment` tie-break。**本批是 DARK LAUNCH，`SOURCE = LEGACY`**：§26.2 两项数据面前置条件未满足——§25 六项对账是事务内 dry-run（`ROLLBACK` 后 live canonical 仍为 `0/0/0`），§26.4 禁止启动 engine 观察运行期 N2 双写收敛；直接切 `CANONICAL` 会让 17 处 reader 全部读到空表。故零行为变化、零持久写入。真实 PG **17/17 逐处对账 `parity diffs = 0`**、六项门禁 `unexplained=0 / blocks_n3=False`、全量 `1006/1006`、`19/19` mutation traps、wheel 含新模块且 53 迁移。**N3 真正激活（持久 backfill ＋ `SOURCE = CANONICAL` ＋ 运行期收敛确认）须操作者单独 go/no-go**；N4 另需裁定；P4–P7 未开始。上行第八笔「live 库 canonical 仍是空的」依然成立，原句保留不改写。
 > **状态推进（2026-11-25，第十笔）**：操作者裁定 **N3 激活 defer**（Task #123 open），固定顺序进入 **Step 4 / V2-P4**。落地前契约 §28（`C-20261125-10`，R1–R7）与交付记录 §29（`C-20261125-11`）先后入库：四个 pure 模块（ET 会话日历、六类日线缺口审计、ISO 周聚合、Strategy 3 shadow 信号子集）＋ Iris 只读接线，§22.3 第 1–6/14 项全部落地、第 7–13 项按 R6 留给 P5/P6。**零迁移、零持久写入、零 drafts / orders**；live `market_bars` 为空 ⇒ 数据面诚实 `unknown / no_data`，数据到位即自动产出真实值。全量 `1056/1056`、`27/27` mutation traps、真实 PG 事务内只读 + `ROLLBACK`、wheel 含四新模块。**P4 shadow 不等于 Strategy 3 可交易**：工具 / 入场窗口 / TP / NAV / 连止均未实现，`instrument_availability=deferred_p5`；P5（`eval-v1` 执行）以真实历史数据可用性为硬门禁。上行第九笔「N3 激活须操作者单独 go/no-go」依然成立。
+> **状态推进（2026-11-25，第十一笔）**：固定顺序 **Step 5 / V2-P5（`eval-v1` 执行）已按 §22.5 硬门禁实测并裁定**，记录见 §30（`C-20261125-12`）。只读实测：live 库 `market_bars=0`、`sim_bars=0`、`calendar_marks` 54 条仅 FED（无 EARNINGS）、`iv_marks/chain_marks=0`、`drafts/orders=0` ⇒ §22.4 最低证据量四项**全部不达标**（52W 数据覆盖率 0%、holdout 完成周 0、有效 candidate 0、覆盖 symbol 0），bootstrap 区间不可计算。**裁定：`insufficient_evidence / no-go / 继续 shadow`**——这正是 §22.5 预言的默认路径；`eval-v1` 阈值零回改，holdout 未被触碰（无从触碰）。**P6 不自动启动**（仅 P5=go 才进入）；P7 不受 P5 no-go 阻塞，按固定顺序继续。本批 doc-only：零代码、零迁移、零持久写入。再运行前置条件见 §30.5。上行第十笔「P4 shadow 不等于 Strategy 3 可交易」依然成立。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1642,3 +1643,69 @@ wheel (athena-strategy-nfr)                       trading_calendar / gap_audit /
 
 - 上游：`C-20261125-10`（§28 契约，R1–R7）、§22（Q7/Q8/Q9/Q14）、`C-20261125-9`（N3 dark launch；操作者裁定 defer 激活、进入 P4）。
 - 下游：**V2-P5 = 冻结协议 `eval-v1` 的历史与 live shadow 执行**（P4 产物即其输入；真实历史数据可用性是硬门禁，不足则 `insufficient_evidence / no-go / 继续 shadow`）；P6 仅在 P5 go 后进入；P7 按固定顺序收尾。
+
+## 30. V2-P5 交付记录（`eval-v1` 执行 · 数据可用性硬门禁 · no-go 裁定，2026-11-25，`C-20261125-12`）
+
+### 30.1 状态与范围
+
+固定顺序 **Step 5 / V2-P5 已执行并裁定**。本批是 §22.4 冻结协议 `eval-v1` 的**首次执行记录**，执行对象是协议自身的硬门禁：真实历史数据可用性（§22.5）。**本批 doc-only：零代码、零迁移、零持久写入、零 engine 启动**。无 holdout 数据可看，故「holdout 后不得回改阈值」的纪律未被触碰——阈值原封不动，`protocol_version` 仍为 `eval-v1`。
+
+### 30.2 数据可用性只读实测（live DB `athena-pg` @ 127.0.0.1:55432，2026-11-25）
+
+| 表 | 行数 | 对 `eval-v1` 的意义 |
+|---|---|---|
+| `market_bars` | **0** | 无任何日线 bar：无 52W 覆盖、无周线聚合输入、无 SMA/hill/slope 因子输入 |
+| `sim_bars` | **0** | 无模拟 bar（且模拟数据本就不满足「真实历史数据」） |
+| `calendar_marks` | 54（`kind='FED'` 仅此一种） | **无 EARNINGS marks** ⇒ 财报过滤（§22.3 第 6 项）不可执行 |
+| `iv_marks` / `chain_marks` | **0** / **0** | 无 IV、无期权链 ⇒ 成本/滑点/bid-ask 模型（§22.4 冻结模型）无校准输入 |
+| `drafts` / `orders` / `positions` | **0** / **0** / **0** | 无 live shadow 可执行性证据 |
+| `news_events` | 2,529 | 仅 legacy 新闻回填；与价格历史评估无关 |
+
+IB Gateway（7497/4001/4002）关闭，无外部数据源在拉取；7799 关闭。
+
+### 30.3 §22.4 最低证据量逐项对照
+
+| 协议要求 | 实测 | 达标？ |
+|---|---|---|
+| holdout 完成周 ≥ 30 | 0（无任何完成周） | ❌ |
+| 有效 candidate ≥ 20 | 0 | ❌ |
+| 覆盖 symbol ≥ 5 | 0 | ❌ |
+| 52W 数据覆盖率 ≥ 80% | **0%** | ❌ |
+| bootstrap 95% 区间可计算 | 不可计算（零样本） | ❌ |
+
+五项全不达标，无一项接近边界——不存在任何解读空间。
+
+### 30.4 裁定
+
+**`insufficient_evidence / no-go / 继续 shadow`**。依据：
+
+- §22.5 硬门禁原文：「真实历史数据可用性是硬门禁……若 §22.4 最低证据量不达标，结论必须写 `insufficient_evidence / no-go / 继续 shadow`，不得判 go、不得事后调阈值」。
+- §22.4 no-go 记录要求逐项留档：净成本结果 = **不可计算**（零样本）；最大风险暴露 = **零**（无任何仓位或草案产生）；数据覆盖 = **0%**（§30.2/§30.3）；样本外表现 = **不存在**（holdout 未被构造，纪律未被触碰）；反例清单 = **不适用**（无 candidate 可保留）；live shadow 可执行性 = **不满足**（Iris shadow 节点在零数据下诚实显示 `unknown`，P4 §29 已交付）。
+- 原文「60–70% 胜率 / 2:1–3:1 盈亏比 / 每年 5–15 次」按 §22.4 不作为预定答案——本裁定不引用它们。
+- `eval-v1` 阈值**零回改**；未来任何重跑都必须以 `protocol_version = eval-v1` 原样执行；若需改口径须新开 `eval-v2` 并重新跑全链、不得复用旧 holdout。
+
+### 30.5 再运行的解除条件（re-run prerequisites）
+
+`eval-v1` 重跑前必须满足的独立数据批次（均不属于本册已授权范围，须各自契约 + 实现 + 验证）：
+
+1. **真实历史日线（复权后）导入**：至少覆盖 watchlist 全体 symbol 的 52W+ 窗口，含 `adjustment_basis` 来源声明（split/dividend adjusted）；导入批次须带确定性重放与缺口审计（P4 `gap_audit` 即其验收工具）。
+2. **EARNINGS calendar marks**：历史财报日期（含盘后归属次日交易日的规则，§22.3 第 6 项）。
+3. **SPX / VIX 历史周线**：SPX 收盘 + SMA50 输入、VIX 周收盘（§22.3 第 5 项）。
+4. **期权链 / IV / borrow 数据源**：§22.4 冻结的成本、滑点、bid-ask、部分成交模型的校准输入；缺失时相应项按协议记 `no_data` 并计入证据量。
+5. 导入完成后再跑 §22.4 全链（切分 → 基准 → 反例留存 → 最低证据量 → go 阈值），产出独立 go/no-go 记录。
+
+### 30.6 对 P6 / P7 的影响
+
+- **P6 不自动启动**：§22.5「P6 仅在 P5 = go 时进入」。本裁定 no-go，故 P6（工具 / 订单 / exit 执行语义）**不进入、不预占迁移号、不写契约**。
+- **P7 不受阻塞**：P5 no-go 不阻塞其余收尾（§22.5 原文）；P7 按固定顺序在 P5 之后执行。
+
+### 30.7 验证、回滚与边界
+
+- 本批只读实测三条 `SELECT count(*)` 查询（§30.2），单连接、无事务写、无 `ROLLBACK` 需求；零迁移（仍 53、无 `058`）。
+- 回滚：`git revert <sha>`；只回滚 §30、头部第十一笔、00 册索引、`CHANGELOG.md` 与台账条目；§22.4 协议冻结行是历史 verbatim，不受影响。
+- 边界：N3 开关不动（`SOURCE = LEGACY`，Task #123 open）；7799 / IB Gateway 均关闭；不重试 `dxnrJP`；两个启动阻塞（`load_active()` 早于 `apply_migrations()`、`var/backups` 996 快照 prune）仍属独立运维轮。
+
+### 30.8 关联
+
+- 上游：§22.4 / §22.5（`C-20261125-5` 协议冻结与硬门禁）、§29（`C-20261125-11`，P4 shadow 产物与诚实空态）。
+- 下游：**P7（固定顺序收尾）**；`eval-v1` 重跑等 §30.5 数据批次就绪后另开独立批次。
