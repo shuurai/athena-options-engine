@@ -4,6 +4,7 @@
 **证据截点**：2026-11-24，代码基线 `56739ce`；数据库只读快照见 §2.3。
 > **状态推进（2026-11-25）**：§17 授权的 **V2-P1 静态 Iris ＋ Orchestration 独立双列已交付并验证**，交付记录见 §18；V2-P2–P7 与 V2-Q1–Q15 仍待裁定。上行「不授权实现」原句保留为 `C-20261124-11` 规划批次的历史状态，不改写。
 > **状态推进（2026-11-25，第二笔）**：**V2-Q Round A 已裁定 8 条**（Q1/Q2/Q3/Q4/Q5/Q6/Q13/Q15），记录见 §19；Q7–Q12、Q14 共 7 条仍待裁定。上行「V2-Q1–Q15 仍待裁定」是第一笔当时的状态，保留不改写。
+> **状态推进（2026-11-25，第三笔）**：操作者确认 §19 后，**V2-P2 / V2-P3 落地前契约已写入 §20**（`C-20261125-3`）。§20 本身零代码、零迁移、不预占迁移号，仍需操作者批准后才进入实现批次；Q7–Q12 / Q14 仍未裁定。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -766,3 +767,130 @@ git diff --check     0
 - 上游：`C-20261124-11`（§16 规划批次）、`C-20261125-1`（§17/§18 P1 交付）。
 - 下游：§20 建议作为 V2-P2 / V2-P3 落地前契约（**待操作者确认后才写、之后才实现**）。
 - 并行未决：Q7–Q12、Q14（P4–P6）；两个启动阻塞运维轮。
+
+---
+
+## 20. V2-P2 / V2-P3 落地前契约（2026-11-25, `C-20261125-3`）
+
+### 20.0 本批性质
+
+操作者已确认 §19 为合并后的裁定源。按 doc-first 纪律，本节**在实现之前**把 V2-P2（结构化事件 / SSE / 真实动画）与 V2-P3（新闻 canonical 模型）各自的实现边界、实测接缝、fixture、迁移与回滚写成契约。
+
+- **本批零代码、零迁移、零 Settings、零运行库写入、零引擎重启。**
+- **§20 本身不授权实现**：P2 / P3 仍需操作者批准本节，才进入各自实现批次；两者可并行但**不得与 NFR 行为变更混批**（§10 相位表）。
+- 依据 §19 已裁定的 Q3 / Q4 / Q15（→ P2）与 Q5 / Q6（→ P3）；§6.2 / §6.3 的 identity 与 N1–N4 分阶段迁移**已被 Q5 / Q6 追认，原文不改写**，本节只补实测接缝与交付门禁。
+- 本节不产生全局 D 号，不预占迁移号，不改 §1 / §6，不改 D1–D111 / 112 节点 / 54 裁定。
+
+### 20.1 只读实测接缝（2026-11-25）
+
+**P2 — 事件与传输**
+
+| 接缝 | 实测位置 | 结论 |
+|---|---|---|
+| SSE 传输已存在 | `console.py:934 _open_stream()`、`:941 _open_api_stream()`；端点 `/api/pulse/ticks`、`/api/logs`、`/api/orders/events`（`console.py:862–870`） | 可复用 HTTP 头 + `queue.Queue` 订阅循环，**但都是进程内队列，无持久化 replay** |
+| 订阅模式 | `pulse.py:96 subscribe_ticks()`、`runtime.py:346 trail_recent()` / `:351 subscribe_trail()`、`order_watch.py:46 subscribe(account)` | `trail_recent()` 只在进程内存里，重启即失；不能当作 `strategy_events` replay |
+| 周期轮询 | `console.py:862 /api/cycle` → `runtime.cycle_view()`；前端 `console.py:3925 fetch("/api/cycle")` 每秒 | 是粗粒度阶段状态，**不是事件流**，不得解析日志冒充事件 |
+| 已有订单事件表 | `052_order_events.sql`：`order_id / account_id / ib_status / status / filled_qty / remaining_qty / avg_fill / created_at`，`ON DELETE CASCADE` | 是**订单维度**的 append-only 日志，不是通用 strategy event model；P2 不得改写它，也不得拿它充当 `strategy_events` |
+| domain commit 边界 | `drafts.py:899 INSERT INTO drafts`；`:1767 approved` / `:1773 rejected` / `:1778 INSERT INTO approvals` / `:1892 INSERT INTO orders`，`conn.commit()` 在 `:1783`；`expire_pending()` `:82` + commit | Q15 的「commit 之后幂等 emit」必须锚定这些**已存在的 commit 点**，不得在 transaction 内同步写事件 |
+| 其它状态写入 | `budget.py:42` / `wheel.py:775,881` blocked；`drafts.py:1599` 通用 `UPDATE drafts SET ...`（amend）；`manage.py:199` reason 更新；`session.py:531/545/566/575/617/639/757/773` 订单状态；`order_watch.py:96/336` 订单更新 | 事件词表必须覆盖这些路径，否则动画会漏帧并撒谎 |
+| operator direct paths | `order_watch.py:431 _insert_ib_order()`（`tactic='EXTERNAL'`、插入即 `status='approved'`）；`tasks.py:450–467`（`tactic='MANUAL'`、插入即 approved，并同时写 approvals + orders） | 这类 draft **没有 pending 阶段**，不得投影成策略 `draft_created`；§17.1(8) 已要求标成 operator direct path |
+| graph 版本 | `iris_view.py:14 GRAPH_VERSION`、`:36 NODES` / `:61 EDGES` | replay 事件携带 graph_version，不匹配时不得动画，触发 mismatch 分支 |
+
+**P3 — 新闻读写**
+
+| 接缝 | 实测位置 | 结论 |
+|---|---|---|
+| 旧表结构 | `006_news_events.sql`：`fingerprint text PRIMARY KEY`，`ts / symbol / source / event_type / sentiment / title / url`；`017_news_dismissed.sql` 追加 `dismissed boolean` | 无 article 表、无 association 表、无 `account_id`；`url` 字段已存在（Q5 的证据字段可落地） |
+| 旧 identity | `news.py:508` 与 `:540`：`sha256(f"{symbol.upper()}\|{title.lower()}")[:24]` | **symbol 在 identity 内 ⇒ 跨 symbol 重复是结构性、必然的**，配置改不掉 |
+| 三处初始写入 | `news.py:511 _insert_event()`（`ts=datetime.now(UTC)`）；`news.py:543 _save_headlines()`（`ts=provider when`）；`news.py:122 store_manual()` 复用 `_save_headlines`（`ts=now(UTC)`） | **三种 `ts` 语义**：provider 发布时间 / ingestion 时间 / ingestion 时间。§6.2 的 `effective_ts + day_precision` 与 ET 日界必须逐 writer 落地，不得把 fallback 伪装成 provider 时间 |
+| 幂等锚点 | 两处 `INSERT ... ON CONFLICT (fingerprint) DO NOTHING` | canonical 必须按自身 identity 幂等写入，且不依赖 legacy 是否冲突（§6.3 N2 的 `conflict_existing`） |
+| sentiment writer | `dsh.py:188 UPDATE news_events SET sentiment=%s WHERE fingerprint=%s` + `conn.commit()`；`enrich_sentiment()` `dsh.py:163` 接收 `_save_headlines` 返回的 `(fingerprint, symbol, title)` | DSH 是 **commit 之后的第二次写**，dual-write 对账必须覆盖；`fresh` 列表按旧 fingerprint 组织，mapping 必须能反查 association |
+| dismiss writer | `news.py:107 dismiss_event(fingerprint)`：`UPDATE ... SET dismissed=true ... RETURNING fingerprint` + `conn.commit()` | 入口只收**单个 fingerprint**；Q5/§6.3 要求解析明确 `association_id`，一对多时必须拒绝并要求新 UI 传 id，禁止一次 dismiss 全部 |
+| reader 面 | 21 处非测试 SQL，分布在 `pages.py`(7)、`iris_view.py`(2)、`news.py`(4)、`agents.py`(2)、`telegram.py`、`console.py`、`guardian_regime.py`、`advisor.py`、`indicators.py`、`dsh.py`；其中 `news.py:226 tags_from_events()` 过滤 `sentiment < x AND ts >= x AND dismissed=false` | N3 canonical read 必须逐处对账；`NEWS_WASH` 与 `news_score` 的 Decimal 路径一致是 §6.3 既定验收项 |
+| 备份契约 | `backup.py:8–27 TABLES` 只列 20 张表，**连 `052_order_events` / `055_regime_labels` 都不在其中** | 既有遗留缺口。P3 若依赖 backup/restore 回滚，必须显式处理新表，否则 restore 会丢 canonical 数据；本批不扩大备份契约，列为实现批次必答项 |
+
+**真实 PostgreSQL 只读快照（`athena-pg`，51 migrations，`BEGIN READ ONLY` → `ROLLBACK`）**
+
+```text
+news_events                 2,529 rows
+distinct lower(title)       1,872
+distinct (UTC day, lower)   1,873     ← day 几乎不额外拆分，仅 1 标题跨两日
+cross-symbol title groups     440
+rows in those groups        1,097
+rows with url               2,529 / 2,529
+distinct sources                2
+ts range          2026-05-08 .. 2026-11-25
+dismissed                         0
+strategy_events table       absent
+drafts / orders                 empty (smoke DB)
+```
+
+⇒ 按 Q5 identity 预计收敛到约 **1,873 篇 canonical article + 2,529 条 association**，减少约 **656 行**重复。该数字是**当前快照的推算，不是验收阈值**；实现批次须在事务内 dry-run 重算。`distinct (UTC day, lower)` 用 UTC 日界计算，§6.2 规定 **America/New_York** 日界，两者可能不同 —— 必须列为 fixture。
+
+### 20.2 V2-P2 契约
+
+1. **新表**：独立 migration 建 `strategy_events`，append-only 窄 read model（Q4）。建议字段：`event_id text PRIMARY KEY`（由 domain subject + transition + version 确定性生成）、`run_id / account_id / subject_type / subject_id / status / from_status / to_status / reason_code / symbol / edge_id / graph_version / occurred_at / payload jsonb / created_at`。**不建万能 event bus、不建订阅注册表、不给事件加可变状态列**。
+2. **词表**：`news_ingested / factor_computed / strategy_started / strategy_completed / filtered / quiet / invalid / draft_created / draft_approved / draft_rejected / draft_expired / draft_blocked / draft_amended / draft_replaced / order_queued / order_submitted / order_blocked / order_cancelled / order_filled / partial_fill / observation_gap`。§8.5 的 `status` 与结构化 `from_status / to_status / reason_code` 必须显式，不得从自由文本推断。
+3. **emit 边界（Q15）**：domain commit **完成后**幂等 emit；`event_id` 确定性 ⇒ 重复 emit / retry / replay 收敛为同一行。事件写失败只记 `observation_gap`，**绝不**回滚或阻断 `drafts / approvals / orders / positions` 的 commit。不得把 emit 放进 domain transaction。
+4. **reconciler**：周期性从持久化 domain rows 补齐**可推导**的缺失事件；补不出的区间显式 `observation_gap`。禁止臆造、禁止用装饰动画填补。
+5. **SSE**：新增独立端点（复用 `_open_stream()` 的 header 与 `queue.Queue` 循环骨架），先按 cursor 从 `strategy_events` replay，再交接 live；`Last-Event-ID` / cursor、断线重连、重复、乱序、错误 account / symbol / edge、graph_version mismatch 全部故障注入。**无事件时零动画**。`/api/cycle` 轮询与 `/api/logs` 自由日志不参与事件判定。
+6. **operator direct**：`EXTERNAL` / `MANUAL` 插入即 approved，不得投影为策略链路；只显示 §17 已标注的 operator direct path。
+7. **fixture 必含**：BUY / CSP / CC / `OPEN_STRANGLE` 四种 tactic；rejected / expired / amended / replaced / blocked / partial-fill / cancel 七类状态；event-write failure；replay→live 交接；「无事件不动画」。
+
+### 20.3 V2-P3 契约
+
+1. **三表**：按 §6.3 已画出的 `news_articles` / `news_article_symbols` / `news_legacy_event_map`，additive，**不改 `news_events` 结构与主键**；legacy map 不并入 association 主键。
+2. **identity v1**：严格按 §6.2 —— `normalized_title = title.lower()`（不做 NFKC / 空白折叠）、`effective_ts` 区分 provider 与 `ingest_fallback`、`published_day = America/New_York` 日界、`article_key = sha256("v1|" + published_day + "|" + normalized_title)`、带 `identity_version`。URL 只作证据，不做语义合并。本节**不改写 §6.2**。
+3. **dual-write 三处**（§6.3 N2）：初始 insert（两个 writer + manual）、`dsh.py` sentiment enrich、`dismiss_event()`。每处记录 `legacy_write_status`；canonical 写入不依赖 legacy `ON CONFLICT DO NOTHING` 结果。
+4. **dismiss 语义**：兼容入口解析明确 `association_id`；一个 fingerprint 映射多个 association 且目标不明确 ⇒ **拒绝操作**，要求 UI 传 id；禁止批量 dismiss。
+5. **readers 对账**：§6.3 六项在真实库 copy 或事务内 dry-run 逐项验证；`NEWS_WASH` 逐 symbol 一致、`news_score` 同一 Decimal 路径重算一致；所有差异必须登记，未登记差异阻止 N3。
+6. **legacy 保留（Q6）**：至少跨 N1–N3 对账期不删 `news_events`；map 数 == legacy 行数、每 legacy row 恰好映射一次、association 无 orphan。删除另开裁定。
+7. **不与 NFR 行为变更混批**：P3 改的是新闻存储/read model，不得顺手改 wheel gate、tag 阈值或 `NEWS_WASH` 语义。
+
+### 20.4 迁移与打包决策
+
+- 当前 `packages/store/src/athena_store/migrations/` 有 **51** 个 `0*.sql`，末位 `055_regime_labels.sql`；下一空号是 `056`。**本批不预占、不创建**；实现批次取当时的下一个空号，P2 与 P3 各一张。
+- `packages/store/pyproject.toml:12–` 的 `[tool.hatch.build.targets.wheel.force-include]` 是**逐文件显式清单**（现 51 条，末条 `055_regime_labels.sql`）。新 migration 必须同时加入该清单，否则 wheel 不含该文件（R7 已实测此坑）。
+- `apply_migrations()`（`migrate.py:26`）按文件名排序、用 `schema_migrations.version` 去重、`conn.commit()` 一次；新表必须在真实 postgres 实例上验证 apply + wheel 内含数量。
+- **至少 6 处测试会随新迁移变化**：`test_d111_vix.py:422`、`test_guardian_r6.py:540`、`test_guardian_r7.py:912` 断言 `len(migrations) == 51`；`test_guardian_r3.py:516–518`、`test_guardian_r4.py:579`、`test_guardian_r5.py:639` 断言末位仍是 `055_regime_labels.sql`。实现批次必须**同步这些断言，而不是删除它们**（D108 收窄而非删除的先例）。
+- 启动顺序缺陷（`run_loop()` → `_cycle_sleep()` → `load_active()` 早于 `apply_migrations()`）与 `var/backups` 996 快照 prune 属独立运维轮；若实现批次要跑 smoke，仍用 `ATHENA_LOCAL_BACKUP_DIR=var/backups-smoke` 与预加迁移的 workaround。
+
+### 20.5 明确不做
+
+- 不实现 `strategy_events` / SSE / 动画 / replay；不建新闻三表；不跑 news backfill；不改写任何 writer 或 reader。
+- 不实现周线 SMA、Strategy 3 shadow、评估协议、工具或 exit 语义（P4–P6，Q7–Q12 / Q14 仍未裁定）。
+- 不改 watchlist、Settings schema、drafts / approvals / orders 状态机、engine cycle、Telegram、NFR gate、`backup.py TABLES`。
+- 不重启运行中的 7799 console（§10.1 门禁 5）；不启动任何 engine 进程；不写任何业务表。
+- 不分配全局 D 号、不改 §1 / §6、不预留迁移号、不改写 §14 / §17 / §18 / §19 的历史 verbatim。
+
+### 20.6 验收门禁（实现批次，不是本批）
+
+1. 纯函数 + 集成单测；每个新规则至少一个破坏即失败的 mutation test，逐字节还原。
+2. 真实 PostgreSQL 迁移 apply、事务内 dry-run / rollback；不只跑 fake conn（P1 的 `LIKE 'VIX%'` 教训：裸 `%` 必须写成 `%%`）。
+3. P2：draft → approve → queued → submitted / blocked 账户隔离与权限回归；事件故障注入不得改变 domain commit。
+4. P3：§6.3 六项对账 + dismiss 一对多拒绝 + collision report + ET 日界 / provider 缺失 / 跨日同标题 / 手工 URL fixture。
+5. Iris：断流、空数据、stale、`prefers-reduced-motion`、窄屏、键盘检查；`graph_version` mismatch 不动画。
+6. 全量 `unittest discover`、`compileall`、`uv lock --check`、`git diff --check`、台账机检、00 册索引 / CHANGELOG / 日志 / workspace memory 同步。
+7. 不夹带 `.cursor/`、`docs/partnerships/` 等无关未跟踪内容。
+
+### 20.7 回滚
+
+- 按实现批次的 commit `git revert`；P2 可单独停用 SSE 端点并保留 `strategy_events` 表（append-only，无读取方即无害）；P3 按 §6.3 逐阶段回退（N3 → legacy reader，N2 → 切回旧 writer，N1 → 删新表，**legacy 数据不动**）。
+- 若依赖 backup/restore，须先解决 `backup.py TABLES` 未含新表的问题，否则 restore 后 canonical 数据缺失。
+- P2 / P3 分开提交、分开回滚，避免一次 revert 同时抽掉事件与新闻两条链。
+
+### 20.8 批准 §20 时需一并确认的实现口径（非新裁定、非全局 D 号）
+
+这些是**实现口径**，不改变 §19 的任何裁定；若操作者认为其中某条实为决策，需另行裁定而非默认通过：
+
+1. `published_day` 时区口径确认沿用 §6.2 的 `America/New_York`（§20.1 快照按 UTC 日界推算，两者可能不同）。
+2. `strategy_events` 的 `payload jsonb` 是否允许携带自由文本 `reason`（建议只允许结构化 `reason_code`，自由文本留在 draft.reason）。
+3. P2 SSE 端点命名与是否复用 `/api/logs` 的 `trail_recent()` 订阅骨架（建议新端点，避免与日志流混淆）。
+4. P3 是否把新表加入 `backup.py TABLES`（建议加入，但会扩大备份契约，需明确授权）。
+5. P2 / P3 的迁移号是否按 `056` / `057` 顺序分配，或按实际实现先后取当时空号（建议后者，本节不预占）。
+
+### 20.9 关联
+
+- 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`（§17/§18 P1 交付）、`C-20261125-2`（§19 Round A 裁定）。
+- 本节是 **V2-P2 / V2-P3 实现批次的前置契约**；未获操作者批准前零代码。
+- 并行未决：Q7–Q12 / Q14（P4–P6）、两个启动阻塞运维轮、D111 的 7799 安全重启与 IB Gateway 可用性。
