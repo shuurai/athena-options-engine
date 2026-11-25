@@ -104,13 +104,11 @@ Trim confidence must be at or below close confidence, and close confidence at or
 
 ## Pages
 
-`/portfolio-analysis` sits under Cockpit. Two columns: the report keeps one third, Advisor actions takes the rest.
+`/iris` sits under Core logic; `/portfolio-analysis` is a backward-compatible alias. The P1 page is a read-only architecture graph with a right-side action rail that reuses existing `/drafts`. Advisor report content is Strategy 2 evidence, not a second action list; the former two-column Advisor actions table is retired from the page.
 
-The report, when the advisor is on, shows RISK OFF, CAUTION, or RISK ON from the highest non-hold confidence, the guidance list, and a Semiconductor/AI versus Other count. Off, it says to turn the advisor on under Settings → Advisor.
+The report, when the advisor is on, shows RISK OFF, CAUTION, or RISK ON from the highest non-hold confidence, the guidance list, and a Semiconductor/AI versus Other count. Off, it says to turn the advisor on under Settings → Advisor. Pending draft ids still link to `/drafts`; legacy drafts show `insufficient_provenance` because no strategy / factor / run identity is persisted.
 
-The actions table lists each open position. The symbol links to `/positions`. A pending draft id links to `/drafts`. A pending `BUY` or `OPEN_CSP` whose symbol is not already in the book is an extra buy or long row.
-
-`/orchestration` keeps the signaled-entry chain. A side path is Guidance → Advisor → Manage, joining Approve. `Narrator`, `ManageExplainer`, and `AdvisorExplainer` are editable prompt cards on that page. The standing text lives in `packages/settings`.
+`/orchestration` keeps the signaled-entry chain. Its prompt cards use two independent columns with Trade in the right column, avoiding shared row-track gaps. A side path is Guidance → Advisor → Manage, joining Approve. `Narrator`, `ManageExplainer`, and `AdvisorExplainer` are editable prompt cards on that page. The standing text lives in `packages/settings`.
 
 ## Store
 

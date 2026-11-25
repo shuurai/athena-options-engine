@@ -752,9 +752,9 @@ class TestWiring(unittest.TestCase):
         body = text.split("def _settings(", 1)[1].split("def _prediction_page", 1)[0]
         self.assertLess(body.index("</form>"), body.index("_vix_card(conn, account)"))
 
-    def test_portfolio_analysis_appends_the_regime_card(self):
+    def test_iris_page_appends_the_regime_card(self):
         text = (ROOT / "apps/orchestrator/src/athena_orchestrator/pages.py").read_text()
-        body = text.split("def _portfolio_analysis_page", 1)[1].split("\ndef ", 1)[0]
+        body = text.split("def _iris_page", 1)[1].split("\ndef ", 1)[0]
         self.assertIn("_regime_card(conn, account)", body)
         self.assertIn('f"{regime}"', body)  # actually interpolated, not just fetched
 

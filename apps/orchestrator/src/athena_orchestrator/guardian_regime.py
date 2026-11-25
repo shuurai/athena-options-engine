@@ -290,7 +290,7 @@ _DIMENSION_LABELS = (
 
 
 def render_card(conn, account: str) -> str:
-    """Pure-ish HTML for /portfolio-analysis. Every dynamic cell escaped."""
+    """Pure-ish HTML for Iris. Every dynamic cell escaped."""
     from html import escape
 
     try:

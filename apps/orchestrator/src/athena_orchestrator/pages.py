@@ -204,7 +204,8 @@ def build(conn, path: str, query: dict) -> dict | None:
         "/orders": _orders_page,
         "/book": _book_page,
         "/guard": _guard_page,
-        "/portfolio-analysis": _portfolio_analysis_page,
+        "/iris": _iris_page,
+        "/portfolio-analysis": _iris_page,
         "/accounts": _accounts,
         "/risk": _risk,
         "/prediction": _prediction_page,
@@ -1673,9 +1674,9 @@ def _position_heatmap(rows: list[dict], intents: dict[str, str]) -> str:
     )
 
 
-def _portfolio_analysis_page(conn, account: str, query: dict) -> dict:
+def _iris_page(conn, account: str, query: dict) -> dict:
     if not account:
-        return _html("Portfolio Analysis", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
+        return _html("Iris", "No account is configured.", '<div class="card"><p>No account is configured.</p></div>', [])
     settings = load_active(conn, account)
     rows = _position_rows(conn, account)
     from athena_strategy.advisor import today_signals
@@ -1683,26 +1684,48 @@ def _portfolio_analysis_page(conn, account: str, query: dict) -> dict:
     day = datetime.now(HKT).date()
     signals = today_signals(conn, account, day)
     report = _advisor_report(conn, account, settings, rows, signals, day)
-    actions = _advisor_actions_table(conn, account, settings, rows, signals, day)
     # R7 (D69): a sibling card, never a third column. Read-only observation.
     from athena_orchestrator.guardian_regime import render_card as _regime_card
+    from athena_orchestrator import iris_view
 
     regime = _regime_card(conn, account)
+    snap = iris_view.snapshot(conn, account, settings)
+    header = iris_view.render_header(snap)
+    graph = iris_view.render_graph(snap)
+    guardian = iris_view.render_guardian_band(snap)
+    rail = iris_view.render_draft_rail(_pending_drafts(conn, account))
     body = (
-        '<div class="settings-cols analysis">'
-        f'<div class="settings-col">{report}</div>'
-        f'<div class="settings-col">{actions}</div>'
-        "</div>"
+        '<div class="iris-page">'
+        f"{header}"
+        '<div class="iris-grid">'
+        '<div class="iris-main">'
+        f"{graph}"
+        '<div class="iris-evidence"><h2>Strategy 2 evidence</h2>'
+        f'<p class="slot-note">Advisor signals and positions are shown as evidence only; actions stay in the single draft rail.</p>'
+        f"{report}</div>"
+        f"{guardian}"
         f"{regime}"
+        "</div>"
+        f"{rail}"
+        "</div>"
+        "</div>"
     )
     enabled = settings.advisor.enabled
-    chips = [("info", "ADVISORY" if enabled else "ADVISOR OFF")]
+    chips = [
+        ("info", "STATIC P1"),
+        ("", "ADVISORY" if enabled else "ADVISOR OFF"),
+    ]
     return _html(
-        "Portfolio Analysis",
-        "Advisor verdicts against your thesis and market guidance. Drafts stay pending until you Approve.",
+        "Iris",
+        "Athena's eyes. Follow inputs through factors and strategy boundaries into the one existing draft queue. No live animation in P1.",
         body,
         chips,
     )
+
+
+def _portfolio_analysis_page(conn, account: str, query: dict) -> dict:
+    """Backward-compatible alias. Iris is the canonical product name."""
+    return _iris_page(conn, account, query)
 
 
 def _advisor_report(conn, account, settings, rows, signals, day) -> str:
@@ -3998,6 +4021,9 @@ def _post_prediction(conn, account: str, form: dict, actor: str) -> dict:
     return _save_live(conn, account, payload, actor, "saved prediction", page=_prediction_page)
 
 
+_ORCH_MOBILE_AGENT_ORDER = tuple(name for name in AGENT_ORDER if name != "Consolidator") + (TRADE_NAME,)
+_ORCH_RIGHT_AGENTS = frozenset({"News", "Strangle", "Call", "ManageExplainer", TRADE_NAME})
+
 _CYCLE_HELP = (
     "They are not one chain. Location and News run together and only emit tags. "
     "CSP, Strangle, Purchase, and Call each read that same tag set. They do not call one another. "
@@ -4022,9 +4048,11 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         max_contracts_per_symbol=3, min_rv_pctl_new_short=50, min_dte_new=7,
         max_short_opt_margin_pct=50, earnings_blackout_days=7,
     )))
-    cards = []
+    left_cards: list[str] = []
+    right_cards: list[str] = []
     side = ""
     for name in AGENT_ORDER:
+        mobile_order = _ORCH_MOBILE_AGENT_ORDER.index(name) + 1 if name in _ORCH_MOBILE_AGENT_ORDER else 0
         prompt = prompts[name]
         open_card = name == "Consolidator"
         fold = "" if open_card else (
@@ -4035,7 +4063,9 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
             "</svg></button>"
         )
         card = (
-            f'<form class="card agent{" collapsed" if not open_card else ""}" method="post" action="/orchestration">'
+            f'<form class="card agent{" collapsed" if not open_card else ""}" '
+            f'data-agent-name="{escape(name, quote=True)}" data-agent-order="{mobile_order}" '
+            f'style="--agent-order:{mobile_order}" method="post" action="/orchestration">'
             f"<h2><span>{escape(name)}</span>{fold}</h2>"
             '<div class="body">'
             f'<p class="role">{escape(AGENT_ROLES[name])}</p>'
@@ -4054,8 +4084,16 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         )
         if name == "Consolidator":
             side = card
+        elif name in _ORCH_RIGHT_AGENTS:
+            right_cards.append(card)
         else:
-            cards.append(card)
+            left_cards.append(card)
+    right_cards.append(
+        _trade_prompt_card(
+            prompts[TRADE_NAME],
+            _ORCH_MOBILE_AGENT_ORDER.index(TRADE_NAME) + 1,
+        )
+    )
     diagram = _chain_svg()
     picture = f'<div class="flow-diagram">{diagram}</div>' if diagram else ""
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
@@ -4069,8 +4107,10 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
         f"{picture}</div>"
         f"{side}"
         "</div>"
-        f'<div class="agent-grid">{"".join(cards)}</div>'
-        f"{_trade_prompt_card(prompts[TRADE_NAME])}"
+        '<div class="agent-columns">'
+        f'<div class="agent-col" data-agent-column="left">{"".join(left_cards)}</div>'
+        f'<div class="agent-col" data-agent-column="right">{"".join(right_cards)}</div>'
+        "</div>"
         "</div>"
     )
     return _html(
@@ -4081,10 +4121,12 @@ def _strategy(conn, account: str, query: dict, note: str = "") -> dict:
     )
 
 
-def _trade_prompt_card(prompt) -> str:
+def _trade_prompt_card(prompt, order: int = 10) -> str:
     note = "Used only by Auto Set Price on Universe. The cycle does not call this prompt."
     return (
-        '<form class="card agent" method="post" action="/orchestration">'
+        f'<form class="card agent" data-agent-name="{escape(TRADE_NAME, quote=True)}" '
+        f'data-agent-order="{order}" style="--agent-order:{order}" '
+        f'method="post" action="/orchestration">'
         f"<h2><span>{escape(TRADE_NAME)}</span></h2>"
         '<div class="body">'
         f'<p class="role">{escape(note)}</p>'

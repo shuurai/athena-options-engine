@@ -43,6 +43,7 @@ _MARK = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidd
   <path fill="none" stroke="#fff" stroke-width="4" d="M24 34L40 52"/>
 </svg>"""
 _MARK_HREF = " ".join(_MARK.split()).replace("#", "%23").replace('"', "'")
+IRIS_ALIASES = frozenset({"/iris", "/portfolio-analysis"})
 
 NAV_GROUPS = (
     ("View", ()),
@@ -50,7 +51,7 @@ NAV_GROUPS = (
         "Core logic",
         (
             ("/", "Cockpit"),
-            ("/portfolio-analysis", "Portfolio Analysis"),
+            ("/iris", "Iris"),
             ("/drafts", "Drafts"),
             ("/phase", "NFR board"),
             ("/audit", "Decisions"),
@@ -332,7 +333,9 @@ form.fill > .settings-cols {
 .flow h2 span { display: inline-flex; align-items: center; gap: 8px; }
 .flow .help-pop { left: 16px; right: auto; top: 42px; width: min(360px, calc(100% - 32px)); }
 .flow-diagram svg { display: block; width: 100%; height: auto; }
-.agent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.agent-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.agent-col { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.agent-col > form.agent { margin: 0; }
 .agent .role { font-size: 12px; color: var(--site-text-3); margin: 0 0 12px; line-height: 1.45; }
 .agent .body > button.btn { width: 100%; align-self: stretch; }
 .agent.collapsed h2 { margin-bottom: 0; }
@@ -372,7 +375,10 @@ tr.hit { cursor: pointer; }
   color: var(--site-text); background: #0a0c10; border: 1px solid var(--site-border); padding: 12px;
 }
 @media (max-width: 900px) {
-  .cycle-split, .agent-grid { grid-template-columns: 1fr; }
+  .cycle-split { grid-template-columns: 1fr; }
+  .agent-columns { display: flex; flex-direction: column; }
+  .agent-col { display: contents; }
+  .agent-col > form.agent { order: var(--agent-order, 99); }
   .cycle-split > form.agent { min-height: auto; overflow: visible; display: block; }
   .cycle-split label.prompt { display: block; min-height: auto; }
   .cycle-split textarea.prompt { height: auto; min-height: 140px; resize: vertical; }
@@ -760,6 +766,48 @@ select:focus-visible {
 .guard-ack .btn { font-size: 11px; padding: 4px 10px; }
 .guard-error { border-color: #7f1d1d; }
 .guard-error pre { white-space: pre-wrap; font-size: 11px; color: var(--site-text-3); }
+/* Iris P1: static architecture graph. No connector animation in this phase. */
+.iris-page { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
+.iris-header { flex: none; }
+.iris-stats { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px 14px; margin: 10px 0 8px; }
+.iris-stats > div { min-width: 0; }
+.iris-stats .k { display: block; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--site-text-4); font-family: var(--font-mono); }
+.iris-stats .v { display: block; margin-top: 3px; font-size: 13px; color: var(--site-text); overflow-wrap: anywhere; }
+.iris-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; align-items: start; }
+.iris-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.iris-evidence { min-width: 0; }
+.iris-evidence h2 { margin-bottom: 6px; }
+.iris-band-line { margin: 6px 0; color: var(--site-text-2); font-size: 12.5px; line-height: 1.45; }
+.iris-draft-rail { min-width: 0; }
+.iris-draft-rail .scroll-y { max-height: 520px; overflow: auto; }
+.iris-graph-wrap { border: 1px solid var(--site-border); background: #0b0e13; padding: 8px; overflow-x: auto; }
+.iris-graph { display: block; width: 100%; min-width: 900px; height: auto; }
+.iris-edge { fill: none; stroke: #4b5768; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.iris-edge[data-flow="data"] { stroke: #60a5fa; }
+.iris-edge[data-flow="factor"] { stroke: #f472b6; }
+.iris-edge[data-flow="action"] { stroke: #16c784; }
+.iris-edge[data-flow="approval"] { stroke: #a78bfa; }
+.iris-edge[data-flow="execution"] { stroke: #93c5fd; }
+.iris-edge[data-flow="shadow"], .iris-edge[data-flow="direct"] { stroke: #f59e0b; }
+.iris-node rect { fill: #10141b; stroke: #2b3441; stroke-width: 1.2; }
+.iris-node text { font-family: var(--font-mono); pointer-events: none; }
+.iris-node-label { fill: var(--site-text); font-size: 12px; font-weight: 600; }
+.iris-node-detail { fill: var(--site-text-4); font-size: 10px; }
+.iris-node[data-status="ready"] rect { stroke: #16c784; }
+.iris-node[data-status="partial"] rect { stroke: #f59e0b; }
+.iris-node[data-status="no_data"] rect { stroke: #ef4444; }
+.iris-node[data-status="unknown"] rect { stroke: #64748b; stroke-dasharray: 4 3; }
+.iris-node[data-status="configured"] rect { stroke: #60a5fa; }
+.iris-node[data-status="shadow"] rect { stroke: #f59e0b; stroke-dasharray: 6 4; }
+.iris-node[data-status="operator"] rect { stroke: #a78bfa; }
+.iris-node:focus rect { stroke: #93c5fd; stroke-width: 2.2; }
+@media (max-width: 1100px) {
+  .iris-grid { grid-template-columns: minmax(0, 1fr); }
+  .iris-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .iris-graph * { animation: none !important; transition: none !important; }
+}
 """
 
 
@@ -1348,7 +1396,8 @@ def _layout(
         if group == "View":
             links.append(_view_switch(conn))
         for href, label in items:
-            current = " class=\"active\"" if href == path else ""
+            iris_active = href == "/iris" and path in IRIS_ALIASES
+            current = " class=\"active\"" if href == path or iris_active else ""
             badge = badges.get(href)
             mark = ""
             if badge:

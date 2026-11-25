@@ -219,7 +219,7 @@ def render_run_history(rows: Sequence[Mapping]) -> str:
         "<th>Day (ET)</th><th>Run</th><th>Fire (HKT)</th>"
         "<th>Portfolio</th><th>Breaches</th><th>Status</th>"
         "</tr></thead><tbody>" + "".join(lines) + "</tbody></table>"
-        '<p class="slot-note">Latest A / B grades. Run C is the midday regime observation on Portfolio Analysis.</p>'
+        '<p class="slot-note">Latest A / B grades. Run C is the midday regime observation on Iris.</p>'
         "</div>"
     )
 

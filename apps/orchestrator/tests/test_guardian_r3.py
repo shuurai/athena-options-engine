@@ -420,7 +420,7 @@ class TestRenderRunHistory(unittest.TestCase):
     def test_run_c_location_is_visible(self):
         html = gr.render_run_history([{"trade_day": "2026-07-01", "run": "A"}])
         self.assertIn("Latest A / B grades.", html)
-        self.assertIn("Run C is the midday regime observation on Portfolio Analysis.", html)
+        self.assertIn("Run C is the midday regime observation on Iris.", html)
         self.assertNotIn("reserved for R7", html)
 
     def test_dynamic_text_is_escaped(self):

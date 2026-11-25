@@ -2,6 +2,7 @@
 
 **状态**：Planning / 待裁定；本册只合并现状证据、目标契约与实施顺序，不授权实现。
 **证据截点**：2026-11-24，代码基线 `56739ce`；数据库只读快照见 §2.3。
+> **状态推进（2026-11-25）**：§17 授权的 **V2-P1 静态 Iris ＋ Orchestration 独立双列已交付并验证**，交付记录见 §18；V2-P2–P7 与 V2-Q1–Q15 仍待裁定。上行「不授权实现」原句保留为 `C-20261124-11` 规划批次的历史状态，不改写。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -624,3 +625,80 @@ reason_codes[] / input_hash / factor_version
 ## 16. 本批交付状态
 
 本册当前交付的是 **现状研究 + v2 目标计划 + 待裁定契约**。下一步不是直接开发，而是先确认 §1、§3、§4、§10 与 §13；确认后再为对应阶段建立全局 D 决策、迁移号和实现台账。
+
+> **状态推进（2026-11-25）**：操作者随后下达 `Please start the implementation for me.` 本册据此进入 **V2-P1 实现批次**。该指令只授权下述 P1 范围，不等于逐项批准 V2-Q1–Q15、P2–P7、新闻迁移、事件流或 Strategy 3 交易化。§14 的「不在本批实现 Iris」专指 `C-20261124-11` 规划批次，历史句保留不改写。
+
+---
+
+## 17. V2-P1 实现前置契约（2026-11-25）
+
+### 17.1 本批授权范围
+
+1. **命名与路由**：新增 canonical `/iris`；`/portfolio-analysis` 保留 GET alias；导航显示 `Iris`；两个路径都高亮同一导航项。
+2. **静态架构图**：服务端生成版本化 graph registry，使用稳定 `data-node-id / data-edge-id / data-source / data-target`；本批不含 JS、SSE、polling 或 connector animation。
+3. **只读 snapshot**：只读取现有 `market_bars / news_events / iv_marks / symbol_phases / advisor_signals / regime_labels / drafts / approvals / orders / order_events / guardian_alerts` 等现有表或纯 helper；禁止调用 Guardian `sync()`、VIX sync、Advisor `run_advisor()`、draft `decide()`、任何 `commit()` 或 IB 连接。
+4. **统一 draft rail**：右侧行动列表只读 `_pending_drafts` 一类已有 pending draft 查询，链接回 `/drafts`；不创建 `iris_actions`、不复制审批按钮、不新建状态字段。
+5. **旧行动面收敛**：旧 `Advisor actions` 表从页面退役；Advisor report 保留为 Strategy 2 evidence card。Run C regime card 保留为只读 Guardian side band。
+6. **legacy provenance**：当前 drafts 没有 `strategy_id / factor_version / input evidence / run_id`；静态图与 rail 对任何试图反查的 legacy action 显示 `insufficient_provenance`，不按 tactic 猜测血缘。
+7. **Orchestration**：两列独立 stack，Trade 为右列最后一张卡；展开卡片只推动本列；移动端恢复原阅读顺序；POST action、hidden agent、settings save 与账号作用域不变。
+8. **Guardian**：只呈现现有 read-only grade / alert / regime 信息；Guardian 不画成 Strategy 4，不产生 actions。manual / liquidate / external order 以 operator direct path 文字标注，不接入策略审批绿链。
+
+### 17.2 明确不做
+
+- 不实现 `strategy_events`、SSE replay、动画、自由日志解析、事件写失败策略或 graph live status。
+- 不改新闻 schema，不跑 news backfill，不处理 DSH / dismiss dual-write。
+- 不实现周线 SMA、Strategy 3 shadow、历史评估或 bearish 交易工具。
+- 不改 watchlist、settings schema、migrations、drafts / approvals / orders 状态机、engine cycle、Telegram 或运行中的 7799 进程。
+- 不在本批分配全局 D 号，不改写 D1–D111 / 112 节点 / 54 条裁定。
+
+### 17.3 验收与回滚
+
+- 新增 P1 单测覆盖：Iris title / route / alias、nav active、静态 graph 节点与边、无动画标记、统一 draft rail、legacy provenance、Run C 只读、无写入副作用、Trade 右列、双列独立、移动端顺序、POST 语义、旧文案同步。
+- 更新受影响 legacy tests 的页面名称与 Run C 文案；保留 D111 英文固定 UI、表格、footnote、动态业务 reason escape 与窄屏 CSS 回归。
+- 运行新增 focused suite、全量 `unittest discover`、`compileall`、`uv lock --check`、`git diff --check`、台账机检；做 targeted mutation traps 并逐字节还原。
+- 真实 PostgreSQL 只做只读或事务内 rollback 验证；不因为 UI 批次重启操作员正在使用的 console。
+- 回滚：按本批 commit `git revert`；Iris 路由可单独停用并保留 `/portfolio-analysis` 原入口；Orchestration 列调整仅回滚渲染，不动 prompt settings。
+
+---
+
+## 18. V2-P1 交付记录（2026-11-25, `C-20261125-1`）
+
+| 项 | 内容 |
+|---|---|
+| 状态 | ✅ **已交付并验证**。仅 §17 授权的静态 Iris 与 Orchestration 独立双列；P2–P7、V2-Q1–Q15、新闻迁移、事件流、Strategy 3 交易化均**未启动** |
+| 命名与路由 | canonical `/iris`；`/portfolio-analysis` 保留为 GET alias（`_portfolio_analysis_page()` 退化成薄包装）；导航只显示一条 `Iris`，两个路径共用同一 active 高亮（`console.IRIS_ALIASES`） |
+| 静态图 | 新 `iris_view.py`：版本化 `GRAPH_VERSION = "iris-p1-static-v1"`；22 个节点 / 23 条边，稳定 `data-node-id / data-edge-id / data-source / data-target / data-flow`；状态只用 `no_data / partial / ready / unknown / shadow / configured / idle / operator`；shadow / direct 边虚线；无 JS、SSE、polling、connector animation |
+| 只读 snapshot | 只发 `SELECT`，读 13 张现有表；显式 `daily_gap_state = "unknown"`、`run_evidence = "unavailable"`；零 `commit()` / `rollback()`、零 Guardian `sync()`、零 VIX sync、零 Advisor `run_advisor()`、零 draft `decide()`、零 IB 连接 |
+| 统一行动面 | 右侧 rail 复用 `_pending_drafts()`，链接回 `/drafts`；legacy draft 一律 `insufficient_provenance`，不按 tactic 猜血缘；旧 `Advisor actions` 表从页面退役，Advisor report 降为 Strategy 2 evidence；Run C 与 Guardian 为只读 side band，Guardian 不画成 Strategy 4；manual / liquidate / external 标为 operator direct path |
+| Orchestration | `.agent-grid` → `.agent-columns` 两个独立 flex stack；Trade 为右列最后一张卡；卡片带 `data-agent-name / data-agent-order / --agent-order`，窄屏 `order: var(--agent-order, 99)` 恢复原阅读顺序；POST `action="/orchestration"`、hidden `agent`、settings save 与账号作用域一字未改 |
+| 零改动边界 | 零迁移（仍 51）、零 `uv.lock` 变动、零 Settings 字段、零新数据源、零 §1／§6 修订、零全局 D 号（D1–D111 / 112 节点 / 54 裁定不变）、零运行引擎重启 |
+| 实测发现 | **真实 PostgreSQL 才暴露的 bug**：`LIKE 'VIX%'` 中的裸 `%` 被 psycopg 当成占位符，抛 `ProgrammingError: only '%s', '%b', '%t' are allowed as placeholders`。fake conn 单测无法捕获；已改为 `LIKE 'VIX%%'` 并新增 `test_like_wildcard_is_escaped_for_psycopg` 钉死。这是本批唯一的生产代码缺陷修复 |
+| 遗留缺口（诚实登记） | ① 无结构化 run event ⇒ 因子节点恒 `unknown`、graph 无 live status；② Strategy 3 / weekly SMA 恒 `shadow`，其边为虚线；③ `market_bars` 无 ib-daily 时 52W 显示 `no_data`，内部 gap 仍 `unknown`；④ legacy draft 无 `strategy_id / factor_version / input evidence / run_id`，只能 `insufficient_provenance`；⑤ `/skill` 页与文档中的 `8788` 示例 URL 属既有 display-only 不一致，本批不动；⑥ 运行中的 7799 console 仍是改动前代码，D111 自动 VIX backfill 与本批 UI 需未来安全重启才生效 |
+| 回滚 | `git revert <sha>`；只回滚渲染与新增模块，不动 prompt settings、drafts / approvals / orders 数据。Iris 路由可单独停用并保留 `/portfolio-analysis` 原入口 |
+
+### 18.1 实测验证块
+
+```
+新增 focused suite   apps.orchestrator.tests.test_iris_p1          63/63 OK
+受影响 legacy suites test_guardian_r3 + r7 + test_d111_vix        211/211 OK
+全量回归             unittest discover -p "test_*.py"              810/810 OK (skipped=2)
+                     (基线 747 + 63；无失败、无新增 skip)
+mutation traps       28/28 TRAPPED，逐字节 sha256 还原一致
+                     (含针对 LIKE 'VIX%%' 修复的专项 trap)
+compileall           OK
+uv lock --check      Resolved 29 packages (无变动)
+git diff --check     0
+台账机检             logs 13 个 / 条目 123 条 / 索引 123 行 ✓
+真实 PostgreSQL      athena-pg 51 migrations；BEGIN READ ONLY
+                     snapshot 25 keys → 22 nodes / 23 edges
+                     6 张表前后 count 不变，ROLLBACK 零写入
+                     pages._iris_page(DUR253115) 20037 bytes，零 CJK
+                     header / graph / Strategy 2 evidence / Guardian band / rail 全渲染
+```
+
+### 18.2 关联
+
+- 台账 `C-20261125-1`（`logs/2026-11-25.md`）＋ `CHANGELOG.md` 索引行。
+- 上游契约 §17；上游规划批次 `C-20261124-11`（§16）。
+- 页面契约 `docs/athena/13-portfolio-advisor.md`；导航与 CSS `console.py`；页面 `pages.py`。
+- 下一阶段仍为 **用户裁定 V2-Q1–Q15**，不是自动进入 P2。

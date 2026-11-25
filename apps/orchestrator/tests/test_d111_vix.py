@@ -338,12 +338,12 @@ class TestEnglishConsistentUI(unittest.TestCase):
         self.assertIsNone(CJK.search(body + chips))
         self.assertIn("live grading", chips)
         self.assertNotIn("read only", chips)
-        self.assertIn("Run C is the midday regime observation on Portfolio Analysis.", body)
+        self.assertIn("Run C is the midday regime observation on Iris.", body)
         self.assertIn('<table class="data">', body)
         self.assertIn('<p class="slot-note">', body)
         self.assertNotIn("guard-history", body)
 
-    def test_portfolio_analysis_fixed_copy_is_english_and_consistent(self):
+    def test_iris_fixed_copy_is_english_and_consistent(self):
         found = {
             "trade_day": date(2026, 11, 24), "run": "C", "label": "insufficient_data",
             "close_bias": "insufficient_data", "evidence": {},
@@ -357,7 +357,7 @@ class TestEnglishConsistentUI(unittest.TestCase):
             patch("athena_strategy.advisor.today_signals", return_value={}),
             patch.object(gr, "latest_label", return_value=found),
         ):
-            body = pages._portfolio_analysis_page(_RecordingConn(), "U1", {})["body"]
+            body = pages._iris_page(_RecordingConn(), "U1", {})["body"]
         self.assertIsNone(CJK.search(body))
         self.assertIn("Midday Regime · Run C", body)
         self.assertIn("VIX dimensions known 1/3", body)
