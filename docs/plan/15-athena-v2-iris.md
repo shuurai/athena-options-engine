@@ -1527,3 +1527,53 @@ pyproject.toml force-include                      零改动（hatch 自动收 Py
 
 - 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`～`-8`（P1 / Round A / §20 / §21 / Round B / P2 / P3-1 / P3-2）、§26 落地前契约（`9fff99c`）。
 - 下游：**N3 激活 go/no-go**（§27.11）→ N4 legacy retirement（Q6 另行裁定）→ P4 → P5 → P6 → P7；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。
+
+---
+
+## 28. V2-P4 落地前契约（2026-11-25，`C-20261125-10`）
+
+本节是 **P4（日线 gap audit、周线聚合、SMA factor registry、Strategy 3 shadow 信号子集）的实现前契约**。依据：§10 `V2-P4` 行、§7.1 / §7.2、§8.2 / §8.4、§22.2 Q7 / Q8、§22.3 第 1–6 / 14 项。操作者已指示「go with your recommendation」，下列 R1–R7 按推荐口径冻结，实现批次照此执行；任何偏离须新开裁定。
+
+### 28.1 只读实测接缝（2026-11-25）
+
+| 事实 | 证据 |
+|---|---|
+| **live `market_bars` 为空（0 行）** | `127.0.0.1:55432`：`market_bars=0`、`iv_marks=0`、`regime_labels=1`、`drafts=0`；`calendar_marks` 仅 54 条 `kind='FED'`，**无任何 earnings marks** |
+| 无复权数据源 | `market_bars` 仅 `(symbol, ts, open, high, low, close, volume, source)`，无 adjusted 列；未发现 `ADJUSTED_LAST` 生产者 |
+| Iris 52W 节点现状 | `iris_view.snapshot()` 硬编码 `daily_gap_state: "unknown"`；P1 测试在两处 pin 该字面量 |
+| 包依赖 | `apps/orchestrator` 已依赖 `athena-strategy-nfr`，pure 模块可被 Iris 直接复用；`strategy-nfr` 已有 `simbars.py` 等纯模块先例 |
+| §22.5 硬门禁 | 「真实历史数据可用性是硬门禁」——IB Gateway 关闭、无 VIX 历史、smoke 库空 ⇒ P4 的数据面在 live 库上必然全为 `no_data` / `unknown` |
+
+**结论**：P4 的全部价值在 **pure 计算模块 ＋ §8.4 fixtures ＋ Iris 诚实显示**；live 数据面按 §22.3 第 14 项与 V2-I8 诚实输出 `no_data` / `unknown`，绝不为图形完整虚构数据。
+
+### 28.2 范围
+
+1. **日线 gap audit（Q7）**：pure 缺口检测器，六类缺口 `internal_gap` / `long_tail_gap` / `ipo_short_history` / `halt` / `zero_volume` / `corporate_action`，各带 `reason_code`；Iris 52W 节点用真实计算值替换硬编码 `unknown`。
+2. **周线聚合（Q8）**：从 `ib-daily` 日线按 `America/New_York` ISO 周聚合；open=首个完成日、high/low=周内极值、close=最后完成日、volume=求和；假日短周保留；未完成本周绝不参与确认。
+3. **SMA factor registry**：完成周 close 的 SMA20 / SMA50，带 `factor_version`。
+4. **Strategy 3 shadow 信号子集（Q9 第 1–6 / 14 项）**：每完成周每 symbol 输出 §8.2 记录（outcome / reason_codes / input_hash / factor_version）。
+5. **Iris 重放（只读）**：snapshot 增量只读；deterministic 重算即可重放 candidate / filtered / no_data。
+
+### 28.3 R1–R7 实现口径（推荐已冻结）
+
+| # | 口径 |
+|---|---|
+| **R1 交易日历** | 打包**确定性 NYSE/ET 会话日历**（stdlib-only：工作日 + 节假日规则含 Good Friday，无网络、无新依赖）；expected sessions 由该日历给出；用 2025–2026 已知假期 fixture 验证 |
+| **R2 Iris gap 状态机** | `unknown`（0 会话或日历覆盖不足，不可测量）/ `partial`（<252 会话或检出 ≥1 缺口）/ `complete`（窗口内 252/252 且零缺口）；替换硬编码字面量；pin 旧字面量的 P1 测试同步收紧而非删除 |
+| **R3 复权诚实** | shadow 模块显式接受 `adjustment_basis`；live 侧无复权生产者 ⇒ `adjustment_basis=None` ⇒ **所有 live 输出 `outcome=no_data` + `adjustment_unavailable`**（§22.3 第 14 项），绝不静默用未复权价；declared-adjusted fixtures 走通 candidate 路径 |
+| **R4 过滤器可得性** | SPX / VIX / earnings 输入缺失 ⇒ `outcome=no_data` + 专属 reason code（`spx_unavailable` / `vix_unavailable` / `earnings_calendar_unavailable`），缺失不是否定（V2-I8）；SPX 用**周线**口径（收盘 > 其周线 SMA50 且斜率 ≥ 0）；VIX 取信号周收盘分档（<15 跳过、15–20 `caution`、≥20 正常，边界归低档） |
+| **R5 outcome 真值序** | 优先级 `no_data` > `invalid` > `filtered` > `no_signal` > `candidate`；每个非 candidate 携带 `reason_codes[]`；只消费完成周、严格无 look-ahead；`hill_peak` 不在最后一周（§22.3 第 1 项） |
+| **R6 P4/P5 边界** | §22.3 第 7–13 项（入场窗口、工具参数、TP、持仓、优先级、NAV、连止）**一律不实现**；`instrument_availability` 输出 `deferred_p5`；VIX `caution` 只作标记、不减半预算（预算属 P5）；**零 drafts、零 orders、零预算消耗** |
+| **R7 零持久化** | **零迁移（无 `058`）**、shadow 逐次 on-read 重算、重放 = 确定性重算 + `input_hash`；live DB 零写入；数据出现时同一代码自动产出真实值 |
+
+### 28.4 验收门禁（实现批次）
+
+- §8.4 fixture 清单：普通周 / 假日短周 / 跨月跨年 / 缺周 / 未完成周 / 19-20 与 49-50 根边界 / hill 5/6/10/11 / slope 容差 / 回踩容差 / 蜡烛量能真值表 / 五条件逐一点失败 / SPX / VIX / earnings / liquidity 边界 / 六类缺口各一 / 日历假期边界。
+- `unittest discover` 全量绿；新增规则有破坏即失败的 mutation test；真实 PG 事务内 dry-run（Iris 只读，`ROLLBACK` 零写入）。
+- §10.1 公共门禁全过；同步 00 册索引、CHANGELOG、日志、memory；`.cursor/`、`docs/partnerships/` 不夹带。
+
+### 28.5 明确不做
+
+- 零迁移、零持久写入、零 engine 启动、零 7799 重启、零 IB Gateway 变更。
+- 不实现 §22.3 第 7–13 项；不做 eval 协议执行（P5）；不写 drafts / orders。
+- 不动 NFR 行为、不动 N3 开关（`SOURCE = LEGACY` 维持，Task #123 仍 open）。
