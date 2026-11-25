@@ -161,3 +161,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-25 | Freeze the V2-P4 shadow contract with R1-R7 conventions | [C-20261125-10](logs/2026-11-25.md#c-20261125-10) |
 | 2026-11-25 | Implement V2-P4 gap audit, weekly SMA and Strategy 3 shadow | [C-20261125-11](logs/2026-11-25.md#c-20261125-11) |
 | 2026-11-25 | Execute V2-P5 eval-v1 hard gate and record no-go verdict | [C-20261125-12](logs/2026-11-25.md#c-20261125-12) |
+| 2026-11-25 | Freeze the V2-P7 dead-code cleanup and doc closeout contract | [C-20261125-13](logs/2026-11-25.md#c-20261125-13) |

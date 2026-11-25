@@ -1709,3 +1709,42 @@ IB Gateway（7497/4001/4002）关闭，无外部数据源在拉取；7799 关闭
 
 - 上游：§22.4 / §22.5（`C-20261125-5` 协议冻结与硬门禁）、§29（`C-20261125-11`，P4 shadow 产物与诚实空态）。
 - 下游：**P7（固定顺序收尾）**；`eval-v1` 重跑等 §30.5 数据批次就绪后另开独立批次。
+
+## 31. V2-P7 落地前契约（已完成范围死代码清理与文档收口，2026-11-25，`C-20261125-13`）
+
+### 31.1 状态与范围
+
+固定顺序 **Step 6（跳过）/ Step 7 / V2-P7**。P6 已由 §30.6 裁定**不启动**（P5 = no-go），故本批直接进入 P7。P7 范围 = §10.1「**已完成范围的** legacy news reader 与旧页面死代码清理、文档收口」；门禁 P1 + P3 已满足，P5 no-go 不阻塞。**本契约零代码、零迁移、零 DB 写入**；实现批次独立 commit / rollback。
+
+### 31.2 只读调研结论（2026-11-25，全量引用扫描）
+
+- **无整模块死亡**：27 个 orchestrator 模块全部可从入口点或测试到达；唯一 console script 是 `athena-orchestrator`，无 `python -m athena_*` 调用。
+- **news 读路径无死亡重复品**：全部 17 处 SELECT reader 已统一经 `news_read.render()` / `score_sql()` 包装；写路径有意留在 legacy 表（N2 dual-write 生效中）；`news_backfill.py` / `news_reconcile.py` 是 N3 激活前提工具。**N3 仍为 DARK LAUNCH（`SOURCE = LEGACY`，Task #123 open），legacy 读路径全部保留，N4 retirement 另需裁定——本批不碰任何 news SQL。**
+- **无未登记状态表**：代码引用的全部表都能在 53 个 migration 中找到来源（唯一例外 `schema_migrations` 由 `migrate.py` 自建自管）。
+- **旧链接仍可达**：`/portfolio-analysis` 与 `/iris` 直映射同页、`/orchestration` ↔ `/strategy` 双别名、导航无孤儿链接。
+
+### 31.3 清单 W1–W7（实现批次口径，逐项冻结）
+
+| # | 动作 | 目标 | 测试同步 |
+|---|---|---|---|
+| W1 | 删除零引用死函数 | `pages._contract_line`、`pages._secret`、`cockpit._money`、`runtime.note_step` | 无测试引用，无需同步 |
+| W2 | 删除生产死亡 setter | `runtime.note_cycle`（生产 cycle 一律经 `begin()` 设置） | `test_rules.py` 移除 import 与一处调用（该调用被紧随的 `begin(4)` 覆盖，行为不变） |
+| W3 | 删除测试专用薄包装 | `pages._audit_result_tag`（= `_audit_result_html({"result":…, "status":…})` 逐字包装） | `test_rules.py` 5 处调用改写为直接构造 dict 调 `_audit_result_html`，断言语义逐字不变 |
+| W4 | 删除旧 Advisor 行动表残件 | `pages._advisor_actions_table`（P1 已将其从页面退役，路由与调用零残留）＋ 仅被它引用的 `pages._decimal_or_none` ＋ 仅服务它的死 CSS `.advisor-reason { white-space: pre-wrap; }` | `test_d111_vix.py` 的 XSS 转义测试**改写到 live 路径 `_draft_card`**（patch 依赖，断言 `<script>` 转义 + `white-space:pre-wrap` 内联样式），CSS 断言移除；**覆盖不降级：live 渲染路径此前无专门转义测试，本批补上** |
+| W5 | 删除不可达别名包装 | `pages._portfolio_analysis_page`（路由表直映射 `_iris_page`，包装函数零调用者；§18「alias 经由该包装」与路由实现的事实不一致由此消除，§18 原句 verbatim 保留、§32 加 supersession 说明） | 删除 P1 测试 `test_alias_helper_is_a_thin_backward_compatible_wrapper`（其存在仅为钉住包装本身；`test_route_map_points_both_paths_at_iris_page` 已覆盖别名语义） |
+| W6 | **明确保留**（有记录意图，非死代码） | `pages.method_switch_note`（docstring 自述 future chain_bs switch 占位 + 测试钉住）；`iris_events.listener_count / detach`（测试 API 面）；全部 news legacy 读写路径（dark launch 生效中）；`news_backfill` / `news_reconcile`；`_pending_drafts` / `_draft_links`（live 多处引用） | 不动 |
+| W7 | 文档收口 | 15 册头部第十二笔 + §32 交付记录；00 册 15 号索引终态（P2–P5 已交付、P6 未启动、P7 已交付）；CHANGELOG / logs / memory | — |
+
+### 31.4 退出条件核验口径（P7 验收）
+
+1. **单一行动入口**：draft rail 仍是唯一行动入口（P1 测试 `test_iris_page_has_exactly_one_action_rail` 等保持全绿）。
+2. **适用范围内单一 news read model**：17 处 reader 全部经 `news_read` 包装（`test_news_p3_n3` AST 断言保持全绿，本批不改任何 reader SQL）。
+3. **旧链接仍可达**：`/portfolio-analysis` 与 `/orchestration` 别名路由不变；导航无孤儿链接。
+4. **无未登记状态表**：零新表、零迁移（仍 53、无 `058`）。
+5. 全量 `unittest discover` 绿（测试总数变化如实记录）；台账机检、`git diff --check`、wheel 全绿；零持久写入、零 engine 启动、零 7799 重启。
+
+### 31.5 边界
+
+- 不碰 `news_events` / canonical 三表的任何 SQL；不切 `SOURCE`；不做 N4。
+- 不删 `method_switch_note` 等有记录意图的占位；不降级任何测试覆盖（W4 覆盖反而增加）。
+- 两个启动阻塞（`load_active()` 早于 `apply_migrations()`、`var/backups` 996 快照 prune）仍属独立运维轮。
