@@ -155,3 +155,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-25 | Approve V2-P2/P3 contract and ratify five §20.8 items | [C-20261125-4](logs/2026-11-25.md#c-20261125-4) |
 | 2026-11-25 | Ratify remaining seven V2-Q rulings and freeze eval-v1 | [C-20261125-5](logs/2026-11-25.md#c-20261125-5) |
 | 2026-11-25 | Implement V2-P2 strategy events, SSE and truthful Iris animation | [C-20261125-6](logs/2026-11-25.md#c-20261125-6) |
+| 2026-11-25 | Implement V2-P3 N1/N2 canonical news tables, UTC identity and dual-write | [C-20261125-7](logs/2026-11-25.md#c-20261125-7) |

@@ -24,6 +24,7 @@ from athena_settings.resolve import deepseek_token, scoring_model
 from athena_strategy.dsh import enrich_sentiment, read_article
 from athena_strategy.tags import EARNINGS_NEAR, FED_EVENT, NEWS_WASH
 from athena_strategy.types import NEWS_TYPE_CODES
+from athena_store import news_canonical as nc
 
 log = logging.getLogger("athena.news")
 ET = ZoneInfo("America/New_York")
@@ -104,8 +105,17 @@ def ingest_news(conn: psycopg.Connection, symbols: list[str], settings: Settings
     return stored
 
 
-def dismiss_event(conn: psycopg.Connection, fingerprint: str) -> bool:
-    """A false alarm stays stored and no longer counts toward wash density."""
+def dismiss_event(
+    conn: psycopg.Connection, fingerprint: str, association_id: str | None = None
+) -> bool:
+    """A false alarm stays stored and no longer counts toward wash density.
+
+    V2-P3 / §20.3.4: the compat entry resolves ONE association. A fingerprint
+    mapping to several associations is refused unless the caller supplies an
+    explicit association_id. Batch dismiss is never allowed.
+    """
+    if association_id is None:
+        association_id = nc.resolve_association_id(conn, fingerprint)
     row = conn.execute(
         """
         UPDATE news_events
@@ -115,13 +125,18 @@ def dismiss_event(conn: psycopg.Connection, fingerprint: str) -> bool:
         """,
         (fingerprint,),
     ).fetchone()
+    if association_id:
+        nc.mark_dismissed(conn, association_id)
     conn.commit()
     return row is not None
 
 
 def store_manual(conn: psycopg.Connection, symbol: str, title: str) -> int:
     """Store one pasted headline. The next phase pass can tag it."""
-    count, _fresh = _save_headlines(conn, symbol.upper(), "manual", [(datetime.now(UTC), title, "")])
+    count, _fresh = _save_headlines(
+        conn, symbol.upper(), "manual", [(datetime.now(UTC), title, "")],
+        day_precision="ingest_fallback",
+    )
     conn.commit()
     return count
 
@@ -279,10 +294,12 @@ def parse_yahoo_rss(xml_text: str, now: datetime) -> list[tuple[datetime, str, s
         if not title:
             continue
         raw = item.findtext("pubDate")
-        when = now
+        when = nc.to_utc(now)
         if raw:
             parsed = parsedate_to_datetime(raw)
-            when = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+            # §21.3: a naive provider timestamp is NOT assumed to be UTC.
+            # Fall back to the ingestion instant instead of guessing a zone.
+            when = nc.to_utc(parsed) if parsed.tzinfo is not None else nc.to_utc(now)
         rows.append((when, title, link))
     return rows
 
@@ -506,13 +523,20 @@ def _insert_event(
     url: str,
 ) -> int:
     fingerprint = hashlib.sha256(f"{symbol.upper()}|{title.lower()}".encode()).hexdigest()[:24]
+    when = nc.to_utc(datetime.now(UTC))
     result = conn.execute(
         """
         INSERT INTO news_events (fingerprint, ts, symbol, source, event_type, sentiment, title, url)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (fingerprint) DO NOTHING
         """,
-        (fingerprint, datetime.now(UTC), symbol, source, event_type, sentiment, title, url),
+        (fingerprint, when, symbol, source, event_type, sentiment, title, url),
+    )
+    nc.dual_write(
+        conn, fingerprint=fingerprint, ts=when, symbol=symbol, title=title,
+        source=source, url=url, event_type=event_type, sentiment=sentiment,
+        legacy_status="inserted" if result.rowcount else "conflict_existing",
+        day_precision="ingest_fallback",
     )
     return result.rowcount
 
@@ -532,19 +556,40 @@ def _save_headlines(
     symbol: str,
     source: str,
     rows: list[tuple[datetime, str, str]],
+    *,
+    day_precision: str = "provider",
 ) -> tuple[int, list[tuple[str, str, str]]]:
+    """Insert legacy rows plus canonical article/association/map (§6.3 N2).
+
+    ``day_precision`` distinguishes a real provider timestamp from an
+    ingestion fallback. A naive source timestamp is never assumed to be UTC:
+    it falls back to the ingestion instant and is marked as such.
+    """
     written = 0
     fresh: list[tuple[str, str, str]] = []
     for when, title, url in rows:
         sentiment, event_type = score_title(title)
         fingerprint = hashlib.sha256(f"{symbol.upper()}|{title.lower()}".encode()).hexdigest()[:24]
+        try:
+            effective = nc.to_utc(when)
+            precision = day_precision
+        except nc.NaiveTimestamp:
+            effective = nc.to_utc(datetime.now(UTC))
+            precision = "ingest_fallback"
         result = conn.execute(
             """
             INSERT INTO news_events (fingerprint, ts, symbol, source, event_type, sentiment, title, url)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (fingerprint) DO NOTHING
             """,
-            (fingerprint, when, symbol, source, event_type, sentiment, title, url),
+            (fingerprint, effective, symbol, source, event_type, sentiment, title, url),
+        )
+        nc.dual_write(
+            conn, fingerprint=fingerprint, ts=effective, symbol=symbol,
+            title=title, source=source, url=url, event_type=event_type,
+            sentiment=sentiment,
+            legacy_status="inserted" if result.rowcount else "conflict_existing",
+            day_precision=precision, original_ts=when if when.tzinfo else None,
         )
         written += result.rowcount
         if result.rowcount:

@@ -8,6 +8,7 @@
 > **状态推进（2026-11-25，第四笔）**：操作者逐项确认 §20.8 五条实现口径后，**§20 获批**，记录见 §21（`C-20261125-4`）。其中第 1 条由 `America/New_York` **显式窄修订为 UTC 日界**（Q5 identity 公式本身不变）；§6.2 / §19 / §20 历史 verbatim 行一律保留，只追加状态推进。**§20 获批 ≠ 授权实现**：P2 / P3 仍须各自独立实现批次、独立 commit / rollback；Q7–Q12 / Q14 仍未裁定。
 > **状态推进（2026-11-25，第五笔）**：操作者指令「stop asking me with choices … just give me one sequential order and get them done」，据此**一次性裁定剩余 7 条 Q7–Q12 / Q14**（§22，`C-20261125-5`），Q14 的 `eval-v1` 在看任何 holdout 结果前先验冻结。**V2-Q1–Q15 全部 15 条已裁定完毕**。此后按固定顺序实施 P2 → P3 → P4 → P5 → P6 → P7，每批独立验证与提交；P5 数据不足则 `no-go` 且不自动进入 P6。上行第三／四笔「Q7–Q12 / Q14 仍未裁定」是当时状态，保留不改写。
 > **状态推进（2026-11-25，第六笔）**：固定顺序的 **Step 2 / V2-P2 已实现、验证并独立交付**，记录见 §23（`C-20261125-6`）。`strategy_events` 窄表（migration `056`）、post-commit 幂等 emit、独立 `/api/iris/events` SSE、cursor replay → live 交接、`observation_gap`、真值动画与 60s reconciler 全部落地；全量 `879/879`（2 env skips）、`27/27` mutation traps、真实 PostgreSQL apply + 事务内 rollback、wheel 52 迁移内含 `056`。**P3–P7 仍未实现**；Q1–Q15 已裁定完毕不代表实现完毕。上行「每批独立验证与提交」是本批遵循的口径。
+> **状态推进（2026-11-25，第七笔）**：固定顺序的 **Step 3 / V2-P3 第一批（§6.3 N1 additive + N2 dual-write）已实现、验证并独立交付**，记录见 §24（`C-20261125-7`）。migration `057` 建 `news_articles / news_article_symbols / news_legacy_event_map` 三表；identity v1 按 §21.3 **UTC 日界**落地，解析入口 tz-aware → `.astimezone(UTC)` 校验、naive 不伪装 UTC；三处初始 writer + DSH sentiment + dismiss 双写；dismiss 明确 `association_id` 且一对多拒绝；三表加入 `backup.py TABLES`，`strategy_events` 排除。全量 `919/919`、`20/20` mutation traps、真实 PG apply + rollback、wheel 53 迁移。**§6.3 N3 canonical read cutover 与 N4 legacy retirement 仍是受六项对账硬门禁约束的后续阶段**，本批未切换 reader、未删 `news_events`；P4–P7 未开始。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1121,3 +1122,92 @@ wheel: athena_store-0.0.0-py3-none-any.whl -> 52 migrations, 056 present
 
 - 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`（§17/§18 P1）、`-2`（§19 Round A）、`-3`（§20 契约）、`-4`（§21 批准与五项口径）、`-5`（§22 Round B / `eval-v1`）。
 - 下游：V2-P3（`§20.3`，下一批，取当时空号 `057`）、P4 / P5 / P6 / P7 按固定顺序继续；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。
+
+---
+
+## 24. V2-P3 第一批交付记录（N1 additive + N2 dual-write，2026-11-25，`C-20261125-7`）
+
+### 24.1 状态与授权边界
+
+- 固定顺序 `Q7–Q12/Q14 → P2 → P3 → P4 → P5 → P6 → P7` 的 **Step 3 / V2-P3 第一批**。§6.3 明确把 P3 拆成 N1–N4 四个**分阶段、各有回滚**的阶段，本批实现 **N1（additive）＋ N2（same-transaction dual write）**，**不含 N3 canonical read cutover、不含 N4 legacy retirement**。按 §20.7 与 P2 分开 commit / rollback。
+- 授权来源：§20.3、§21.2 第 4 条（`backup.py TABLES`）、§21.3（UTC 日界窄修订 + 解析入口额外检查）、Q5 / Q6。**Q7–Q12 / Q14 已在 §22 裁定完毕**，本批不重新裁定；不分配全局 D 号，`D1–D111 / 112 节点 / 54 条裁定`、§1 不变；§6.2 / §19 / §20 / §21 / §22 历史 verbatim 行保留。
+- 运行时：**未重启 7799、未重试被取消的 `dxnrJP`、未启动任何 engine**；IB Gateway `7497/4001/4002` 仍关闭。`athena-pg` 本批唯一 schema 变更：`52 → 53` migrations，仅新增 `057_news_canonical.sql`。真实库验证全部在事务内 `ROLLBACK`，使用 `ZZP3*` 隔离 symbol，业务表零持久写入。
+
+### 24.2 实现清单
+
+| 文件 | 变更 |
+|---|---|
+| `migrations/057_news_canonical.sql` | 新增三表：`news_articles`（`UNIQUE (identity_version, identity_hash)`）、`news_article_symbols`（`UNIQUE (article_id, symbol)`）、`news_legacy_event_map`（`PRIMARY KEY (legacy_fingerprint, article_id)`）+ 4 索引；**不改 / 不删 `news_events`** |
+| `packages/store/src/athena_store/news_canonical.py` | 新增 identity v1（UTC 日界、`title.lower()`、`article_key`、symbol 移出 identity）、`to_utc()` / `NaiveTimestamp`、`dual_write()`（savepoint 内含）、`resolve_association_id()` / `AmbiguousAssociation`、`mark_dismissed()` / `mark_sentiment()`、`collision_report()`、`reconcile()` 六项 |
+| `packages/store/src/athena_store/backup.py` | `TABLES` 加入三张新闻表；**`strategy_events` 不加入**（§21.2 第 4 条） |
+| `packages/store/pyproject.toml` | force-include 新增 `057_news_canonical.sql`（wheel 实测 53） |
+| `packages/strategy-nfr/src/athena_strategy/news.py` | `parse_yahoo_rss()` 去掉 `parsed.replace(tzinfo=UTC)`，naive pubDate 回退 ingestion instant；`_insert_event()` / `_save_headlines()` / `store_manual()` 三处归一到 UTC 并 `dual_write`；`dismiss_event()` 支持显式 `association_id`、一对多拒绝 |
+| `packages/strategy-nfr/src/athena_strategy/dsh.py` | sentiment enrich 双写 canonical association（失败内含、不影响 legacy UPDATE） |
+| `apps/orchestrator/tests/test_news_p3.py` | **新增 40 项** P3 单测：identity / UTC 日界 / dual-write / dismiss / reconcile / collision / migration / wiring / §20.3.5 fixture |
+| 8 处历史断言 | `52 → 53`、`05*.sql` 列表加 `057`；**同步而非删除** |
+
+### 24.3 §20.3 契约逐条对照
+
+| §20.3 | 落地 | 证据 |
+|---|---|---|
+| 1 三表 additive | `057` 三表按 §6.1 模型；`news_events` 结构与主键零改动、未删除；legacy map 不并入 association 主键 | `test_migration_creates_three_tables_and_keeps_legacy`、真实 PG 9/13/12 列 |
+| 2 identity v1 | `normalized_title = title.lower()`（无 NFKC／空白折叠）、`published_day = UTC calendar day`、`article_key = sha256("v1|" + day + "|" + normalized_title)`、`identity_version = v1`；`effective_ts` 区分 `provider` / `ingest_fallback`、保留 `original_ts`；URL 只作证据；symbol 移出 identity | `TestIdentity`、ET `23:30 → 2026-11-26` fixture |
+| 3 dual-write 三处 | `_insert_event` / `_save_headlines`（含 `store_manual`）/ `ingest_url` 走 `_insert_event`；每处记录 `inserted` / `conflict_existing`；canonical 写入**不依赖** legacy `ON CONFLICT DO NOTHING` 是否插入；DSH sentiment 双写 | `test_conflict_existing_does_not_skip_canonical`、`TestMigrationAndWiring` |
+| 4 dismiss 语义 | 兼容入口解析明确 `association_id`；一个 fingerprint 映射多个 association ⇒ `AmbiguousAssociation` 且**在写 legacy 前拒绝**；禁止批量 dismiss | `TestDismiss`、真实 PG `AMBIGUOUS: TRAPPED` |
+| 5 readers 对账 | `reconcile()` 提供七项可查询计数（覆盖 §6.3 六项）、`collision_report()` 同日同标题不同 URL；真实 PG 事务内 dry-run 已跑。**N3 切换前的冻结数据集逐 symbol `NEWS_WASH` / `news_score` 同 Decimal 路径重算留作 N3 批次硬门禁** | 真实 PG `RECONCILE` / `COLLISIONS` / `ORPHANS: 0` |
+| 6 legacy 保留（Q6） | `news_events` 原表与全部 reader 均未改动；map 数按每 legacy row 逐行累计设计 | §24.5 遗留、真实 PG rollback 后 `map_rows = 0` 而 legacy `2529` 不变 |
+| 7 不与 NFR 行为变更混批 | 未改 wheel gate / tag 阈值 / `NEWS_WASH` 语义；只新增 canonical 写入与解析入口校验 | 全量 919/919 零回归 |
+
+### 24.4 §21.2 / §21.3 口径遵守
+
+- **UTC 日界**：`published_day()` 用 `to_utc(when).date()`，不在 SQL 里用 session-local `::date`；DB 侧 `published_day date` 已是确定性日历日，避免 `TimeZone` 漂移。跨 UTC 日同标题不自动合并（fixture 已验证）。
+- **解析入口唯一新增检查**：`to_utc()` 要求 tz-aware 并 `.astimezone(UTC)`；naive 抛 `NaiveTimestamp`，由 `_save_headlines` 回退到 ingestion instant 并标记 `day_precision="ingest_fallback"`，**绝不**静默 `replace(tzinfo=UTC)`。Yahoo RFC-822 offset 与 Finviz `tzinfo=ET` 均由 Python datetime 换算。三处 writer 全覆盖：`_insert_event`（`datetime.now(UTC)`，fallback）、`_save_headlines`（provider `when`）、`store_manual`（`datetime.now(UTC)` → 传 `ingest_fallback`）。
+- **不新增时区列**：无 `provider_tz` / `published_local_day` / 其它证据列。
+- **`backup.py TABLES`**：只加三张新闻表（现 23 张），`strategy_events` 排除；`052_order_events` / `055_regime_labels` 既有缺口仍归独立运维轮。
+- **命名口径**：§21.2 第 4 条写作 `news_associations`，§6.1 与 §20.3 写作 `news_article_symbols`。本批按 **§6.1 模型定义与 §20.3 直接契约**采用 `news_article_symbols`，此处登记差异，不静默改写任何历史行。
+
+### 24.5 验证（实测）
+
+```
+apps.orchestrator.tests.test_news_p3       40/40 OK
+unittest discover -p "test_*.py"           919/919 OK (skipped=2)
+                                             879 (P2 后) + 40 (新增 P3)
+mutation traps                             20/20 TRAPPED, sha256 逐字节还原
+compileall / uv lock --check / git diff     OK / 29 packages / 0
+node scripts/check-changelog.mjs            logs 13 / 条目 129 / 索引 129 ✓
+LOCAL_LINK_AND_SOURCE_ERRORS                0
+隔离临时夹具 missing-index mutation        MISSING_INDEX_MUTATION_TRAPPED
+
+真实 PostgreSQL (athena-pg, 53 migrations)
+  apply_migrations() -> ['057_news_canonical.sql']
+  news_articles 9 cols / news_article_symbols 13 cols / news_legacy_event_map 12 cols
+  真实 news._insert_event() 双写 -> RECONCILE:
+    legacy_rows=2531 map_rows=2 distinct_map=2 articles=1 associations=2
+    orphan_associations=0 distinct_article_identities=1
+  UTC_DAY_OF_ET_2330 = 2026-11-26
+  RESOLVE_ONE = True / AMBIGUOUS = TRAPPED
+  COLLISIONS = same UTC day + same title + 2 urls -> 1 report row
+  ROLLBACK -> legacy_rows=2529, map/articles/associations = 0
+wheel: athena_store-0.0.0-py3-none-any.whl -> 53 migrations, 057 present
+```
+
+### 24.6 明确不做 / 遗留（硬门禁）
+
+- **N3 canonical read cutover 未执行**：NFR / News / Iris 仍读 `news_events`；未切 reader、未做「冻结数据集上逐 symbol `NEWS_WASH` 一致、`news_score` 同一 Decimal 路径重算一致」验证。按 §6.3，任何未登记差异都**阻止 N3**；本批 `reconcile()` / `collision_report()` 是 N3 的输入，不是 N3 的通过证明。
+- **N4 legacy retirement 未执行**：`news_events` 保留且不删，删除须长期对账为零且另行裁定。
+- **未跑 news backfill**：本批只做 additive 建表与 N2 双写，未把 2,529 行历史 `news_events` 回填进 canonical；§6.3 要求 backfill 的 map 数 == legacy 行数、每 legacy row 恰好映射一次，属 N3 前独立批次。
+- **零 P4–P6**：周线 SMA、Strategy 3 shadow、`eval-v1` 执行、exit 语义、工具接入均未开始。
+- 两个启动阻塞（`run_loop()` 的 `load_active()` 早于 `apply_migrations()`；`var/backups` 996 快照 prune）仍属独立运维轮。
+- 7799 console 仍载入改动前代码；本批不重启、不重试 `dxnrJP`。
+
+### 24.7 回滚
+
+- `git revert <sha>`：只回滚 `057`、canonical 模块、三处 writer / dsh 双写、`backup.py TABLES`、§24、头部第七笔、00 册索引、`CHANGELOG.md` 与 `C-20261125-7`；历史 verbatim 行不受影响。
+- **N1 回滚按 §6.3「删新表即可，旧数据不动」**：三张新表 additive，无外部 reader 依赖；`news_events` 完全不动。回滚后 writer 恢复纯 legacy 行为。
+- `057` 已入 `backup.py TABLES`，restore 后 canonical 数据可保；但 N3 前 canonical 只作写入与对账，不是读取真源。
+- P2 / P3 分开提交、分开回滚，一次 revert 不同时抽掉事件与新闻两条链。
+
+### 24.8 关联
+
+- 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`～`-6`（P1 / Round A / §20 / §21 / Round B / P2）。
+- 下游：**V2-P3 后续批次 = news backfill + 六项对账 + N3 canonical reader cutover**（N4 另需裁定）；随后 P4 / P5 / P6 / P7 按固定顺序继续；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。

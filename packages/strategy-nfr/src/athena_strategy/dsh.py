@@ -188,6 +188,12 @@ def enrich_sentiment(
             "UPDATE news_events SET sentiment = %s WHERE fingerprint = %s",
             (sentiment, fingerprint),
         )
+        try:
+            from athena_store import news_canonical as nc
+
+            nc.mark_sentiment(conn, fingerprint, sentiment)
+        except Exception:
+            log.warning("canonical sentiment dual-write failed fingerprint=%s", fingerprint)
         updated += result.rowcount
     if updated:
         conn.commit()

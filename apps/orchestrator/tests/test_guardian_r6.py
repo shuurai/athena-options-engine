@@ -537,8 +537,8 @@ class TestDeployArtifacts(unittest.TestCase):
         self.assertFalse(list(MACOS.glob("requirements*.txt")))
         # R6 adds no migration; 055 is R7's regime_labels (D69 / D104).
         migrations = ROOT / "packages" / "store" / "src" / "athena_store" / "migrations"
-        # V2-P2 C-20261125-6: 056_strategy_events.sql is the first post-055 migration.
-        self.assertEqual(len(list(migrations.glob("0*.sql"))), 52)
+        # V2-P2/P3 C-20261125-6/7: 056 strategy_events, 057 news_canonical.
+        self.assertEqual(len(list(migrations.glob("0*.sql"))), 53)
         self.assertTrue((migrations / "055_regime_labels.sql").exists())
 
     def test_readme_documents_every_decision_and_the_2fa_gap(self):

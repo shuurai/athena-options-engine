@@ -633,12 +633,12 @@ class TestBoundaries(unittest.TestCase):
     def test_r5_adds_no_migration_and_055_is_r7s(self):
         # R5 added no migration; 055 is R7's regime_labels (D69 / D104).
         folder = ROOT / "packages/store/src/athena_store/migrations"
-        # V2-P2 C-20261125-6: 056 is strategy_events (P2), not R5 / R7.
+        # V2-P2/P3 C-20261125-6/7: 056 strategy_events, 057 news_canonical.
         self.assertEqual(sorted(p.name for p in folder.glob("05*.sql")),
                          ["050_cycle_progress.sql", "051_advisor_signals.sql",
                           "052_order_events.sql", "053_guardian_alerts.sql",
                           "054_guardian_runs.sql", "055_regime_labels.sql",
-                          "056_strategy_events.sql"])
+                          "056_strategy_events.sql", "057_news_canonical.sql"])
         self.assertEqual([p.name for p in folder.glob("056*")],
                          ["056_strategy_events.sql"])
 

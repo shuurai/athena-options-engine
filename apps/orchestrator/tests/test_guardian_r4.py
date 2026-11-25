@@ -573,12 +573,12 @@ class TestWiring(unittest.TestCase):
         # R4 never took 055; R7 consumes it for regime_labels (D69 / D104).
         folder = ROOT / "packages/store/src/athena_store/migrations"
         self.assertTrue((folder / "055_regime_labels.sql").exists())
-        # V2-P2 C-20261125-6: 056_strategy_events.sql added; R4 still added none.
+        # V2-P2/P3 C-20261125-6/7: 056 strategy_events, 057 news_canonical.
         self.assertEqual(sorted(p.name for p in folder.glob("05*.sql")),
                          ["050_cycle_progress.sql", "051_advisor_signals.sql",
                           "052_order_events.sql", "053_guardian_alerts.sql",
                           "054_guardian_runs.sql", "055_regime_labels.sql",
-                          "056_strategy_events.sql"])
+                          "056_strategy_events.sql", "057_news_canonical.sql"])
 
     def test_no_new_settings_field(self):
         src = (ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_nag.py").read_text(encoding="utf-8")
