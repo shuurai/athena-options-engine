@@ -9,6 +9,7 @@
 > **状态推进（2026-11-25，第五笔）**：操作者指令「stop asking me with choices … just give me one sequential order and get them done」，据此**一次性裁定剩余 7 条 Q7–Q12 / Q14**（§22，`C-20261125-5`），Q14 的 `eval-v1` 在看任何 holdout 结果前先验冻结。**V2-Q1–Q15 全部 15 条已裁定完毕**。此后按固定顺序实施 P2 → P3 → P4 → P5 → P6 → P7，每批独立验证与提交；P5 数据不足则 `no-go` 且不自动进入 P6。上行第三／四笔「Q7–Q12 / Q14 仍未裁定」是当时状态，保留不改写。
 > **状态推进（2026-11-25，第六笔）**：固定顺序的 **Step 2 / V2-P2 已实现、验证并独立交付**，记录见 §23（`C-20261125-6`）。`strategy_events` 窄表（migration `056`）、post-commit 幂等 emit、独立 `/api/iris/events` SSE、cursor replay → live 交接、`observation_gap`、真值动画与 60s reconciler 全部落地；全量 `879/879`（2 env skips）、`27/27` mutation traps、真实 PostgreSQL apply + 事务内 rollback、wheel 52 迁移内含 `056`。**P3–P7 仍未实现**；Q1–Q15 已裁定完毕不代表实现完毕。上行「每批独立验证与提交」是本批遵循的口径。
 > **状态推进（2026-11-25，第七笔）**：固定顺序的 **Step 3 / V2-P3 第一批（§6.3 N1 additive + N2 dual-write）已实现、验证并独立交付**，记录见 §24（`C-20261125-7`）。migration `057` 建 `news_articles / news_article_symbols / news_legacy_event_map` 三表；identity v1 按 §21.3 **UTC 日界**落地，解析入口 tz-aware → `.astimezone(UTC)` 校验、naive 不伪装 UTC；三处初始 writer + DSH sentiment + dismiss 双写；dismiss 明确 `association_id` 且一对多拒绝；三表加入 `backup.py TABLES`，`strategy_events` 排除。全量 `919/919`、`20/20` mutation traps、真实 PG apply + rollback、wheel 53 迁移。**§6.3 N3 canonical read cutover 与 N4 legacy retirement 仍是受六项对账硬门禁约束的后续阶段**，本批未切换 reader、未删 `news_events`；P4–P7 未开始。
+> **状态推进（2026-11-25，第八笔）**：固定顺序的 **Step 3 收尾 / V2-P3 第二批（N1 backfill ＋ §6.3 六项对账）已实现、验证并独立交付**，记录见 §25（`C-20261125-8`）。新增 `news_backfill.py`（幂等、可重导、`ingest_fallback` 诚实标注）与 `news_reconcile.py`（`six_item_gate()`，把差异机械分为 registered / unexplained）。真实库事务内 dry-run：**2,529 legacy rows → 1,873 articles / 2,529 associations / 2,529 map**，六项 **全 PASS、unexplained = 0、`blocks_n3 = False`**，二次 backfill `maps_inserted = 0`，`ROLLBACK` 后 legacy 仍 `2529`、canonical 归零。全量 `959/959`、`40/40` mutation traps、wheel 含两个新模块。**本批只证明「六项对账通过」，不等于 N3 已切换**：reader 仍读 `news_events`、`news_events` 未删（N4 另需裁定），且 live 库的 canonical 表仍是空的（对账是 dry-run，不是持久回填）。上行第七笔「N3 / N4 仍是受六项对账硬门禁约束的后续阶段」依然成立，本批只解除了门禁本身；§24.6「未跑 news backfill」一句由本节取代，原句保留不改写。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1211,3 +1212,108 @@ wheel: athena_store-0.0.0-py3-none-any.whl -> 53 migrations, 057 present
 
 - 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`～`-6`（P1 / Round A / §20 / §21 / Round B / P2）。
 - 下游：**V2-P3 后续批次 = news backfill + 六项对账 + N3 canonical reader cutover**（N4 另需裁定）；随后 P4 / P5 / P6 / P7 按固定顺序继续；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。
+
+---
+
+## 25. V2-P3 第二批交付记录（N1 backfill ＋ §6.3 六项对账，2026-11-25，`C-20261125-8`）
+
+### 25.1 状态与授权边界
+
+- 固定顺序 `Q7–Q12/Q14 → P2 → P3 → P4 → P5 → P6 → P7` 的 **Step 3 收尾**。本批实现 **N1 的历史数据回填**与 **§6.3 六项对账门禁**，**不含 N3 canonical read cutover、不含 N4 legacy retirement**。与 §24 分开 commit / rollback。
+- 授权来源：**§6.3 六项**（本批逐条落地并留证）、Q6（legacy 至少跨 N1–N3 不删）、§20.3 第 5 / 6 条、§21.2 第 4 条。不分配全局 D 号，`D1–D111 / 112 节点 / 54 条裁定`、§1 不变；§6.2 / §19 / §20 / §21 / §22 / §24 历史 verbatim 行一律保留，只在本节追加。
+- 运行时：**未重启 7799、未重试被取消的 `dxnrJP`、未启动任何 engine**；IB Gateway `7497/4001/4002` 仍关闭。本批**零 migration**（`athena-pg` 维持 `53`），`news_events` 零写入。真实库验证全部在事务内 `ROLLBACK`，业务表零持久写入。
+
+### 25.2 实现清单
+
+| 文件 | 变更 |
+|---|---|
+| `packages/store/src/athena_store/news_backfill.py` | 新增 `backfill(conn, limit=None)`：按 `fingerprint` 全序幂等回填；`_row_identity()` 复用 `nc.to_utc()` / `article_id()`；回填行一律标 `day_precision='ingest_fallback'`（legacy 无 provenance 列，不冒充 provider）；`INSERT_MAP_SQL` **只 insert 不 update**（审计锚点不可变）；`INSERT_ASSOCIATION_SQL` 对可变列 `source/url/event_type/sentiment/dismissed` 按 legacy **重导**、`effective_ts` 取 `LEAST`（与行序无关）；`weighted_news_score()` 与 `indicators.news_score` 同一 Decimal 循环；成对的 legacy / canonical reader SQL 及确定性 tie-break 变体 |
+| `packages/store/src/athena_store/news_reconcile.py` | 新增 `six_item_gate(conn, *, as_of, window_days=3, sentiment_below=-0.3)`、六个 `item*` 函数、`classify_score_delta()`、`format_gate()`；**纯只读**（模块内零 `INSERT/UPDATE/DELETE/DROP/ALTER`）；输出 `registered` / `unexplained` 两桶，`blocks_n3 = bool(unexplained) or not all(ok)` |
+| `apps/orchestrator/tests/test_news_p3_backfill.py` | **新增 40 项**：identity / UTC 日界 / naive 拒绝 / symbol 大写 / limit 门控 / 幂等 / 重导可变列 / map 不可变 / Decimal 路径 / tie 分类四分支 / 六项聚合 / 只读不变量 / reader SQL 与生产 `WHERE` 对齐 |
+
+### 25.3 §6.3 六项逐条对照（真实库，事务内 dry-run）
+
+| §6.3 | 判据 | 实测 |
+|---|---|---|
+| ① map 数与 legacy 行数一致、每 legacy row 恰好映射一次 | `legacy_rows == map_rows` 且每 `fingerprint` 恰一行 且无未映射 且无 orphan map | `2529 == 2529`，`multi_mapped=0`、`unmapped=0`、`orphan_map=0` |
+| ② association 数 == 不同 `(article_id, symbol)` 数、无 orphan | 计数相等 + 无 orphan + map 无悬挂 `association_id` / `article_id` + 无无 map 的 association | `2529 == 2529`，`orphan=0`、`dangling_assoc=0`、`dangling_article=0`、`assoc_without_map=0` |
+| ③ article 数只按已登记 identity 规则减少 | `articles == distinct identity_hash == distinct (published_day, normalized_title)`，且 `articles == legacy distinct (UTC day, lower(title))` | `1873 == 1873 == 1873 == 1873`，`collapsed=0`；相对 legacy 行数减少 `2529 − 1873 = 656` 全部来自 439 个跨 symbol 同 `(UTC 日, 标题)` 组 |
+| ④ 初始 insert / DSH enrich / dismiss 后字段无未解释差异 | 不可变列经 **map** 对 legacy；可变列经 **association** 对 legacy | `source/url/event_type = 0/0/0`；`sentiment/dismissed = 0/0`；`duplicate (article,symbol) pairs = 0` |
+| ⑤ 冻结数据集逐 symbol `NEWS_WASH` 一致、`news_score` 同一 Decimal 路径重算一致 | 37 个 symbol 逐一比对；分数差异必须可机械归因 | `NEWS_WASH` **37/37 零差异**；`news_score` 1 项差异（NVDA），归类 `tie_order_nondeterminism`（见 §25.4） |
+| ⑥ ET 日界 / provider 缺失 / 跨日同标题 / legacy conflict / 同日同标题异 URL / 手工 URL 均有 fixture 与 collision report | 六族齐全并有实测计数 | `et_utc_boundary_rows=183`、`provider_ts_missing=2529`、`cross_day_same_title_groups=1`、`legacy_conflict_rows=0`、`collision_groups=16`、`manual_url_rows=0`（手工 URL 为合成 fixture，见 §25.6） |
+
+**门禁结论：`blocks_n3 = False`（unexplained = 0，registered = 2）。**
+
+### 25.4 ⑤ 的 NVDA 差异为何是「已登记」而不是「未解释」
+
+这是本批唯一需要辩护的地方，必须机械证明而非口头断言。`indicators.news_score` 只按 `ts` 排序，**同一时间戳的行没有确定相对顺序**，而 recency 权重是位置权重（第 n 行权重 = n），因此同 ts 行的聚合结果不可复现。三项证据：
+
+1. **无数据丢失**：两侧 `(ts, sentiment)` 多重集**完全相同**（`698 == 698`，逐元素相等）。
+2. **Decimal 路径相同**：两侧同时改用 `(ts, sentiment)` 作 tie-break 后，分数**逐位相同**（`-0.09053301687633992072178429275`，同一字符串）。
+3. **legacy 自身不一致**：同一 legacy 查询用 `ORDER BY ts` 与「`ORDER BY ts DESC` 再反转」得到**不同**结果（`-0.090555972305…` vs `-0.090558021897…`），证明差异源于 tie 顺序而非 canonical 建模。
+
+NVDA 窗口内有 **26 个同 ts 组、最大 8 行同 ts**。叠加 §5 的既有结论——`news_score` **当前没有确定性 wheel / phase 消费者**（只有 `NEWS_WASH + RV_HIGH` 才进 `signaled_strangle` candidate）——该差异对任何决策路径的行为影响为零。因此归入 `registered`，`classify_score_delta()` 的三分支（`data_mismatch` / `decimal_path_mismatch` / `tie_order_nondeterminism`）保证：**多重集不同或确定性分数不同一律落进 `unexplained` 并阻止 N3**。本批不修改 `indicators.py`（§6.3 第 7 条：不与 NFR 行为变更混批）；N3 批次再决定 canonical reader 是否加确定性 tie-break。
+
+### 25.5 collision report 抽样审查（§6.2 要求）
+
+16 组「同 UTC 日 + 同 normalized title + 不同 URL」全部逐组看过真实 URL，结论：
+
+- **同 URL 仅差追踪尾巴**：如 `.../alibaba-tencent-put-faith-chinese-124451275.html` 与 `...?tsrc=rss`（组 4/5/13/7/11/14）。
+- **同一稿件多站转载**：`just-auto` / `yahoo`（组 1）、`thedailyupside` / `yahoo`（组 2/3）、`barrons` / `yahoo`（组 6）、`yahoo` / `proactiveinvestors`（组 8）、`stocktwits` / `yahoo`（组 9）、`yahoo` / `investors.com`（组 10）、`ibtimes` / `yahoo`（组 12）、`investorshub` / finviz 相对路径（组 15/16）。
+- **无一组是「两篇不同报道被错误合并」**。按 Q5「URL 只作证据、不做语义强合并」的既定口径，**接受 identity v1 现状，不修订规则**；不引入 URL 归一化（会反向引入新的误合并风险，且属新裁定）。
+
+### 25.6 §6.3 之外的工程决定
+
+- **回填诚实标注**：legacy `ts` 是已存 UTC 瞬时，但表内无 provenance 列，故一律 `ingest_fallback`，原始值另存 `original_ts`。不把「猜测的 provider 时间」写成 provider。
+- **回填可重导**：N1/N2 期 legacy 是真源，因此重跑时按 legacy **覆盖** association 的可变列。否则「回填 → DSH enrich → 再回填」会让 canonical 变旧并击穿 ④。`backfill()` 永不写 `news_events`（测试以 SQL 动词断言）。
+- **map 不可变**：`ON CONFLICT DO NOTHING`，只做锚点，不随后续 enrich 漂移；④ 的可变列因此走 association 而非 map。
+- **门禁只读**：`news_reconcile.py` 模块级零变更 SQL，用测试把 `INSERT/UPDATE/DELETE/DROP/TRUNCATE/ALTER` 全部扫掉，防止对账逻辑日后偷偷改写数据。
+- **不新增迁移**：本批纯代码，`53` 不变，回滚无需 `DOWN`。
+
+### 25.7 验证（实测）
+
+```
+apps.orchestrator.tests.test_news_p3_backfill   40/40 OK
+apps.orchestrator.tests.test_news_p3            40/40 OK
+unittest discover -p "test_*.py"               959/959 OK (skipped=2)
+                                                 919 (P3-1 后) + 40 (本批)
+mutation traps                                  20/20 TRAPPED, sha256 逐字节还原
+compileall / uv lock --check / git diff --check  OK / 29 packages / clean
+wheel athena_store-0.0.0-py3-none-any.whl       53 migrations (057 present)
+                                                 news_backfill.py / news_reconcile.py / news_canonical.py 均在包内
+
+真实 PostgreSQL (athena-pg, 53 migrations, 全程事务内 ROLLBACK)
+  legacy rows (untouched)            2529
+  backfill #1                        {legacy_rows: 2529, articles: 1873, associations: 2529, maps_inserted: 2529}
+  backfill #2 (幂等)                 {legacy_rows: 2529, articles: 1873, associations: 2529, maps_inserted: 0}
+  six_item_gate as_of=2026-11-25
+    PASS 1_map_parity              legacy_rows=2529 map_rows=2529 multi=0 unmapped=0 orphan_map=0
+    PASS 2_association_integrity   associations=2529 pairs=2529 orphan=0 dangling=0/0
+    PASS 3_article_identity        articles=1873 identity=1873 published=1873 legacy=1873 collapsed=0
+    PASS 4_field_parity            immutable 0/0/0  mutable 0/0  duplicate_pairs=0
+    PASS 5_reader_parity           symbols=37  NEWS_WASH diffs=0  news_score diffs=1(registered)
+    PASS 6_fixture_coverage        boundary=183 fallback=2529 cross_day=1 conflict=0 collisions=16 manual=0
+    registered=2  unexplained=0  blocks_n3=False
+  二次门禁 blocks_n3                False
+  ROLLBACK -> articles/assoc/map/legacy   0 / 0 / 0 / 2529
+```
+
+### 25.8 明确不做 / 遗留（N3 仍是独立批次）
+
+- **N3 canonical read cutover 未执行**：六项门禁已解除（`blocks_n3=False`），但 reader 切换是**另一件事**——`news.py tags_from_events()`、`indicators.news_score()`、`agents.py` 头条、`advisor.py _yahoo_notes()`、`pages.py` 新闻 UI、`guardian_regime.py _NEWS_SQL`、`iris_view.py` 计数共 21 处非测试 SQL 仍读 `news_events`，须逐处给出 canonical 等价路径与逐处对账后再切。
+- **live 库 canonical 仍为空**：本批对账是**事务内 dry-run**，没有持久回填。N3 之前必须先做一次**真实持久 backfill** 并确认 N2 双写在运行期持续收敛，否则切 reader 会读到空表。
+- **N4 legacy retirement 未执行**：`news_events` 保留不删，删除须长期对账为零且另行裁定（Q6）。
+- **未改 `indicators.py` 排序**：NVDA tie 问题留待 N3 批次决定，避免与 NFR 行为变更混批（§6.3 第 7 条）。
+- **零 P4–P6**：周线 SMA、Strategy 3 shadow、`eval-v1` 执行、exit 语义、工具接入均未开始。
+- 两个启动阻塞（`run_loop()` 的 `load_active()` 早于 `apply_migrations()`；`var/backups` 996 快照 prune）仍属独立运维轮。
+
+### 25.9 回滚
+
+- `git revert <sha>`：只回滚两个新模块、40 项测试、§25、头部第八笔、00 册索引、`CHANGELOG.md` 与 `C-20261125-8`。**无 migration 可回滚**，`057` 三表与既有数据不受影响。
+- 两个模块在无人调用时完全惰性：不 import 进 `loop.py`、不注册定时器，回滚后系统行为与 §24 交付态一致。
+- `news_events` 与本批零交互，回滚不存在数据面风险。
+
+### 25.10 关联
+
+- 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`～`-7`（P1 / Round A / §20 / §21 / Round B / P2 / P3-1）。
+- 下游：**V2-P3 第三批 = 持久 backfill ＋ 21 处 reader 逐处 cutover（N3）**，随后 N4 另需裁定；P4 / P5 / P6 / P7 按固定顺序继续；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。
