@@ -11,6 +11,7 @@
 > **状态推进（2026-11-25，第七笔）**：固定顺序的 **Step 3 / V2-P3 第一批（§6.3 N1 additive + N2 dual-write）已实现、验证并独立交付**，记录见 §24（`C-20261125-7`）。migration `057` 建 `news_articles / news_article_symbols / news_legacy_event_map` 三表；identity v1 按 §21.3 **UTC 日界**落地，解析入口 tz-aware → `.astimezone(UTC)` 校验、naive 不伪装 UTC；三处初始 writer + DSH sentiment + dismiss 双写；dismiss 明确 `association_id` 且一对多拒绝；三表加入 `backup.py TABLES`，`strategy_events` 排除。全量 `919/919`、`20/20` mutation traps、真实 PG apply + rollback、wheel 53 迁移。**§6.3 N3 canonical read cutover 与 N4 legacy retirement 仍是受六项对账硬门禁约束的后续阶段**，本批未切换 reader、未删 `news_events`；P4–P7 未开始。
 > **状态推进（2026-11-25，第八笔）**：固定顺序的 **Step 3 收尾 / V2-P3 第二批（N1 backfill ＋ §6.3 六项对账）已实现、验证并独立交付**，记录见 §25（`C-20261125-8`）。新增 `news_backfill.py`（幂等、可重导、`ingest_fallback` 诚实标注）与 `news_reconcile.py`（`six_item_gate()`，把差异机械分为 registered / unexplained）。真实库事务内 dry-run：**2,529 legacy rows → 1,873 articles / 2,529 associations / 2,529 map**，六项 **全 PASS、unexplained = 0、`blocks_n3 = False`**，二次 backfill `maps_inserted = 0`，`ROLLBACK` 后 legacy 仍 `2529`、canonical 归零。全量 `959/959`、`40/40` mutation traps、wheel 含两个新模块。**本批只证明「六项对账通过」，不等于 N3 已切换**：reader 仍读 `news_events`、`news_events` 未删（N4 另需裁定），且 live 库的 canonical 表仍是空的（对账是 dry-run，不是持久回填）。上行第七笔「N3 / N4 仍是受六项对账硬门禁约束的后续阶段」依然成立，本批只解除了门禁本身；§24.6「未跑 news backfill」一句由本节取代，原句保留不改写。
 > **状态推进（2026-11-25，第九笔）**：固定顺序的 **Step 3 / V2-P3 第三批（N3 canonical read model）已实现、验证并独立交付，记录见 §27（`C-20261125-9`）**。新增 `news_read.py`：以 `WITH news_events AS (...)` CTE 把 `057` 三表投影为 legacy 九列，17 处非测试 reader 全部经 `render()` / `score_sql()` 包装、SQL 主体逐字节不变；R1 保留 ET 日界、R2 只对 canonical `news_score` 加 `ORDER BY ts, sentiment` tie-break。**本批是 DARK LAUNCH，`SOURCE = LEGACY`**：§26.2 两项数据面前置条件未满足——§25 六项对账是事务内 dry-run（`ROLLBACK` 后 live canonical 仍为 `0/0/0`），§26.4 禁止启动 engine 观察运行期 N2 双写收敛；直接切 `CANONICAL` 会让 17 处 reader 全部读到空表。故零行为变化、零持久写入。真实 PG **17/17 逐处对账 `parity diffs = 0`**、六项门禁 `unexplained=0 / blocks_n3=False`、全量 `1006/1006`、`19/19` mutation traps、wheel 含新模块且 53 迁移。**N3 真正激活（持久 backfill ＋ `SOURCE = CANONICAL` ＋ 运行期收敛确认）须操作者单独 go/no-go**；N4 另需裁定；P4–P7 未开始。上行第八笔「live 库 canonical 仍是空的」依然成立，原句保留不改写。
+> **状态推进（2026-11-25，第十笔）**：操作者裁定 **N3 激活 defer**（Task #123 open），固定顺序进入 **Step 4 / V2-P4**。落地前契约 §28（`C-20261125-10`，R1–R7）与交付记录 §29（`C-20261125-11`）先后入库：四个 pure 模块（ET 会话日历、六类日线缺口审计、ISO 周聚合、Strategy 3 shadow 信号子集）＋ Iris 只读接线，§22.3 第 1–6/14 项全部落地、第 7–13 项按 R6 留给 P5/P6。**零迁移、零持久写入、零 drafts / orders**；live `market_bars` 为空 ⇒ 数据面诚实 `unknown / no_data`，数据到位即自动产出真实值。全量 `1056/1056`、`27/27` mutation traps、真实 PG 事务内只读 + `ROLLBACK`、wheel 含四新模块。**P4 shadow 不等于 Strategy 3 可交易**：工具 / 入场窗口 / TP / NAV / 连止均未实现，`instrument_availability=deferred_p5`；P5（`eval-v1` 执行）以真实历史数据可用性为硬门禁。上行第九笔「N3 激活须操作者单独 go/no-go」依然成立。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1577,3 +1578,67 @@ pyproject.toml force-include                      零改动（hatch 自动收 Py
 - 零迁移、零持久写入、零 engine 启动、零 7799 重启、零 IB Gateway 变更。
 - 不实现 §22.3 第 7–13 项；不做 eval 协议执行（P5）；不写 drafts / orders。
 - 不动 NFR 行为、不动 N3 开关（`SOURCE = LEGACY` 维持，Task #123 仍 open）。
+
+---
+
+## 29. V2-P4 交付记录（gap audit ＋ 周线 SMA ＋ Strategy 3 shadow，2026-11-25，`C-20261125-11`）
+
+### 29.1 状态与范围
+
+固定顺序 **Step 4 / V2-P4 已实现、验证并独立交付**。四个 pure 模块 ＋ Iris 只读接线，**零迁移、零持久写入、零 drafts / orders、零 NFR 行为变更**。R1–R7 按 §28.3 落地；实现中只修正契约内口径，未引入新裁定。
+
+### 29.2 新模块（`packages/strategy-nfr/src/athena_strategy/`）
+
+| 模块 | 内容 |
+|---|---|
+| `trading_calendar.py` | R1：确定性 NYSE/ET 会话日历（stdlib-only），fixed/floating 假日 ＋ Good Friday（Anonymous Gregorian Easter），Saturday→前周五 / Sunday→后周一 observed，跨年 Jan 1 边界两侧都正确；`sessions / sessions_back / next_sessions / is_session` |
+| `gap_audit.py` | Q7：六类缺口 `internal_gap / long_tail_gap / ipo_short_history / halt / zero_volume / corporate_action` 各带 reason_code；expected 窗口止于最新存储会话，**未来会话永不算缺失**；`listed_since` 声明后 tail 归 IPO 而非数据缺口；`has_blocking_gaps(through=)` 供 SMA 窗口拦截 |
+| `weekly.py` | Q8：ISO 周聚合（open=首个完成日 / high-low=周内极值 / close=最后完成日 / volume=求和）；假日短周保留；`complete` = 周内全部 expected 会话已存在且最后 expected 会话已完成；**进行中本周永不确认**；`adjustment_basis` 原样透传 |
+| `strategy3.py` | Q9 第 1–6/14 项：hill（6–10 周、相等中断、峰不在最后一周）、4 周最小二乘 slope 归一化（|x|<0.002 flat、<−0.002 declining）、0.5% OHLC 触碰带、蜡烛/量能真值表（低量硬过滤、基准=前 8 完成周）、SPX 周线口径、VIX <15 skip / ≤20 caution / >20 ok（边界归低档）、财报前 5 交易日（calendar_marks `EARNINGS`）、20 日均成交额 ≥ $5 亿、prior_rally 仅偏好不设门；outcome 真值序 `no_data > invalid > filtered > no_signal > candidate`；每条记录带 `input_hash` / `factor_version=s3-shadow-v1` / `instrument_availability=deferred_p5` |
+
+### 29.3 实现中修掉的两个真实缺陷
+
+1. **SMA 未成窗时以 `Decimal(0)` 占位毒化 hill 计数**：早期周 SMA50 尚不可算，占位 0 使 `SMA20 > 0` 恒真，hill 连续计数被虚增到 40 周。改为显式 `None`，`_hill` / `_slope_state` / `_retest_state` 遇 `None` 即中断/不可用。
+2. **`weekly_bar_count` 泄漏未来**：每条记录原带「全历史完成周总数」，重放旧周时记录含未来信息（look-ahead）。改为该周当时的完成周数 `i+1`，`test_no_look_ahead_replay_is_stable` 钉死。
+
+### 29.4 Iris 只读接线（`iris_view.py`）
+
+- `_p4_recompute()`：单查询读全部 `ib-daily` 会话 ＋ SPX（仅 `SPX/^SPX/I:SPX`，**明确不把 SPY 当代理**）＋ `VIX` ＋ `calendar_marks kind='EARNINGS'`；逐 watchlist symbol 跑 gap audit 与 shadow（live 侧 `adjustment_basis=None` ⇒ 全部诚实 `no_data`）。
+- snapshot 新键：`daily_gap_state / daily_gap_count / daily_gap_symbols / strategy3_week / strategy3_candidates / strategy3_scanned`；52W 节点、weekly_sma 与 strategy_3 节点文案换真实计算值；header 注记在可测量时切换为「gap audit found N gap(s)」。
+- 节点状态保持 `shadow`（P1 断言不变），`zero drafts (P5/P6 pending)` 文案明示零草案。
+
+### 29.5 测试与变异
+
+`apps/orchestrator/tests/test_strategy3_p4.py` **50 项**：日历 2026 假日/observed/跨年、六类缺口逐一、周聚合规则/假日短周/缺周/进行中周/no-look-ahead、49/50 边界、工程化 fixture 精确产出 **1 个 candidate**（2026-W29：hill 10 / declining / below / bearish / low volume / SPX strong / VIX ok / liquidity ok）并在 W30 出 `hill_too_long`、W25 出 `slope_not_declining`、49 周出 `history_short`；`death_cross` / `peak_in_last_week` / equality 中断 / touch-below-untouched 单元断言；蜡烛中性、低量缺失、SPX weak、VIX skip/caution/20 边界/21 ok、财报 near、thin、adjustment 缺失、SPX/VIX/earnings unavailable、SMA 窗口内缺口、input_hash 确定性与周唯一、无效 bar → `invalid`；Iris 接线（gap 计算、空库 unknown、只读＋表白名单、节点文案、header 切换）。
+
+mutation traps `/tmp/p4_mutation.py` **27/27 TRAPPED**、逐字节 sha256 还原：覆盖日历假日规则、252 窗口 off-by-one、六类缺口分类、状态机、周聚合四规则、look-ahead、slope/touch/VIX/hill/earnings/liquidity/adjustment/过滤分支/量能基准/history_short 门/bar 校验、Iris 硬编码 unknown、gap 计数、zero-drafts 文案、recompute 整体跳过。初跑 24/27：`gap_blocking_gaps` anchor 不符、look-ahead 与量能基准窗口缺测试覆盖 —— 补齐断言后 27/27。
+
+### 29.6 验证链汇总
+
+```
+compileall                                       OK
+test_strategy3_p4                                 50/50 OK
+test_iris_p1                                      63/63 OK
+unittest discover（全量）                        1056/1056 OK (skipped=2)
+mutation traps                                   27/27 TRAPPED, sha256 一致, 逐字节还原
+uv lock --check                                   29 packages
+git diff --check                                  clean
+变更台账机检                                     133/133
+LOCAL_LINK_AND_SOURCE_ERRORS                      0（32 份文档）
+wheel (athena-strategy-nfr)                       trading_calendar / gap_audit / weekly / strategy3 全部在包内
+真实 PostgreSQL (事务内 ROLLBACK)                 live market_bars=0 → gap unknown / strategy3 unknown；
+                                                  market_bars 与 calendar_marks 行数前后不变
+运行时监听                                        7799 / 7497 / 4001 / 4002 全无
+```
+
+### 29.7 边界与明确不做
+
+- **零迁移（仍 53）、零持久写入**：live DB 只有只读 `SELECT` ＋ `ROLLBACK`；`uv.lock` 零变动、零新依赖。
+- **§22.3 第 7–13 项未实现**（入场窗口、工具参数、TP、持仓、优先级、NAV、连止）——`instrument_availability=deferred_p5`；eval 协议执行、成本/滑点模型归 P5。
+- live 数据面诚实空态：`market_bars` 空 ⇒ gap `unknown`、Strategy 3 `unknown`；数据出现时同一代码自动产出真实值，无需再改。
+- 不重启 7799、不重试 `dxnrJP`、不启动 engine；IB Gateway 关闭；N3 开关不动（`SOURCE = LEGACY`，Task #123 open）。
+
+### 29.8 关联
+
+- 上游：`C-20261125-10`（§28 契约，R1–R7）、§22（Q7/Q8/Q9/Q14）、`C-20261125-9`（N3 dark launch；操作者裁定 defer 激活、进入 P4）。
+- 下游：**V2-P5 = 冻结协议 `eval-v1` 的历史与 live shadow 执行**（P4 产物即其输入；真实历史数据可用性是硬门禁，不足则 `insufficient_evidence / no-go / 继续 shadow`）；P6 仅在 P5 go 后进入；P7 按固定顺序收尾。

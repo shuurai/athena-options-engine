@@ -1,4 +1,4 @@
-"""Read-only Iris architecture snapshot (V2-P2).
+"""Read-only Iris architecture snapshot (V2-P2 + V2-P4 shadow additions).
 
 This module stays a pure read model: no animation code, no polling, no event
 stream, no domain writer, no migration and no trading logic. It renders the
@@ -6,6 +6,14 @@ graph from existing tables and reuses the one existing draft queue. The
 event-driven connector pulse lives in the console client script and is fed
 only by structured ``strategy_events`` frames; with no event there is no
 animation.
+
+V2-P4 additions are read-only recomputations: the daily gap audit (Q7) and
+the Strategy 3 weekly shadow summary (Q9 signal subset) run on every
+snapshot from ``market_bars`` / ``calendar_marks`` and never persist
+anything. Live ``ib-daily`` bars carry no adjusted-close proof, so the
+shadow runs with ``adjustment_basis=None`` and every week honestly reports
+``no_data`` + ``adjustment_unavailable`` (§28.3 R3) until an adjusted
+producer exists.
 """
 
 from __future__ import annotations
@@ -13,9 +21,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
+from zoneinfo import ZoneInfo
+
+from athena_strategy.gap_audit import STATE_COMPLETE, STATE_PARTIAL, STATE_UNKNOWN, audit_daily
+from athena_strategy.strategy3 import shadow_history
 from athena_store import news_read
 
 GRAPH_VERSION = "iris-p2-events-v1"
+
+_ET = ZoneInfo("America/New_York")
+
+# SPX is read under its own symbol; SPY is an ETF and is deliberately not
+# accepted as an SPX proxy without a ruling (§28.3 R4).
+_SPX_SYMBOLS = ("SPX", "^SPX", "I:SPX")
 
 
 @dataclass(frozen=True)
@@ -100,6 +118,106 @@ def _stamp(value) -> str:
     if value is None:
         return "unknown"
     return str(value)[:19]
+
+
+def _et_today():
+    return datetime.now(_ET).date()
+
+
+def _p4_recompute(conn, settings) -> dict:
+    """V2-P4 read-only recompute: daily gap audit + Strategy 3 shadow summary.
+
+    Reads ``market_bars`` / ``calendar_marks`` only, writes nothing, and runs
+    with ``adjustment_basis=None`` because no adjusted-close producer exists
+    (§28.3 R3) — every shadow week therefore honestly reports ``no_data``.
+    The pure modules stay fully exercised by their own fixtures.
+    """
+    empty = {
+        "daily_gap_state": STATE_UNKNOWN,
+        "daily_gap_count": 0,
+        "daily_gap_symbols": 0,
+        "strategy3_week": "unknown",
+        "strategy3_candidates": 0,
+        "strategy3_scanned": 0,
+    }
+    rows = conn.execute(
+        "SELECT symbol, ts::date, open, high, low, close, volume "
+        "FROM market_bars WHERE source = 'ib-daily' ORDER BY symbol, ts"
+    ).fetchall()
+    if not rows:
+        return empty
+    by_symbol: dict[str, list[tuple]] = {}
+    for symbol, day, o, high, low, close, volume in rows:
+        by_symbol.setdefault(str(symbol).upper(), []).append(
+            (day, o, high, low, close, volume)
+        )
+    watchlist = [s.upper() for s in (getattr(settings, "watchlist", []) or [])]
+    symbols = sorted(
+        set(watchlist) & set(by_symbol) if watchlist else sorted(by_symbol)
+    )
+    spx_closes = conn.execute(
+        "SELECT ts::date, close FROM market_bars "
+        "WHERE symbol = ANY(%s) AND source = 'ib-daily' ORDER BY ts",
+        (list(_SPX_SYMBOLS),),
+    ).fetchall()
+    vix_closes = conn.execute(
+        "SELECT ts::date, close FROM market_bars "
+        "WHERE symbol = 'VIX' AND source IN ('ib-daily', 'ib-vix') ORDER BY ts"
+    ).fetchall()
+    earnings_count = int(
+        _scalar(conn, "SELECT count(*) FROM calendar_marks WHERE kind = 'EARNINGS'")
+    )
+    earnings_rows = (
+        conn.execute(
+            "SELECT symbol, event_date FROM calendar_marks WHERE kind = 'EARNINGS'"
+        ).fetchall()
+        if earnings_count
+        else []
+    )
+    earnings_by_symbol: dict[str, set] = {}
+    for symbol, event_day in earnings_rows:
+        earnings_by_symbol.setdefault(str(symbol).upper(), set()).add(event_day)
+
+    today = _et_today()
+    audits = []
+    candidates = 0
+    weeks = []
+    scanned = 0
+    for symbol in symbols:
+        daily = by_symbol[symbol]
+        audit = audit_daily(symbol, [(d, v) for d, *_rest, v in daily], as_of=today)
+        audits.append(audit)
+        if audit.state == STATE_UNKNOWN:
+            continue
+        scanned += 1
+        records = shadow_history(
+            symbol,
+            daily,
+            as_of=today,
+            adjustment_basis=None,
+            spx_closes=spx_closes,
+            vix_closes=vix_closes,
+            spx_available=bool(spx_closes),
+            vix_available=bool(vix_closes),
+            earnings_days=frozenset(earnings_by_symbol.get(symbol, ())),
+            earnings_available=earnings_count > 0,
+        )
+        if records:
+            last = records[-1]
+            weeks.append(last.as_of_week)
+            if last.outcome == "candidate":
+                candidates += 1
+    states = {a.state for a in audits} - {STATE_UNKNOWN}
+    if not states:
+        return empty
+    return {
+        "daily_gap_state": STATE_PARTIAL if STATE_PARTIAL in states else STATE_COMPLETE,
+        "daily_gap_count": sum(len(a.gaps) for a in audits),
+        "daily_gap_symbols": len(audits),
+        "strategy3_week": max(weeks) if weeks else "unknown",
+        "strategy3_candidates": candidates,
+        "strategy3_scanned": scanned,
+    }
 
 
 def snapshot(conn, account: str, settings) -> dict:
@@ -222,7 +340,7 @@ def snapshot(conn, account: str, settings) -> dict:
         "daily_bars": daily_bars,
         "daily_first": _stamp(daily_first),
         "daily_last": _stamp(daily_last),
-        "daily_gap_state": "unknown",
+        **_p4_recompute(conn, settings),
         "delayed_prints": delayed_prints,
         "vix_bars": vix_bars,
         "news_rows": news_rows,
@@ -261,7 +379,8 @@ def _node_states(snap: dict) -> dict[str, tuple[str, str]]:
         ),
         "daily_bars": (
             _state(snap["daily_bars"], 252),
-            f"{snap['daily_bars']} ib-daily sessions; gaps {snap['daily_gap_state']}",
+            f"{snap['daily_bars']} ib-daily sessions; gaps "
+            f"{snap['daily_gap_state']} ({snap['daily_gap_count']})",
         ),
         "price_ticks": (
             _state(snap["delayed_prints"]),
@@ -289,10 +408,18 @@ def _node_states(snap: dict) -> dict[str, tuple[str, str]]:
             "ready" if snap["advisor_rows"] else "unknown",
             f"{snap['advisor_rows']} today signals",
         ),
-        "weekly_sma": ("shadow", "not implemented in P1"),
+        "weekly_sma": (
+            "shadow",
+            "sma20/sma50 on completed weeks (V2-P4, shadow only)",
+        ),
         "strategy_1": ("configured", "current opening path"),
         "strategy_2": ("configured", "current management path"),
-        "strategy_3": ("shadow", "not implemented in P1"),
+        "strategy_3": (
+            "shadow",
+            f"last complete week {snap['strategy3_week']}: "
+            f"{snap['strategy3_candidates']} candidate(s) across "
+            f"{snap['strategy3_scanned']} symbol(s); zero drafts (P5/P6 pending)",
+        ),
         "drafts": (
             "ready" if snap["pending"] else "idle",
             f"{snap['pending']} pending",
@@ -324,13 +451,23 @@ def render_header(snap: dict) -> str:
         f'<span class="v mono">{escape(str(value))}</span></div>'
         for label, value in stats
     )
+    if snap.get("daily_gap_state", "unknown") == "unknown":
+        gap_note = (
+            "The 52-week count is stored daily sessions; internal gaps are unknown."
+        )
+    else:
+        gap_note = (
+            f"The 52-week gap audit found {snap['daily_gap_count']} gap(s) "
+            f"across {snap['daily_gap_symbols']} symbol(s): "
+            f"{snap['daily_gap_state']}."
+        )
     return (
         '<div class="card iris-header" data-iris-static="true" '
         f'data-graph-version="{escape(snap["graph_version"], quote=True)}">'
         '<h2>Iris snapshot</h2>'
         f'<div class="iris-stats">{cells}</div>'
         '<p class="slot-note">Read-only graph. Connectors pulse only on a structured run event; '
-        'no event means no animation. The 52-week count is stored daily sessions; internal gaps are unknown.</p>'
+        f'no event means no animation. {gap_note}</p>'
         "</div>"
     )
 
