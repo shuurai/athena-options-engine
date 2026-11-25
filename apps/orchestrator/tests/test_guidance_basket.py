@@ -228,7 +228,8 @@ class TestDecisionRecord(unittest.TestCase):
 
     def test_no_new_migration(self):
         migrations = sorted((ROOT / "packages/store/src/athena_store/migrations").glob("*.sql"))
-        self.assertEqual(len(migrations), 51)
+        # V2-P2 C-20261125-6: 056_strategy_events.sql is the first post-055 migration.
+        self.assertEqual(len(migrations), 52)
         self.assertFalse((ROOT / "packages/store/src/athena_store/migrations/056_guidance.sql").exists())
 
 

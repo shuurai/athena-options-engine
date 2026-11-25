@@ -633,18 +633,26 @@ class TestBoundaries(unittest.TestCase):
     def test_r5_adds_no_migration_and_055_is_r7s(self):
         # R5 added no migration; 055 is R7's regime_labels (D69 / D104).
         folder = ROOT / "packages/store/src/athena_store/migrations"
+        # V2-P2 C-20261125-6: 056 is strategy_events (P2), not R5 / R7.
         self.assertEqual(sorted(p.name for p in folder.glob("05*.sql")),
                          ["050_cycle_progress.sql", "051_advisor_signals.sql",
                           "052_order_events.sql", "053_guardian_alerts.sql",
-                          "054_guardian_runs.sql", "055_regime_labels.sql"])
-        self.assertEqual([p for p in folder.glob("056*")], [])
+                          "054_guardian_runs.sql", "055_regime_labels.sql",
+                          "056_strategy_events.sql"])
+        self.assertEqual([p.name for p in folder.glob("056*")],
+                         ["056_strategy_events.sql"])
 
     def test_force_include_registry_has_no_056(self):
-        # R5 added no registry entry; R7 adds 055 (D104). 056 must stay absent.
+        # V2-P2 C-20261125-6: the only 056 entry is P2's strategy_events.
         text = (ROOT / "packages/store/pyproject.toml").read_text(encoding="utf-8")
         self.assertIn("054_guardian_runs.sql", text)
         self.assertIn("055_regime_labels.sql", text)
-        self.assertNotIn("056_", text)
+        self.assertIn("056_strategy_events.sql", text)
+        self.assertEqual(
+            [line for line in text.splitlines() if "056_" in line],
+            ['"src/athena_store/migrations/056_strategy_events.sql" = '
+             '"athena_store/migrations/056_strategy_events.sql"'],
+        )
 
     def test_last_tradeable_price_is_the_only_price_reader(self):
         src = (ROOT / "apps/orchestrator/src/athena_orchestrator/guardian_trigger.py").read_text(encoding="utf-8")

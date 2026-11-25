@@ -17,6 +17,67 @@ from athena_settings.model import SettingsPayload
 class AmendError(ValueError):
     """The link is still good. The numbers are not."""
 
+
+def _observe(conn, specs: list[dict]) -> None:
+    """V2-P2 / Q15: post-commit, best-effort observation of domain transitions.
+
+    This function is a strict no-op from the domain's point of view: every
+    failure (including an unavailable ``strategy_events`` table) is contained
+    here. The domain commit has already happened before any spec is built.
+    """
+    try:
+        from athena_store import strategy_events
+
+        for spec in specs:
+            strategy_events.observe_event(conn, **spec)
+    except Exception:
+        pass
+
+
+_ORDER_EVENTS = {
+    "queued": "order_queued",
+    "submitted": "order_submitted",
+    "blocked": "order_blocked",
+    "cancelled": "order_cancelled",
+    "filled": "order_filled",
+    "partial": "partial_fill",
+}
+
+
+def _observe_orders(conn, *, draft_id: str, account_id: str, symbol: str, tactic: str) -> None:
+    """Emit one observation per persisted order row created by ``decide()``."""
+    try:
+        rows = conn.execute(
+            "SELECT id, status FROM orders WHERE draft_id = %s ORDER BY id", (draft_id,)
+        ).fetchall()
+    except Exception:
+        return
+    specs = []
+    for row in rows:
+        try:
+            order_id, order_status = row[0], str(row[1])
+        except Exception:
+            continue
+        mapped = _ORDER_EVENTS.get(order_status)
+        if mapped is None:
+            continue
+        specs.append(
+            dict(
+                account_id=account_id,
+                subject_type="order",
+                subject_id=str(order_id),
+                status=mapped,
+                transition=f"draft_approved->{order_status}",
+                symbol=symbol,
+                tactic=tactic,
+                to_status=order_status,
+                reason_code=mapped,
+                payload={"order_status": order_status},
+            )
+        )
+    _observe(conn, specs)
+
+
 PAPER_SYMBOL = "NVDA"
 PAPER_TACTIC = "OPEN_STRANGLE"
 
@@ -89,6 +150,22 @@ def expire_pending(conn: psycopg.Connection, account_id: str, ttl_minutes: int) 
         (account_id, ttl_minutes),
     ).fetchall()
     conn.commit()
+    _observe(conn, [
+        dict(
+            account_id=account_id,
+            subject_type="draft",
+            subject_id=str(row[0]),
+            status="draft_expired",
+            transition="pending->expired",
+            symbol=str(row[1] or ""),
+            tactic=str(row[2] or ""),
+            from_status="pending",
+            to_status="expired",
+            reason_code="draft_ttl",
+            payload={"draft_status": "expired"},
+        )
+        for row in rows
+    ])
     return list(rows)
 
 
@@ -410,6 +487,22 @@ def apply_ticket_block(
         (reason, [row[0] for row in rows]),
     )
     conn.commit()
+    _observe(conn, [
+        dict(
+            account_id=account_id,
+            subject_type="draft",
+            subject_id=str(row[0]),
+            status="draft_blocked",
+            transition="pending->blocked",
+            symbol=symbol,
+            tactic=str(row[1] or ""),
+            from_status="pending",
+            to_status="blocked",
+            reason_code="ticket_cap",
+            payload={"draft_status": "blocked", "contracts": int(row[2] or 0)},
+        )
+        for row in rows
+    ])
     note = "ticket cash need would breach reserve" if "cash_reserve" in reason else ""
     for row in rows:
         draft_id, tactic, contracts, limit_price, put_strike, call_strike, multiplier = row
@@ -912,6 +1005,23 @@ def _insert_draft(
         ),
     )
     conn.commit()
+    _observe(conn, [dict(
+        account_id=account_id,
+        subject_type="draft",
+        subject_id=draft_id,
+        status="draft_blocked" if status == "blocked" else "draft_created",
+        transition="created->blocked" if status == "blocked" else "created",
+        symbol=str(symbol or ""),
+        tactic=str(tactic or ""),
+        from_status="",
+        to_status=str(status),
+        reason_code="risk_block" if status == "blocked" else "draft_created",
+        payload={
+            "tactic": str(tactic or ""),
+            "contracts": int(contracts or 0),
+            "draft_status": str(status),
+        },
+    )])
     if status == "blocked":
         _note_risk_block(
             conn, account_id, draft_id, symbol, tactic, contracts, reason,
@@ -1738,6 +1848,24 @@ def use_link(
         (token,),
     )
     conn.commit()
+    if amend:
+        try:
+            owner = conn.execute(
+                "SELECT account_id FROM drafts WHERE id = %s", (draft_id,)
+            ).fetchone()
+        except Exception:
+            owner = None
+        if owner is not None:
+            _observe(conn, [dict(
+                account_id=str(owner[0] or ""),
+                subject_type="draft",
+                subject_id=str(draft_id),
+                status="draft_amended",
+                transition="pending->amended",
+                to_status="pending",
+                reason_code="draft_amended",
+                payload={"draft_status": "pending"},
+            )])
     return draft_id
 
 
@@ -1783,6 +1911,30 @@ def decide(
     if decision == "reject":
         note_reject_streak(conn, account_id)
     conn.commit()
+    approved = decision == "approve"
+    final_status = "approved" if approved else "rejected"
+    _observe(conn, [dict(
+        account_id=account_id,
+        subject_type="draft",
+        subject_id=draft_id,
+        status="draft_approved" if approved else "draft_rejected",
+        transition=f"pending->{final_status}",
+        symbol=str(symbol or ""),
+        tactic=str(tactic or ""),
+        from_status="pending",
+        to_status=final_status,
+        reason_code="draft_approved" if approved else "draft_rejected",
+        payload={
+            "tactic": str(tactic or ""),
+            "contracts": int(contracts or 0),
+            "draft_status": final_status,
+        },
+    )])
+    if approved:
+        _observe_orders(
+            conn, draft_id=draft_id, account_id=account_id,
+            symbol=str(symbol or ""), tactic=str(tactic or ""),
+        )
 
 
 def _queue_order(

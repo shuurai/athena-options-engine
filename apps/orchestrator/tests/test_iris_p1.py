@@ -199,9 +199,11 @@ class TestIrisStaticGraph(unittest.TestCase):
         cls.graph = iris_view.render_graph(iris_view.snapshot(_SpyConn(), "U1", standard_payload()))
 
     def test_graph_version_is_stable_and_exposed(self):
-        self.assertEqual(iris_view.GRAPH_VERSION, "iris-p1-static-v1")
-        self.assertIn('data-graph-version="iris-p1-static-v1"', self.body)
-        self.assertEqual(self.body.count("iris-p1-static-v1"), 2)
+        # V2-P2 bumps the version: events now carry a graph_version that the
+        # client must match before animating (§20.2). P1 was p1-static-v1.
+        self.assertEqual(iris_view.GRAPH_VERSION, "iris-p2-events-v1")
+        self.assertIn('data-graph-version="iris-p2-events-v1"', self.body)
+        self.assertEqual(self.body.count("iris-p2-events-v1"), 2)
 
     def test_every_registered_node_has_a_stable_id_and_status(self):
         for node in iris_view.NODES:
@@ -284,12 +286,12 @@ class TestIrisStaticGraph(unittest.TestCase):
 
     def test_graph_copy_is_english(self):
         self.assertIsNone(CJK.search(self.graph))
-        self.assertIn("No line is animated", self.graph)
+        self.assertIn("A connector moves only when a matching structured run event arrives", self.graph)
 
     def test_header_states_no_live_events_and_daily_gap_is_unknown(self):
         header = iris_view.render_header(iris_view.snapshot(_SpyConn(), "U1", standard_payload()))
-        self.assertIn("Read-only static graph", header)
-        self.assertIn("No live events or connector animation in P1", header)
+        self.assertIn("Read-only graph", header)
+        self.assertIn("no event means no animation", header)
         self.assertIn("internal gaps are unknown", header)
         self.assertIn('data-iris-static="true"', header)
 
@@ -298,8 +300,12 @@ class TestIrisStaticGraph(unittest.TestCase):
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
         self.assertIn(".iris-graph * { animation: none !important; transition: none !important; }", css)
 
-    def test_css_says_no_connector_animation_in_p1(self):
-        self.assertIn("No connector animation in this phase", CONSOLE_SRC.read_text())
+    def test_css_says_connectors_pulse_only_on_real_events(self):
+        # V2-P2: finite, event-driven pulse; still no perpetual animation.
+        css = CONSOLE_SRC.read_text()
+        self.assertIn("a single finite pulse is applied", css)
+        self.assertIn("No perpetual animation", css)
+        self.assertIn("animation: iris-pulse 900ms ease-out 1", css)
 
 
 class TestIrisReadOnlySnapshot(unittest.TestCase):
@@ -476,10 +482,10 @@ class TestIrisGuardianSideBand(unittest.TestCase):
         self.assertIn("Operator direct paths", direct[0].label)
         self.assertTrue(any(e.flow == "direct" for e in iris_view.EDGES))
 
-    def test_iris_lead_and_chips_mark_static_p1(self):
+    def test_iris_lead_and_chips_mark_events_p2(self):
         _, built = _render_iris()
-        self.assertIn("No live animation in P1", built["lead"])
-        self.assertIn(("info", "STATIC P1"), built["chips"])
+        self.assertIn("Connectors move only on real run events", built["lead"])
+        self.assertIn(("info", "EVENTS P2"), built["chips"])
 
     def test_iris_page_is_english(self):
         _, built = _render_iris()

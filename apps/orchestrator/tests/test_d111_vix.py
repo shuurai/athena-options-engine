@@ -419,7 +419,8 @@ class TestDecisionRecord(unittest.TestCase):
 
     def test_no_schema_migration_or_streaming_vix_path_was_added(self):
         migrations = list((ROOT / "packages/store/src/athena_store/migrations").glob("0*.sql"))
-        self.assertEqual(len(migrations), 51)
+        # V2-P2 C-20261125-6: 056_strategy_events.sql is the first post-055 migration.
+        self.assertEqual(len(migrations), 52)
         for path in (
             ROOT / "apps/orchestrator/src/athena_orchestrator/backfill.py",
             ROOT / "apps/orchestrator/src/athena_orchestrator/pages.py",

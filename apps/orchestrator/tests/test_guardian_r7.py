@@ -909,7 +909,8 @@ class TestD109Retirement(unittest.TestCase):
         not appear is a *source literal* or a quote/subscription call.
         """
         migrations = list((ROOT / "packages/store/src/athena_store/migrations").glob("0*.sql"))
-        self.assertEqual(len(migrations), 51)
+        # V2-P2 C-20261125-6: 056_strategy_events.sql is the first post-055 migration.
+        self.assertEqual(len(migrations), 52)
         self.assertTrue((ROOT / "packages/store/src/athena_store/migrations"
                          / "055_regime_labels.sql").exists())
         self.assertEqual(vixfeed.SOURCE, "ib-vix")

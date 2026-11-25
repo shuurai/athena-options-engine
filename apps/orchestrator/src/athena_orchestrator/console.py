@@ -33,6 +33,48 @@ from athena_orchestrator import pages
 from athena_orchestrator.tasks import begin_fill, begin_positions, list_tasks
 from athena_orchestrator.view import bind_view, current_view
 
+def _iris_frame(event: dict, *, account: str | None = None) -> dict | None:
+    """Validate one observation frame. Drops wrong account / malformed frames.
+
+    §21.2: structured JSON only; no free-text reason. A stale
+    ``graph_version`` is passed through unchanged so the client can show a
+    mismatch and apply no animation (§20.6.5).
+    """
+    from athena_store import strategy_events as store_events
+
+    event_id = event.get("event_id")
+    if not isinstance(event_id, str) or not event_id:
+        return None
+    if account is not None and event.get("account_id") != account:
+        return None
+    # The stored version is passed through, never rewritten: the client rejects
+    # a stale graph_version instead of animating against the wrong graph.
+    version = event.get("graph_version") or store_events.GRAPH_VERSION
+    status = event.get("status")
+    if status not in store_events.EVENT_TYPES:
+        return None
+    payload = event.get("payload") or {}
+    if not isinstance(payload, dict):
+        return None
+    extra = set(payload) - store_events.PAYLOAD_KEYS
+    if extra or "reason" in payload or "reason_text" in payload:
+        return None
+    return {
+        "event_id": event_id,
+        "status": status,
+        "subject_type": event.get("subject_type", ""),
+        "subject_id": event.get("subject_id", ""),
+        "from_status": event.get("from_status", ""),
+        "to_status": event.get("to_status", ""),
+        "reason_code": event.get("reason_code", ""),
+        "symbol": event.get("symbol", ""),
+        "edge_id": event.get("edge_id", ""),
+        "graph_version": version,
+        "occurred_at": str(event.get("occurred_at", "")),
+        "payload": payload,
+    }
+
+
 _MARK = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true">
   <defs><linearGradient id="strangle" x1="8" y1="0" x2="56" y2="64" gradientUnits="userSpaceOnUse">
     <stop offset="0" stop-color="#2f6fed"/><stop offset="1" stop-color="#0e7490"/>
@@ -766,7 +808,8 @@ select:focus-visible {
 .guard-ack .btn { font-size: 11px; padding: 4px 10px; }
 .guard-error { border-color: #7f1d1d; }
 .guard-error pre { white-space: pre-wrap; font-size: 11px; color: var(--site-text-3); }
-/* Iris P1: static architecture graph. No connector animation in this phase. */
+/* Iris P2: connectors are static by default; a single finite pulse is applied
+   only when a matching structured run event arrives. No perpetual animation. */
 .iris-page { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; }
 .iris-header { flex: none; }
 .iris-stats { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px 14px; margin: 10px 0 8px; }
@@ -805,8 +848,18 @@ select:focus-visible {
   .iris-grid { grid-template-columns: minmax(0, 1fr); }
   .iris-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+/* V2-P2: one finite pulse per real event. No keyframes loop, no idle motion. */
+.iris-edge.iris-pulse { animation: iris-pulse 900ms ease-out 1; stroke: #e2e8f0; }
+@keyframes iris-pulse {
+  0% { stroke-width: 1.4; opacity: 1; }
+  35% { stroke-width: 3.2; opacity: 1; }
+  100% { stroke-width: 1.4; opacity: 1; }
+}
+.iris-live-status[data-iris-live="gap"] { color: #f59e0b; }
+.iris-live-status[data-iris-live="mismatch"] { color: #ef4444; }
 @media (prefers-reduced-motion: reduce) {
   .iris-graph * { animation: none !important; transition: none !important; }
+  .iris-edge.iris-pulse { animation: none !important; }
 }
 """
 
@@ -827,9 +880,11 @@ def _design_root() -> Path:
 
 
 def start_console_server(database_url: str, port: int, allowlist: set[str]) -> ThreadingHTTPServer:
+    from athena_orchestrator import iris_events
     from athena_orchestrator.pulse import configure
 
     configure(database_url)
+    iris_events.attach()  # V2-P2: live observer of post-commit event writes
     class Handler(QuietHandler):
         def do_OPTIONS(self) -> None:
             path = urlparse(self.path).path
@@ -873,6 +928,9 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                 return
             if parsed.path == "/api/logs":
                 self._send_logs()
+                return
+            if parsed.path == "/api/iris/events":
+                self._send_iris_events(query)
                 return
             if parsed.path == "/api/pulse":
                 with connect(database_url) as conn:
@@ -1048,6 +1106,95 @@ def start_console_server(database_url: str, port: int, allowlist: set[str]) -> T
                 return
             finally:
                 unsubscribe_trail(listener)
+
+        def _send_iris_events(self, query: dict) -> None:
+            """V2-P2: structured Iris SSE. Replay from Postgres, then live.
+
+            Separate from ``/api/logs`` (§21.2). Durable rows are re-read on
+            each keepalive, so an engine-side emit in another process still
+            reaches this stream. An unknown cursor or a failed replay is an
+            explicit ``observation_gap`` — never a silently empty interval.
+            """
+            from queue import Empty
+
+            from athena_orchestrator import iris_events
+            from athena_store import strategy_events as store_events
+
+            account = _account()
+            cursor = (query.get("cursor") or [self.headers.get("Last-Event-ID", "")])[0]
+            self._open_stream()
+            listener = iris_events.subscribe()
+            sent: set[str] = set()
+            state = {"last_id": cursor, "gap": "", "ticks": 0}
+
+            def gap(reason_code: str) -> None:
+                if state["gap"] == reason_code:
+                    return  # do not spam the client on every poll
+                state["gap"] = reason_code
+                self.wfile.write(
+                    ("data: " + json.dumps({
+                        "status": "observation_gap",
+                        "reason_code": reason_code,
+                        "graph_version": store_events.GRAPH_VERSION,
+                    }) + "\n\n").encode("utf-8")
+                )
+                self.wfile.flush()
+
+            def drain(rows: list[dict]) -> None:
+                for event in rows:
+                    payload = _iris_frame(event, account=account)
+                    if payload is None or payload["event_id"] in sent:
+                        continue
+                    sent.add(payload["event_id"])
+                    state["last_id"] = payload["event_id"]
+                    self._write_iris_frame(payload)
+
+            def poll_db() -> None:
+                try:
+                    with connect(database_url) as conn:
+                        rows = store_events.replay(
+                            conn, account_id=account,
+                            after_event_id=state["last_id"], limit=200,
+                        )
+                except store_events.UnknownCursor:
+                    gap("unknown_cursor")
+                    return
+                except Exception:
+                    gap("replay_unavailable")
+                    return
+                state["gap"] = ""
+                drain(rows)
+
+            try:
+                poll_db()  # cursor replay first, in (occurred_at, event_id) order
+                while True:
+                    try:
+                        event = listener.get(timeout=5)
+                    except Empty:
+                        state["ticks"] += 1
+                        if state["ticks"] % 3 == 0:
+                            self.wfile.write(b":\n\n")
+                            self.wfile.flush()
+                        poll_db()  # closes the replay -> live handoff
+                        continue
+                    payload = _iris_frame(event, account=account)
+                    if payload is None or payload["event_id"] in sent:
+                        continue
+                    sent.add(payload["event_id"])
+                    state["last_id"] = payload["event_id"]
+                    self._write_iris_frame(payload)
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                from athena_orchestrator.httpd import client_closed
+
+                client_closed(self)
+                return
+            finally:
+                iris_events.unsubscribe(listener)
+
+        def _write_iris_frame(self, payload: dict) -> None:
+            self.wfile.write(("id: " + payload["event_id"] + "\n").encode("utf-8"))
+            self.wfile.write(("data: " + json.dumps(payload, default=str) + "\n\n").encode("utf-8"))
+            self.wfile.flush()
 
         def _send_events(self, account: str) -> None:
             from queue import Empty
@@ -5086,6 +5233,54 @@ _CLIENT_JS = r"""
   pollReview();
   setInterval(pollReview, 5000);
   showFlashes();
+  bootIrisEvents();
+
+  // V2-P2: truthful, event-driven Iris animation. No event => no animation.
+  function bootIrisEvents() {
+    const graph = document.querySelector('.iris-graph[data-graph-version]');
+    const status = document.querySelector('.iris-live-status[data-iris-live]');
+    if (!graph || !status) return;
+    const version = graph.getAttribute('data-graph-version');
+    const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let stream;
+    try { stream = new EventSource('/api/iris/events'); }
+    catch (_) { return; }
+    stream.onmessage = function (ev) {
+      let frame;
+      try { frame = JSON.parse(ev.data); } catch (_) { return; }
+      if (frame.status === 'observation_gap') {
+        status.textContent = 'Observation gap: part of this interval has no structured event evidence.';
+        status.setAttribute('data-iris-live', 'gap');
+        return;
+      }
+      if (frame.graph_version !== version) {
+        status.textContent = 'Graph version mismatch; no animation applied.';
+        status.setAttribute('data-iris-live', 'mismatch');
+        return;
+      }
+      if (!frame.edge_id) {
+        status.textContent = 'Latest event: ' + frame.status;
+        status.setAttribute('data-iris-live', 'event');
+        return;
+      }
+      const edge = graph.querySelector('.iris-edge[data-edge-id="' + frame.edge_id + '"]');
+      if (!edge) return;
+      if (reduced) {
+        status.textContent = 'Latest event: ' + frame.status;
+        status.setAttribute('data-iris-live', 'event');
+        return;
+      }
+      edge.classList.remove('iris-pulse');
+      void edge.getBoundingClientRect();
+      edge.classList.add('iris-pulse');
+      status.textContent = 'Latest event: ' + frame.status;
+      status.setAttribute('data-iris-live', 'event');
+    };
+    stream.onerror = function () {
+      status.textContent = 'Event stream interrupted. Reconnecting replays from the last event id.';
+      status.setAttribute('data-iris-live', 'gap');
+    };
+  }
 })();
 </script>
 """

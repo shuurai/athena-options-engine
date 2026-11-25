@@ -1712,12 +1712,12 @@ def _iris_page(conn, account: str, query: dict) -> dict:
     )
     enabled = settings.advisor.enabled
     chips = [
-        ("info", "STATIC P1"),
+        ("info", "EVENTS P2"),
         ("", "ADVISORY" if enabled else "ADVISOR OFF"),
     ]
     return _html(
         "Iris",
-        "Athena's eyes. Follow inputs through factors and strategy boundaries into the one existing draft queue. No live animation in P1.",
+        "Athena's eyes. Follow inputs through factors and strategy boundaries into the one existing draft queue. Connectors move only on real run events.",
         body,
         chips,
     )

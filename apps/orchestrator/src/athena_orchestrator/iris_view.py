@@ -1,8 +1,11 @@
-"""Read-only Iris P1 architecture snapshot.
+"""Read-only Iris architecture snapshot (V2-P2).
 
-This module deliberately contains no animation, polling, event stream, domain
-writer, migration or trading logic. It renders a static graph from existing
-tables and reuses the one existing draft queue.
+This module stays a pure read model: no animation code, no polling, no event
+stream, no domain writer, no migration and no trading logic. It renders the
+graph from existing tables and reuses the one existing draft queue. The
+event-driven connector pulse lives in the console client script and is fed
+only by structured ``strategy_events`` frames; with no event there is no
+animation.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
 
-GRAPH_VERSION = "iris-p1-static-v1"
+GRAPH_VERSION = "iris-p2-events-v1"
 
 
 @dataclass(frozen=True)
@@ -325,8 +328,8 @@ def render_header(snap: dict) -> str:
         f'data-graph-version="{escape(snap["graph_version"], quote=True)}">'
         '<h2>Iris snapshot</h2>'
         f'<div class="iris-stats">{cells}</div>'
-        '<p class="slot-note">Read-only static graph. No live events or connector animation in P1. '
-        'The 52-week count is stored daily sessions; internal gaps are unknown.</p>'
+        '<p class="slot-note">Read-only graph. Connectors pulse only on a structured run event; '
+        'no event means no animation. The 52-week count is stored daily sessions; internal gaps are unknown.</p>'
         "</div>"
     )
 
@@ -401,7 +404,9 @@ def render_graph(snap: dict) -> str:
         '<div class="card iris-graph-card"><h2>Architecture · static</h2>'
         '<div class="iris-graph-wrap">' + "".join(parts) + "</div>"
         '<p class="slot-note">Lines describe current architecture and planned shadow edges. '
-        'No line is animated because no structured run events exist in P1.</p>'
+        'A connector moves only when a matching structured run event arrives.</p>'
+        '<p class="slot-note iris-live-status" data-iris-live="idle" role="status">'
+        'Event stream idle. No structured run events yet.</p>'
         "</div>"
     )
 

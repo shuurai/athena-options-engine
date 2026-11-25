@@ -7,6 +7,7 @@
 > **状态推进（2026-11-25，第三笔）**：操作者确认 §19 后，**V2-P2 / V2-P3 落地前契约已写入 §20**（`C-20261125-3`）。§20 本身零代码、零迁移、不预占迁移号，仍需操作者批准后才进入实现批次；Q7–Q12 / Q14 仍未裁定。
 > **状态推进（2026-11-25，第四笔）**：操作者逐项确认 §20.8 五条实现口径后，**§20 获批**，记录见 §21（`C-20261125-4`）。其中第 1 条由 `America/New_York` **显式窄修订为 UTC 日界**（Q5 identity 公式本身不变）；§6.2 / §19 / §20 历史 verbatim 行一律保留，只追加状态推进。**§20 获批 ≠ 授权实现**：P2 / P3 仍须各自独立实现批次、独立 commit / rollback；Q7–Q12 / Q14 仍未裁定。
 > **状态推进（2026-11-25，第五笔）**：操作者指令「stop asking me with choices … just give me one sequential order and get them done」，据此**一次性裁定剩余 7 条 Q7–Q12 / Q14**（§22，`C-20261125-5`），Q14 的 `eval-v1` 在看任何 holdout 结果前先验冻结。**V2-Q1–Q15 全部 15 条已裁定完毕**。此后按固定顺序实施 P2 → P3 → P4 → P5 → P6 → P7，每批独立验证与提交；P5 数据不足则 `no-go` 且不自动进入 P6。上行第三／四笔「Q7–Q12 / Q14 仍未裁定」是当时状态，保留不改写。
+> **状态推进（2026-11-25，第六笔）**：固定顺序的 **Step 2 / V2-P2 已实现、验证并独立交付**，记录见 §23（`C-20261125-6`）。`strategy_events` 窄表（migration `056`）、post-commit 幂等 emit、独立 `/api/iris/events` SSE、cursor replay → live 交接、`observation_gap`、真值动画与 60s reconciler 全部落地；全量 `879/879`（2 env skips）、`27/27` mutation traps、真实 PostgreSQL apply + 事务内 rollback、wheel 52 迁移内含 `056`。**P3–P7 仍未实现**；Q1–Q15 已裁定完毕不代表实现完毕。上行「每批独立验证与提交」是本批遵循的口径。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1023,3 +1024,100 @@ drafts / orders                 empty (smoke DB)
 - 上游：`C-20261124-11`（§16）、`C-20261125-1`（§18）、`-2`（§19）、`-3`（§20）、`-4`（§21）。
 - 本批验证：`unittest discover` 全量、`git diff --check`、台账机检、缺失索引 mutation trap、本地链接与来源路径检查；零代码改动故无真实库写入。实测见 `logs/2026-11-25.md` `C-20261125-5` 验证块。
 - 回滚：`git revert <sha>`；只回滚 §22、头部第五笔状态推进、00 册索引、`CHANGELOG.md` 与台账条目；历史 verbatim 行不受影响。
+
+---
+
+## 23. V2-P2 交付记录（2026-11-25，`C-20261125-6`）
+
+### 23.1 状态与授权边界
+
+- 操作者指令「stop asking me with choices … just give me one sequential order and get them done」确立固定顺序 `Q7–Q12/Q14 → P2 → P3 → P4 → P5 → P6 → P7`。本批是其中 **Step 2 / V2-P2 的独立实现批次**，按 §20.7 独立 commit、独立 rollback，与 P3 分开。
+- 授权来源：§20（已批准，`C-20261125-4`）、§21.2 五项实现口径、§19 的 Q4 / Q15、§22 的 Q12（operator direct 标注口径）。**Q7–Q12 / Q14 已在 §22 裁定完毕**，本批不重新裁定。
+- 编号纪律：本批仍是册内 `V2-*`，**不分配全局 D 号**；`D1–D111 / 112 节点 / 54 条裁定` 不变；§1 / §6 零修订；§14 / §17 / §18 / §19 / §20 / §21 / §22 历史 verbatim 行一律保留，只追加状态推进。
+- 运行时：本批**未重启 7799 console、未重试被取消的 `dxnrJP`、未启动任何 engine 进程**；IB Gateway `7497 / 4001 / 4002` 仍关闭。`athena-pg` 是本批唯一 schema 变更：`51 → 52` migrations，仅新增 `056_strategy_events.sql`。验证数据写入使用隔离账号 `ZZP2TEST` 并在事务内 `ROLLBACK`，业务表零写入。
+
+### 23.2 实现清单
+
+| 文件 | 变更 |
+|---|---|
+| `packages/store/src/athena_store/migrations/056_strategy_events.sql` | 新增 append-only 窄表 `strategy_events`，15 列、`event_id` 主键、3 个索引；注释内不含分号（`migrate.py` 按 `;` 切句，R7 既有坑） |
+| `packages/store/src/athena_store/strategy_events.py` | 新增：21 项词表、`PAYLOAD_KEYS` 结构化白名单、确定性 `event_id()`、`validate_event()`、`build_event()`、`emit_after_commit()`、`emit_observation_gap()`、`replay()` / `UnknownCursor`、`observe_event()`、`reconcile_drafts()`、观察者注册表 `add_observer()` / `_notify()` |
+| `packages/store/pyproject.toml` | force-include 新增 `056_strategy_events.sql`（wheel 实测 52 迁移） |
+| `packages/strategy-nfr/src/athena_strategy/drafts.py` | 新增 `_observe()` / `_observe_orders()`；在 `expire_pending()` / `apply_ticket_block()` / `_insert_draft()` / `decide()` / `use_link()` 五处 **domain `commit()` 之后**幂等 emit；失败完全内含，零 domain 影响 |
+| `apps/orchestrator/src/athena_orchestrator/iris_events.py` | 新增独立 live fan-out 注册表（`publish` / `subscribe` / `recent` / `attach` / `detach`），与 `runtime._TRAIL` / `/api/logs` 完全分离 |
+| `apps/orchestrator/src/athena_orchestrator/iris_reconcile.py` | 新增 60s daemon，只从 `drafts` 持久化行补齐**可推导**事件；`run_once()` / `accounts()` 可单测 |
+| `apps/orchestrator/src/athena_orchestrator/console.py` | 新增 `/api/iris/events` 路由、`_iris_frame()`、`_send_iris_events()`、`_write_iris_frame()`；CSS 有限单次 pulse + `prefers-reduced-motion`；客户端 `bootIrisEvents()` 真值动画；启动时 `iris_events.attach()` |
+| `apps/orchestrator/src/athena_orchestrator/iris_view.py` | `GRAPH_VERSION = iris-p2-events-v1`、真值动画文案、`data-iris-live="idle"` 状态节点；模块仍为纯只读快照 |
+| `apps/orchestrator/src/athena_orchestrator/pages.py` | `_iris_page()` chip `EVENTS P2`、lead「Connectors move only on real run events」 |
+| `apps/orchestrator/src/athena_orchestrator/loop.py` | 启动 / 停止 `iris_reconcile` daemon（两处 shutdown 路径） |
+| `apps/orchestrator/tests/test_iris_p1.py` | 同步被 P2 supersede 的 P1 断言（graph version、文案、CSS、chip） |
+| `apps/orchestrator/tests/test_iris_p2.py` | **新增 69 项** P2 单测：identity / payload / Q15 / replay / reconciler / registry / frame / migration / console surface / 域接线 / §20.2.7 fixture |
+| 8 处历史断言 | `test_d111_vix` / `test_guardian_r3` / `r4` / `r5` / `r6` / `r7` / `test_guidance_basket` / `test_settings_layout` 同步 `51 → 52` 与 `056` 归属，**同步而非删除**（§20.4，D108 先例） |
+
+### 23.3 §20.2 契约逐条对照
+
+| §20.2 | 落地 | 证据 |
+|---|---|---|
+| 1 新表 | `056_strategy_events.sql` 窄表、append-only、`event_id` 由 subject + transition + version 确定性生成；无万能 event bus、无可变状态列 | 真实 PG 15 列 / 4 索引；`INSERT_SQL` 唯一写入路径 |
+| 2 词表 | 21 项 `EVENT_TYPES` 与 §20.2.2 逐字一致；`status / from_status / to_status / reason_code` 显式 | `test_event_types_match_the_ratified_vocabulary` |
+| 3 emit 边界（Q15） | domain `commit()` **之后**调用；`ON CONFLICT (event_id) DO NOTHING` 幂等；`_observe()` 捕获一切异常；失败只记 `observation_gap`，绝不回滚或阻断 `drafts / approvals / orders / positions` | `test_event_write_failure_does_not_change_a_committed_domain_row`、`test_observe_swallows_event_write_failures`、真实 PG 重复插入 count 不变 |
+| 4 reconciler | 60s daemon 只补 `draft_created` 与 6 类终态；**不臆造** `filtered / quiet / factor_computed`，补不出留 `observation_gap` | `iris_reconcile.py` docstring、`test_does_not_invent_events_for_unknown_status` |
+| 5 SSE | 独立 `/api/iris/events`；`Last-Event-ID` / `cursor`；先 replay 再 live；`sent` 去重；未知 / 跨账号 cursor → `observation_gap`；每 5s 从 `strategy_events` 复读持久行以跨进程闭合 replay→live 交接；15s keepalive；`prefers-reduced-motion`、graph version mismatch、wrong account / symbol / edge 不动画 | `test_iris_p2.py` `TestConsoleSurface`、真实 PG `UNKNOWN_CURSOR TRAPPED` / `CROSS_ACCOUNT_CURSOR TRAPPED` |
+| 6 operator direct | `EXTERNAL` / `MANUAL` 不投影为策略链路；且这两类 draft 由 `tasks.py` / `order_watch.py` 直接写库，本就不经过 `drafts.py` emit 锚点 | `test_operator_direct_tactics_are_not_a_strategy_chain` |
+| 7 fixture | BUY / `OPEN_CSP` / `OPEN_CC` / `OPEN_STRANGLE` 四 tactic；rejected / expired / amended / replaced / blocked / partial-fill / cancel 七状态类；event-write failure；replay→live 交接；「无事件不动画」 | `TestP2Fixture`（`TACTICS` / `STATUSES` 表驱动） |
+
+### 23.4 §20.4 / §21.2 迁移、打包与备份口径
+
+- 按 §20.8 第 5 条「实现时取当时空号」，本批取 `056`；同批加入 `.sql` + `pyproject.toml` force-include + 同步 8 处断言。**不预占 `057`**（留给 P3）。
+- wheel 实测：`uv build --package athena-store` → `MIGRATION_COUNT_IN_WHEEL = 52`、`056_IN_WHEEL = True`、末三条 `054 / 055 / 056`。
+- 真实 PG `apply_migrations()` 只返回 `['056_strategy_events.sql']`；`schema_migrations` 末位为 `056`。
+- **§21.2 第 4 条遵守**：`strategy_events` **不加入** `backup.py TABLES`（append-only 观察读模型，丢失由 reconciler + `observation_gap` 覆盖）；P3 三张新闻表留到 P3 批次加入；`052_order_events` / `055_regime_labels` 既有缺口仍归独立运维轮。
+- **§21.2 第 2 条遵守**：`payload` 只有结构化标量；自由文本 `reason` 留在 `drafts.reason`；`validate_event()` 显式拒绝 `reason` / `reason_text` 键，`_iris_frame()` 二次拦截。
+- **§21.2 第 3 条遵守**：不复用 `/api/logs` 的 `subscribe_trail()` / `trail_recent()`；`/api/logs`、`/api/pulse/ticks` 未改。
+
+### 23.5 验证（实测）
+
+```
+apps.orchestrator.tests.test_iris_p2                 69/69 OK
+unittest discover -p "test_*.py"                    879/879 OK (skipped=2)
+                                                    基线 810 + 新增 69
+mutation traps                                      27/27 TRAPPED, sha256 逐字节还原
+compileall                                          OK
+uv lock --check                                      Resolved 29 packages (uv.lock 零变动)
+git diff --check                                     0
+node scripts/check-changelog.mjs                     logs 13 / 条目 128 / 索引 128 ✓
+LOCAL_LINK_AND_SOURCE_ERRORS                         0
+隔离临时夹具 missing-index mutation                 MISSING_INDEX_MUTATION_TRAPPED
+
+真实 PostgreSQL (athena-pg, 52 migrations)
+  apply_migrations() -> ['056_strategy_events.sql']
+  strategy_events: 15 columns / 4 indexes (pkey + occurred + account + subject)
+  BEGIN (implicit) -> insert 4 events -> replay all = 4
+  after cursor (2nd) = 2 rows ['d2','d3']
+  duplicate INSERT (ON CONFLICT DO NOTHING) -> count stays 4
+  UNKNOWN_CURSOR TRAPPED / CROSS_ACCOUNT_CURSOR TRAPPED
+  ROLLBACK -> COUNT_AFTER_ROLLBACK = 0
+wheel: athena_store-0.0.0-py3-none-any.whl -> 52 migrations, 056 present
+```
+
+### 23.6 明确不做 / 遗留
+
+- **零 P3**：未建新闻三表、未跑 news backfill、未改任何 writer / reader、未落地 §21.3 的 UTC 解析入口校验（属 P3）。
+- **零 P4–P6**：未实现周线 SMA、Strategy 3 shadow、`eval-v1` 执行、exit 语义、工具接入。
+- **零业务写入**：验证用 `ZZP2TEST` 隔离账号且事务内 `ROLLBACK`；未写 `drafts / approvals / orders / positions`。
+- **P2 边界**：`news_ingested / factor_computed / strategy_started / strategy_completed / filtered / quiet / invalid / draft_replaced` 当前无 domain 生产者，`strategy_events` 中这些词表项保持为空；这不是臆造，未覆盖区间一律 `observation_gap`。`draft_replaced` 在当前代码中无对应状态路径，reconciler 只在出现该状态时补。
+- **无持久化 live replay 队列**（§21.2）：重连从 cursor 复读 `strategy_events`；未知 cursor 显式 `observation_gap`。
+- 两个启动阻塞（`run_loop()` 的 `load_active()` 早于 `apply_migrations()`；`var/backups` 996 快照 prune）仍属独立运维轮。
+- 7799 console 仍载入改动前代码；D111 自动 VIX backfill 与本批 SSE 需未来安全重启窗口。**本批不重启、不重试 `dxnrJP`**。
+
+### 23.7 回滚
+
+- `git revert <sha>`：只回滚本批新增 / 修改文件、§23、头部第六笔状态推进、00 册 15 号索引、`CHANGELOG.md` 与 `C-20261125-6` 台账条目；历史 verbatim 行不受影响。
+- `056_strategy_events.sql` 是 additive；按 §20.7 可**单独停用 `/api/iris/events` 端点并保留空表**（append-only、无读取方即无害），也可单独 `DROP TABLE strategy_events` 并从 `schema_migrations` 撤号，不影响任何业务表。
+- `strategy_events` 未入 `backup.py TABLES`，restore 后该表缺失由 reconciler + `observation_gap` 覆盖，符合 §21.2 裁定。
+- P2 / P3 分开提交、分开回滚，避免一次 revert 同时抽掉事件与新闻两条链。
+
+### 23.8 关联
+
+- 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`（§17/§18 P1）、`-2`（§19 Round A）、`-3`（§20 契约）、`-4`（§21 批准与五项口径）、`-5`（§22 Round B / `eval-v1`）。
+- 下游：V2-P3（`§20.3`，下一批，取当时空号 `057`）、P4 / P5 / P6 / P7 按固定顺序继续；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。

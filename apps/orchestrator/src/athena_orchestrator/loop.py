@@ -27,6 +27,10 @@ from athena_orchestrator.guardian_regime import (
     start_regime_scheduler,
     stop_regime_scheduler,
 )
+from athena_orchestrator.iris_reconcile import (
+    start_iris_reconciler,
+    stop_iris_reconciler,
+)
 from athena_orchestrator.paper import run_paper_cycle
 from athena_orchestrator.runtime import (
     begin_running,
@@ -139,6 +143,9 @@ async def run_loop() -> None:
     # EXECUTED_RUNS stays ("A", "B") so the two threads never claim each other's slot.
     start_regime_scheduler(database_url)
     log.info("regime scheduler started (R7, C at 12:30 ET)")
+    # V2-P2: derive missing observation events from persisted domain rows.
+    start_iris_reconciler(database_url)
+    log.info("iris reconciler started (V2-P2, 60s, derivable events only)")
     # R4 (D81): the callback registry must be installed BEFORE polling starts,
     # so an inline Resolve arriving on the first update is already routable.
     install_guardian_callbacks(database_url)
@@ -166,6 +173,7 @@ async def run_loop() -> None:
         stop_tunnel()
         stop_guardian_scheduler()
         stop_regime_scheduler()
+        stop_iris_reconciler()
         stop_guardian_nag()
         return
     while cycles == 0 or completed < cycles:
@@ -174,6 +182,7 @@ async def run_loop() -> None:
             stop_tunnel()
             stop_guardian_scheduler()
             stop_regime_scheduler()
+            stop_iris_reconciler()
             stop_guardian_nag()
             return
         completed += 1
