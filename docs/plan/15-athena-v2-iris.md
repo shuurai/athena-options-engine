@@ -6,6 +6,7 @@
 > **状态推进（2026-11-25，第二笔）**：**V2-Q Round A 已裁定 8 条**（Q1/Q2/Q3/Q4/Q5/Q6/Q13/Q15），记录见 §19；Q7–Q12、Q14 共 7 条仍待裁定。上行「V2-Q1–Q15 仍待裁定」是第一笔当时的状态，保留不改写。
 > **状态推进（2026-11-25，第三笔）**：操作者确认 §19 后，**V2-P2 / V2-P3 落地前契约已写入 §20**（`C-20261125-3`）。§20 本身零代码、零迁移、不预占迁移号，仍需操作者批准后才进入实现批次；Q7–Q12 / Q14 仍未裁定。
 > **状态推进（2026-11-25，第四笔）**：操作者逐项确认 §20.8 五条实现口径后，**§20 获批**，记录见 §21（`C-20261125-4`）。其中第 1 条由 `America/New_York` **显式窄修订为 UTC 日界**（Q5 identity 公式本身不变）；§6.2 / §19 / §20 历史 verbatim 行一律保留，只追加状态推进。**§20 获批 ≠ 授权实现**：P2 / P3 仍须各自独立实现批次、独立 commit / rollback；Q7–Q12 / Q14 仍未裁定。
+> **状态推进（2026-11-25，第五笔）**：操作者指令「stop asking me with choices … just give me one sequential order and get them done」，据此**一次性裁定剩余 7 条 Q7–Q12 / Q14**（§22，`C-20261125-5`），Q14 的 `eval-v1` 在看任何 holdout 结果前先验冻结。**V2-Q1–Q15 全部 15 条已裁定完毕**。此后按固定顺序实施 P2 → P3 → P4 → P5 → P6 → P7，每批独立验证与提交；P5 数据不足则 `no-go` 且不自动进入 P6。上行第三／四笔「Q7–Q12 / Q14 仍未裁定」是当时状态，保留不改写。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -949,3 +950,76 @@ drafts / orders                 empty (smoke DB)
 - 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`（§17/§18 P1 交付）、`C-20261125-2`（§19 Round A）、`C-20261125-3`（§20 契约）。
 - 本批验证：`unittest discover` 全量、`git diff --check`、台账机检、缺失索引 mutation trap、本地链接与来源路径检查；零代码改动故无真实库写入。实测结果见 `logs/2026-11-25.md` `C-20261125-4` 验证块。
 - 回滚：`git revert <sha>`；只回滚 §21、头部第四笔状态推进、§6.2 窄修订注记、00 册索引、`CHANGELOG.md` 与台账条目。历史 verbatim 行不受影响。
+
+---
+
+## 22. V2-Q Round B 裁定记录（Q7–Q12 / Q14，2026-11-25，`C-20261125-5`）
+
+### 22.1 状态与编号纪律
+
+操作者指令：「stop asking me with choices on what to do first … just give me one sequential order and get them done」。本批据此**一次性裁定剩余 7 条**，不再逐条追问。裁定全部采用 §13「推荐」列与 §8.3–§8.5 已写明的口径，**7 条零偏离、零跳过**，不引入本册之外的新方向。
+
+- `V2-Q*` 仍是册内标识，**不是全局 D 决策**；D1–D111 / 112 节点 / 54 条裁定不变；不预占迁移号；不改 §1。
+- **本批零代码、零迁移、零 DB 写入、零 engine 重启**，只写裁定文档与台账。
+- **Q14 必须在查看 holdout 结果前冻结**（§8.5、§19.4）。本批在**尚无任何历史 / holdout 结果**时冻结 §22.4 协议，这正是反 look-ahead 纪律要求的时点；§19.4「现在裁定等于凭空猜阈值」的顾虑由「先验冻结、事后不得回改」化解，不构成推迟理由。
+- 裁定 ≠ 实现授权。P4–P7 仍须按 §10.1 门禁各自独立批次、独立 commit / rollback。
+
+### 22.2 七条裁定
+
+| V2-Q | 问题 | 裁定 | 来源 |
+|---|---|---|---|
+| **Q7** | 52W 完整性是否引入正式交易日历 | ✅ **引入**。以交易所交易日（ET 会话日）为唯一权威日历；先测量缺口再实现；缺口分六类 `internal_gap` / `long_tail_gap` / `ipo_short_history` / `halt` / `zero_volume` / `corporate_action`，各带 `reason_code`；Iris 不得把 <252 行直接显示为 `complete`，须显示 `partial` / `unknown` 并给出缺口计数 | §13 推荐「是；先测量缺口」、§8.4 |
+| **Q8** | 周线 corporate action / 复权口径 | ✅ **唯一口径：复权后收盘序列**（split / dividend adjusted），全文一致，不混用 raw 与 adjusted；每条 shadow 输出带 `adjustment_basis`；周聚合 open=首个完成日、high/low=周内极值、close=最后完成日、volume=求和；未完成本周绝不产生 candidate；零 look-ahead；fixture 覆盖普通周 / 假日短周 / 跨月跨年 / 缺周 / 未完成周 / 拆分 / 分红 / 复权源缺失 | §13 推荐、§8.4 |
+| **Q9** | §8.3 十四项语义 | ✅ **逐项冻结**，见 §22.3；十四项全部给出唯一可复算定义，不留「由 LLM 判断」或「待定」 | §13 推荐、§8.3 |
+| **Q10** | 首选工具与 DTE / strikes / width | ✅ **capped-risk put spread** 为唯一默认；DTE / strikes / width 按 §22.3 第 8 项冻结为**shadow 评估用先验值**，不得在 P5 go 之前用于任何 ticket；short stock / long put 保留为候选但须 §11.1 显式风险扩展，本册不默认启用 | §13 推荐、§11.1 |
+| **Q11** | exit 是否每次独立 Approve | ✅ **每次独立 Approve**，沿用现有 `decide()` + `all_orders` gate；TP1 / TP2 / SL / Time Stop 各自一张 exit draft；同时触发按 §22.3 第 11 项优先级串行，但审批粒度不合并；任何自动退出属另开 privilege 裁定，本册不授权 | §13 推荐、§11.5、V2-I5 |
+| **Q12** | manual / liquidate 是否纳入 pre-trade drafts | ✅ **不改旁路**。仅要求在 Iris 显式标注 `source=manual\|liquidate\|external`，并从策略胜率统计中剔除；改变现有 `EXTERNAL` / `MANUAL` 插入即 approved 的行为属另开安全裁定，本册不授权 | §13 推荐、§11.6、§20.1 |
+| **Q14** | 评估协议 / 最低证据量 / go-no-go | ✅ **§22.4 协议 `eval-v1` 先验冻结**：时间顺序切分、survivorship、成本 / 滑点 / borrow / bid-ask / 部分成交模型、简单基准、反例留存、最低候选数与覆盖率、go / no-go 阈值全部在看 holdout **之前**定死；`insufficient_evidence` 一律 `no-go`；holdout 后不得回改阈值再称同一次验证 | §13 推荐、§8.5 |
+
+### 22.3 Q9 十四项语义冻结（shadow 用，可复算）
+
+| # | 语义空洞 | 冻结定义 |
+|---|---|---|
+| 1 | hill 6–10 周 | 含信号周；`hill_weeks` = `SMA20 > SMA50` 的连续完成周数，6 ≤ n ≤ 10；等值（`SMA20 == SMA50`）**中断**连续计数；必须有局部峰 `hill_peak = max(SMA20 − SMA50)` 且峰不在最后一周 |
+| 2 | SMA20 slope | 用最近 4 个完成周的 `SMA20` 做最小二乘斜率，归一化为 `slope / SMA20`；`flat` 当且仅当 \|归一化斜率\| < 0.002 / 周；`declining` 为 < −0.002；带 `factor_version` |
+| 3 | 触碰 SMA20 | 容差 0.5%：`low ≤ SMA20 × 1.005` 且 `close ≥ SMA20 × 0.995` 视为触碰；以 OHLC 相交为准，不只看 close；首次回踩重置：新信号周开始后，第一次触碰即固定 `retest_state`，同周内后续触碰不重算 |
+| 4 | 蜡烛 / 量能真值表 | 条件 4 = `bearish_candle OR long_upper_shadow OR low_volume` 三者 **OR**；`low_volume` 同时是**额外硬过滤**（缩量必须满足，否则 `filtered`）；长上影 = 上影 ≥ 实体 2 倍且 ≥ 全周振幅 40%；量能基准 = 前 8 完成周平均 volume，窗口固定 8 |
+| 5 | SPX / VIX 过滤 | SPX 强势 = SPX 收盘 > 其 SMA50 且 SMA50 斜率 ≥ 0；VIX < 15 **跳过**（不减半），15 ≤ VIX < 20 为 `caution` 且风险预算减半（**风险预算**，非名义仓位，§11.4），VIX ≥ 20 正常；边界值归低档 |
+| 6 | 资格与财报 | 3–6 个月上涨 50%+ 是**偏好**不是硬资格；「日均成交量 > 5 亿美元」明确为**日均成交额**、窗口 20 个完成交易日；「财报前 5 天」用**交易日**、时间源为 `calendar_marks`，盘后财报归属**次日**交易日 |
+| 7 | 入场窗口 | 信号周完成后次周 regular session 开盘满 30 分钟起，至该周收盘为有效窗口；急跌 = 开盘 30 分钟内跌幅 > 3% 则该周作废；order type = limit，TTL = 当日收盘；同一信号幂等 |
+| 8 | 工具参数（Q10） | put spread：DTE 30–45 日历日；short strike 取 0.25 delta 最近档（无 delta 数据时以 −7% OTM 代理并标 `proxy`）；width = 标的价格 5% 四舍五入到最近 $5 档；max loss = width − credit；合约数由 1% NAV 风险反推并向下取整 |
+| 9 | TP 的 SMA50 | 入场时**冻结** SMA50 值，持有期不随周更新；以**周收盘**确认，不看盘中；TP1 = 跌破冻结 SMA50 下方 3% 平 50%，TP2 = 下方 5% 平余仓；−2.99% / −3% / −5% 边界单列 fixture |
+| 10 | 持仓时长 | 「2–4 周」与「最长 2 周」冲突裁定为**最长 2 个完成周**；第 2 周收盘全平（不减半） |
+| 11 | 触发优先级 | 同周多触发：`SL > Time Stop > TP2 > TP1`；高优先级执行后低优先级当周不再生成；每次 exit 独立 Approve（Q11） |
+| 12 | 1% NAV 风险 | 三种工具统一按**最大确定损失**计：put spread = width − credit；long put = 权利金；short stock = 按入场价 10% 名义止损估算并另记 borrow / 召回；一律计入组合预算，多笔单独合格但合计超限即 `blocked` |
+| 13 | 连续 3 次止损 | 按**全策略**累计（非单 symbol）；自然月以 ET 日历月计；仅 `SL` 触发算 stop，TP / Time Stop 不算；当月第 3 次 SL 后停止新开至月末 |
+| 14 | 周线复权 | 与 Q8 同一口径：复权后序列，`adjustment_basis` 随每条输出；复权源缺失该 symbol 该周标 `adjustment_unavailable` 且 `outcome=no_data`，绝不静默用未复权价 |
+
+### 22.4 Q14 评估协议 `eval-v1`（先验冻结，零 holdout 数据）
+
+| 项 | 冻结值 |
+|---|---|
+| 版本 / 时点 | `protocol_version = eval-v1`；冻结于 `2026-11-25`，**早于任何历史或 holdout 结果**；此后不得回改阈值 |
+| 数据切分 | 按 `as_of_week` **严格时间先后**切分：最早 60% 完成周 = calibration，其后 40% = holdout；禁止随机打散、禁止跨边界调参 |
+| Universe | 每个历史时点的成员快照；退市标的保留至退市周并显式标记，禁止 survivorship 剔除；universe 定义带版本 |
+| 冻结模型 | 信号 / 候选 / 入场窗口 / 成本 / 滑点 / borrow / option bid-ask / 部分成交模型全部按 §22.3 与固定参数表冻结；任何改动须新开 `eval-v2` 并**重新跑全链**，不得复用旧 holdout |
+| 基准 | 至少一个简单可复算基准：同期 SPY buy-and-hold 净成本后收益；运行前登记 |
+| 反例留存 | 保留所有 `filtered` / `invalid` / `no_data` / 亏损 candidate 与完整 `reason_codes[]`，不得只展示盈利候选 |
+| 最低证据量 | holdout 完成周 ≥ 30 且有效 candidate ≥ 20 且覆盖 symbol ≥ 5；52W 数据覆盖率 ≥ 80%；bootstrap 95% 区间可计算。任一不满足 ⇒ `insufficient_evidence / no-go`，**继续 shadow**，不是「通过」 |
+| go 阈值 | 净成本后 holdout 收益相对基准的超额 **bootstrap 95% 下界 > 0**，且单笔最大损失 ≤ 1% NAV、组合预算无超限、live shadow 可执行；四条全满足才 go |
+| no-go 记录 | 同时记录净成本结果、最大风险暴露、数据覆盖、样本外表现、反例清单与 live shadow 可执行性；原文 60–70% 胜率 / 2:1–3:1 盈亏比 / 每年 5–15 次**不作为预定答案** |
+| live shadow | 只写 audit / Iris evidence；即使出现 candidate 也**零 drafts、零 orders** |
+
+### 22.5 对后续阶段的影响与硬门禁
+
+- **P4 现在可写落地前契约并实施**：Q7 / Q8 / Q9 子集已冻结；工具 / 订单 / exit 执行语义仍留 P5 / P6，但 hill / slope / retest / volume / calendar / 周线口径不得留白。
+- **P5 现在可冻结协议并实施**：`eval-v1` 已冻结；但**真实历史数据可用性是硬门禁** —— 当前 smoke 库 drafts / orders 为空、IB Gateway `7497/4001/4002` 关闭、无 VIX 历史，若 §22.4 最低证据量不达标，结论必须写 `insufficient_evidence / no-go / 继续 shadow`，**不得判 go、不得事后调阈值**。
+- **P6 仅在 P5 = go 时进入**；按当前数据条件默认路径是 no-go，故 P6 **不自动启动**，不因本批裁定而绕过。
+- **P7** 依赖 P1 + P3 完成；P5 no-go 不阻塞其余清理。
+- 两个启动阻塞（`load_active()` 早于 `apply_migrations()`、`var/backups` 996 快照 prune）仍属独立运维轮；7799 console 仍关闭，本批不重启、不重试被取消的 `dxnrJP`。
+
+### 22.6 验证、回滚与关联
+
+- 上游：`C-20261124-11`（§16）、`C-20261125-1`（§18）、`-2`（§19）、`-3`（§20）、`-4`（§21）。
+- 本批验证：`unittest discover` 全量、`git diff --check`、台账机检、缺失索引 mutation trap、本地链接与来源路径检查；零代码改动故无真实库写入。实测见 `logs/2026-11-25.md` `C-20261125-5` 验证块。
+- 回滚：`git revert <sha>`；只回滚 §22、头部第五笔状态推进、00 册索引、`CHANGELOG.md` 与台账条目；历史 verbatim 行不受影响。
