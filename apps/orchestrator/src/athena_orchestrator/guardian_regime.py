@@ -38,6 +38,7 @@ from psycopg.types.json import Jsonb
 from athena_marketdata import vixfeed
 from athena_orchestrator.guardian_schedule import RunSlot, hk_clock, next_run
 from athena_strategy.regime import Axes, Regime, evaluate
+from athena_store import news_read
 
 __all__ = [
     "REFERENCE",
@@ -165,7 +166,7 @@ def _news_label(conn, trade_day: date) -> str:
     there is no bond feed, so "缺一不算" leaves it unassertable. Single-name
     earnings without a Fed event is exactly the ``narrative_only`` bucket.
     """
-    rows = conn.execute(_NEWS_SQL, (trade_day,)).fetchall()
+    rows = conn.execute(news_read.render(_NEWS_SQL), (trade_day,)).fetchall()
     kinds = {str(row[0] or "") for row in rows}
     if "FED_RATE_DECISION" in kinds:
         return "none"  # neither narrative-only nor a confirmable regime_shift

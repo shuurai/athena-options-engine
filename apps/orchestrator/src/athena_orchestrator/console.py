@@ -28,6 +28,7 @@ from athena_orchestrator.cockpit import (
 )
 from athena_settings import load_active
 from athena_store import connect
+from athena_store import news_read
 from athena_orchestrator.httpd import QuietHandler
 from athena_orchestrator import pages
 from athena_orchestrator.tasks import begin_fill, begin_positions, list_tasks
@@ -1454,7 +1455,7 @@ def _nav_badges(conn) -> dict[str, tuple[int | str, bool, str]]:
         (account,),
     ).fetchone()[0]
     news = conn.execute(
-        "SELECT count(*) FROM news_events WHERE ts >= %s AND NOT dismissed",
+        news_read.render("SELECT count(*) FROM news_events WHERE ts >= %s AND NOT dismissed"),
         (start,),
     ).fetchone()[0]
     fills = conn.execute(

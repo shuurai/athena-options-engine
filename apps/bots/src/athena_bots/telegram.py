@@ -32,6 +32,7 @@ from athena_settings.resolve import bot_token, live_allowlist, live_settings
 from athena_store import connect
 from athena_store.backup import write_snapshot
 from athena_store.s3 import sync_snapshot
+from athena_store import news_read
 from athena_bots.public_url import control_page_url
 from athena_strategy import decide, draft_facts
 
@@ -786,13 +787,13 @@ def _stored_headlines(database_url: str, symbol: str) -> str:
     name = symbol.upper()
     with connect(database_url) as conn:
         rows = conn.execute(
-            """
+            news_read.render("""
             SELECT ts, source, title
             FROM news_events
             WHERE symbol = %s AND dismissed = false
             ORDER BY ts DESC
             LIMIT 8
-            """,
+            """),
             (name,),
         ).fetchall()
     return format_headlines(name, rows)

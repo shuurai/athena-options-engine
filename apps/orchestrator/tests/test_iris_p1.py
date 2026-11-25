@@ -28,6 +28,7 @@ from athena_orchestrator import console, guardian_regime as gr, iris_view, pages
 from athena_orchestrator import guardian_runner as runs
 from athena_settings.model import standard_payload
 from athena_settings.prompts import AGENT_ORDER, TRADE_NAME
+from athena_store import news_read
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "apps/orchestrator/src/athena_orchestrator"
@@ -37,10 +38,31 @@ IRIS_SRC = SRC / "iris_view.py"
 RUNNER_SRC = SRC / "guardian_runner.py"
 CJK = re.compile(r"[\u3400-\u9fff]")
 
+# V2-P3 N3: news_read.render() prefixes one read-only CTE named news_events.
+# Only THAT exact CTE may precede a statement; any other WITH (writable CTE,
+# data-modifying CTE, ad-hoc projection) is still rejected by the startswith
+# assertion. This keeps the P1 "snapshot issues only SELECT" contract intact
+# instead of blanket-allowing WITH.
+_CANONICAL_CTE_FLAT = " ".join(news_read.CANONICAL_CTE.split())
+
+
+def _readonly_body(sql: str) -> str:
+    """Strip the one sanctioned canonical CTE and return the executable body."""
+    flat = " ".join(sql.split())
+    if flat.startswith(_CANONICAL_CTE_FLAT):
+        return flat[len(_CANONICAL_CTE_FLAT):].lstrip()
+    return flat
+
+
 _EXISTING_TABLES = frozenset(
     {
         "market_bars",
         "news_events",
+        # V2-P3 N3: the canonical read model is a read-only CTE named
+        # news_events built from these three additive tables (migration 057).
+        "news_articles",
+        "news_article_symbols",
+        "news_legacy_event_map",
         "calendar_marks",
         "iv_marks",
         "symbol_phases",
@@ -325,9 +347,16 @@ class TestIrisReadOnlySnapshot(unittest.TestCase):
         iris_view.snapshot(conn, "U1", standard_payload())
         self.assertTrue(conn.calls)
         for sql, _params in conn.calls:
-            self.assertTrue(sql.lstrip().upper().startswith("SELECT"), sql[:80])
+            body = _readonly_body(sql)
+            self.assertTrue(body.upper().startswith("SELECT"), sql[:80])
+            # The CTE itself must be read-only too: no data-modifying CTE.
             for verb in ("INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "COMMIT"):
                 self.assertNotIn(verb, sql.upper())
+            if sql.lstrip().upper().startswith("WITH"):
+                # Only the exact shipped CTE prefix is allowed, byte for byte.
+                self.assertTrue(
+                    " ".join(sql.split()).startswith(_CANONICAL_CTE_FLAT), sql[:120]
+                )
 
     def test_snapshot_never_commits_or_rolls_back(self):
         conn = _SpyConn()
@@ -391,7 +420,7 @@ class TestIrisReadOnlySnapshot(unittest.TestCase):
         self.assertEqual(conn.commits, 0)
         self.assertEqual(conn.rollbacks, 0)
         for sql, _ in conn.calls:
-            self.assertTrue(sql.lstrip().upper().startswith("SELECT"), sql[:80])
+            self.assertTrue(_readonly_body(sql).upper().startswith("SELECT"), sql[:80])
         self.assertIn("Iris snapshot", built["body"])
 
 

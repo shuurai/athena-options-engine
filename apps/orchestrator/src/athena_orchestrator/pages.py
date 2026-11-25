@@ -18,6 +18,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from athena_bots.public_url import control_page_url
+from athena_store import news_read
 from athena_exec.accounts import active_accounts, trading_mode
 from athena_orchestrator.view import current_view
 from athena_exec.slots import HKT
@@ -753,10 +754,10 @@ def _draft_banner(conn, account: str) -> str:
     densest = ("", 0)
     for symbol in settings.watchlist:
         count = conn.execute(
-            """
+            news_read.render("""
             SELECT count(*) FROM news_events
             WHERE symbol = %s AND sentiment < %s AND ts >= %s AND dismissed = false
-            """,
+            """),
             (symbol, below, start),
         ).fetchone()[0]
         if count > densest[1]:
@@ -828,16 +829,16 @@ def _news(conn, account: str, query: dict, note: str = "") -> dict:
     densest = ("", 0)
     for symbol in symbols:
         count = conn.execute(
-            """
+            news_read.render("""
             SELECT count(*) FROM news_events
             WHERE symbol = %s AND sentiment < %s AND ts >= %s AND dismissed = false
-            """,
+            """),
             (symbol, below, start),
         ).fetchone()[0]
         if count >= densest[1]:
             densest = (symbol, count)
     average = conn.execute(
-        "SELECT avg(sentiment) FROM news_events WHERE dismissed = false"
+        news_read.render("SELECT avg(sentiment) FROM news_events WHERE dismissed = false")
     ).fetchone()[0]
     wash_names = 0
     if account:
@@ -4832,10 +4833,10 @@ def _phase_table(conn, account: str, symbols: list[str], settings, selected: str
     for symbol in symbols:
         phase, tags, tactic = _phase_row(conn, account, symbol)
         negatives = conn.execute(
-            """
+            news_read.render("""
             SELECT count(*) FROM news_events
             WHERE symbol = %s AND sentiment < %s AND ts >= %s AND dismissed = false
-            """,
+            """),
             (symbol, below, start),
         ).fetchone()[0]
         draft = conn.execute(
@@ -4888,13 +4889,13 @@ def _rank_text(conn, symbol: str, minimum: int) -> str:
 
 def _weekly_negatives(conn, below: float) -> list[int]:
     rows = conn.execute(
-        """
+        news_read.render("""
         SELECT date_trunc('week', ts) AS week, count(*)
         FROM news_events
         WHERE sentiment < %s AND dismissed = false AND ts >= now() - interval '12 weeks'
         GROUP BY week
         ORDER BY week
-        """,
+        """),
         (below,),
     ).fetchall()
     counts = {row[0].date(): row[1] for row in rows}
@@ -4909,12 +4910,12 @@ def _weekly_negatives(conn, below: float) -> list[int]:
 
 def _source_counts(conn) -> list[tuple[str, int]]:
     rows = conn.execute(
-        """
+        news_read.render("""
         SELECT source, count(*) FROM news_events
         WHERE dismissed = false
         GROUP BY source
         ORDER BY count(*) DESC, source
-        """
+        """)
     ).fetchall()
     if not rows:
         return [("none", 0)]
@@ -4950,12 +4951,12 @@ def _news_table(rows: str) -> str:
 
 def _news_rows(conn, offset: int) -> tuple[str, bool, int]:
     rows = conn.execute(
-        """
+        news_read.render("""
         SELECT fingerprint, ts, symbol, source, event_type, sentiment, title, dismissed
         FROM news_events
         ORDER BY ts DESC
         LIMIT %s OFFSET %s
-        """,
+        """),
         (_PAGE + 1, offset),
     ).fetchall()
     more = len(rows) > _PAGE

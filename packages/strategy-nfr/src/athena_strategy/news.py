@@ -25,6 +25,7 @@ from athena_strategy.dsh import enrich_sentiment, read_article
 from athena_strategy.tags import EARNINGS_NEAR, FED_EVENT, NEWS_WASH
 from athena_strategy.types import NEWS_TYPE_CODES
 from athena_store import news_canonical as nc
+from athena_store import news_read
 
 log = logging.getLogger("athena.news")
 ET = ZoneInfo("America/New_York")
@@ -236,10 +237,10 @@ def tags_from_events(
     tags: set[str] = set()
     start = datetime.combine(day - timedelta(days=news.wash_window_days), datetime.min.time(), ET)
     count = conn.execute(
-        """
+        news_read.render("""
         SELECT count(*) FROM news_events
         WHERE symbol = %s AND sentiment < %s AND ts >= %s AND dismissed = false
-        """,
+        """),
         (symbol, news.wash_sentiment_below, start),
     ).fetchone()[0]
     if count >= news.wash_min_negative:

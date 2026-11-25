@@ -21,6 +21,7 @@ from athena_strategy.agents import _ask, fill_prompt
 from athena_strategy.drafts import last_tradeable_price
 from athena_strategy.draft_facts import moneyness, premium_captured_pct
 from athena_strategy.news import tags_from_events
+from athena_store import news_read
 
 log = logging.getLogger("athena.strategy.advisor")
 
@@ -367,12 +368,12 @@ def _yahoo_notes(conn, symbols: list[str]) -> list[str]:
     if not symbols:
         return []
     rows = conn.execute(
-        """
+        news_read.render("""
         SELECT DISTINCT ON (symbol) symbol, title
         FROM news_events
         WHERE symbol = ANY(%s) AND source = 'yahoo' AND dismissed = false
         ORDER BY symbol, ts DESC
-        """,
+        """),
         (symbols,),
     ).fetchall()
     lines = [f"{symbol} yahoo: {title}" for symbol, title in rows if title]

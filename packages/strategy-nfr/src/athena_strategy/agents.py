@@ -23,6 +23,7 @@ from athena_strategy.indicators import Indicators, indicators_enabled, read_indi
 from athena_strategy.iv import tags_from_iv
 from athena_strategy.phases import _load
 from athena_strategy.regime import Regime
+from athena_store import news_read
 from athena_strategy.schemas import parse_response, schema_line
 from athena_strategy.tags import (
     CHANNEL_RISING,
@@ -130,12 +131,12 @@ def _trade_context(conn, settings: SettingsPayload, symbol: str, last: str, side
         (symbol, day),
     ).fetchone()
     news = conn.execute(
-        """
+        news_read.render("""
         SELECT title FROM news_events
         WHERE symbol = %s AND dismissed = false AND ts >= %s AND ts < %s
         ORDER BY ts DESC
         LIMIT 8
-        """,
+        """),
         (symbol, start, start + timedelta(days=1)),
     ).fetchall()
     headlines = "none" if not news else "\n".join(f"- {row[0]}" for row in news)
@@ -1187,12 +1188,12 @@ def _shares(conn, account_id: str, symbol: str):
 
 def _headlines(conn, symbol: str) -> str:
     rows = conn.execute(
-        """
+        news_read.render("""
         SELECT title FROM news_events
         WHERE symbol = %s
         ORDER BY ts DESC
         LIMIT 8
-        """,
+        """),
         (symbol.upper(),),
     ).fetchall()
     if not rows:

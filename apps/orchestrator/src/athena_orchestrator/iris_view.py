@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import escape
+from athena_store import news_read
 
 GRAPH_VERSION = "iris-p2-events-v1"
 
@@ -135,11 +136,11 @@ def snapshot(conn, account: str, settings) -> dict:
         )
     )
     news_rows = int(
-        _scalar(conn, "SELECT count(*) FROM news_events WHERE NOT dismissed")
+        _scalar(conn, news_read.render("SELECT count(*) FROM news_events WHERE NOT dismissed"))
     )
     news_last = _scalar(
         conn,
-        "SELECT max(ts) FROM news_events WHERE NOT dismissed",
+        news_read.render("SELECT max(ts) FROM news_events WHERE NOT dismissed"),
         default=None,
     )
     calendar_marks = int(_scalar(conn, "SELECT count(*) FROM calendar_marks"))

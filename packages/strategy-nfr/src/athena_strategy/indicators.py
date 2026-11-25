@@ -15,6 +15,7 @@ from psycopg.types.json import Jsonb
 from athena_marketdata.pricing import Bar, daily_bars
 from athena_settings.model import SettingsPayload, StrategySettings
 from athena_strategy.iv import RV_METHOD, iv_rank
+from athena_store import news_read
 from athena_strategy.tags import (
     ATR_WIDE,
     DIP_BOUGHT,
@@ -263,11 +264,11 @@ def news_score(conn: psycopg.Connection, settings: SettingsPayload, symbol: str,
     """Recency-weighted mean of stored headline sentiment. Newer rows count more."""
     start = datetime.combine(today - timedelta(days=settings.news.wash_window_days), datetime.min.time(), _ET)
     rows = conn.execute(
-        """
+        news_read.score_sql("""
         SELECT sentiment FROM news_events
         WHERE symbol = %s AND ts >= %s AND dismissed = false AND sentiment IS NOT NULL
         ORDER BY ts
-        """,
+        """),
         (symbol.upper(), start),
     ).fetchall()
     if not rows:

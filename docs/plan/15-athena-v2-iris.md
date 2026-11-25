@@ -10,6 +10,7 @@
 > **状态推进（2026-11-25，第六笔）**：固定顺序的 **Step 2 / V2-P2 已实现、验证并独立交付**，记录见 §23（`C-20261125-6`）。`strategy_events` 窄表（migration `056`）、post-commit 幂等 emit、独立 `/api/iris/events` SSE、cursor replay → live 交接、`observation_gap`、真值动画与 60s reconciler 全部落地；全量 `879/879`（2 env skips）、`27/27` mutation traps、真实 PostgreSQL apply + 事务内 rollback、wheel 52 迁移内含 `056`。**P3–P7 仍未实现**；Q1–Q15 已裁定完毕不代表实现完毕。上行「每批独立验证与提交」是本批遵循的口径。
 > **状态推进（2026-11-25，第七笔）**：固定顺序的 **Step 3 / V2-P3 第一批（§6.3 N1 additive + N2 dual-write）已实现、验证并独立交付**，记录见 §24（`C-20261125-7`）。migration `057` 建 `news_articles / news_article_symbols / news_legacy_event_map` 三表；identity v1 按 §21.3 **UTC 日界**落地，解析入口 tz-aware → `.astimezone(UTC)` 校验、naive 不伪装 UTC；三处初始 writer + DSH sentiment + dismiss 双写；dismiss 明确 `association_id` 且一对多拒绝；三表加入 `backup.py TABLES`，`strategy_events` 排除。全量 `919/919`、`20/20` mutation traps、真实 PG apply + rollback、wheel 53 迁移。**§6.3 N3 canonical read cutover 与 N4 legacy retirement 仍是受六项对账硬门禁约束的后续阶段**，本批未切换 reader、未删 `news_events`；P4–P7 未开始。
 > **状态推进（2026-11-25，第八笔）**：固定顺序的 **Step 3 收尾 / V2-P3 第二批（N1 backfill ＋ §6.3 六项对账）已实现、验证并独立交付**，记录见 §25（`C-20261125-8`）。新增 `news_backfill.py`（幂等、可重导、`ingest_fallback` 诚实标注）与 `news_reconcile.py`（`six_item_gate()`，把差异机械分为 registered / unexplained）。真实库事务内 dry-run：**2,529 legacy rows → 1,873 articles / 2,529 associations / 2,529 map**，六项 **全 PASS、unexplained = 0、`blocks_n3 = False`**，二次 backfill `maps_inserted = 0`，`ROLLBACK` 后 legacy 仍 `2529`、canonical 归零。全量 `959/959`、`40/40` mutation traps、wheel 含两个新模块。**本批只证明「六项对账通过」，不等于 N3 已切换**：reader 仍读 `news_events`、`news_events` 未删（N4 另需裁定），且 live 库的 canonical 表仍是空的（对账是 dry-run，不是持久回填）。上行第七笔「N3 / N4 仍是受六项对账硬门禁约束的后续阶段」依然成立，本批只解除了门禁本身；§24.6「未跑 news backfill」一句由本节取代，原句保留不改写。
+> **状态推进（2026-11-25，第九笔）**：固定顺序的 **Step 3 / V2-P3 第三批（N3 canonical read model）已实现、验证并独立交付，记录见 §27（`C-20261125-9`）**。新增 `news_read.py`：以 `WITH news_events AS (...)` CTE 把 `057` 三表投影为 legacy 九列，17 处非测试 reader 全部经 `render()` / `score_sql()` 包装、SQL 主体逐字节不变；R1 保留 ET 日界、R2 只对 canonical `news_score` 加 `ORDER BY ts, sentiment` tie-break。**本批是 DARK LAUNCH，`SOURCE = LEGACY`**：§26.2 两项数据面前置条件未满足——§25 六项对账是事务内 dry-run（`ROLLBACK` 后 live canonical 仍为 `0/0/0`），§26.4 禁止启动 engine 观察运行期 N2 双写收敛；直接切 `CANONICAL` 会让 17 处 reader 全部读到空表。故零行为变化、零持久写入。真实 PG **17/17 逐处对账 `parity diffs = 0`**、六项门禁 `unexplained=0 / blocks_n3=False`、全量 `1006/1006`、`19/19` mutation traps、wheel 含新模块且 53 迁移。**N3 真正激活（持久 backfill ＋ `SOURCE = CANONICAL` ＋ 运行期收敛确认）须操作者单独 go/no-go**；N4 另需裁定；P4–P7 未开始。上行第八笔「live 库 canonical 仍是空的」依然成立，原句保留不改写。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1360,3 +1361,169 @@ wheel athena_store-0.0.0-py3-none-any.whl       53 migrations (057 present)
 - **不新增迁移**：N3 优先以 canonical 读模块 / SQL 投影落地，避免再动 schema；如确需兼容视图，另开裁定与迁移号。
 - **不重启 7799、不重试被取消的 `dxnrJP`、不启动 engine**；IB Gateway 保持关闭。
 - 两项裁定由操作者于 `C-20261125-8` 交付后确认，历史 verbatim 行（含 §24.6 / §25.8）保留不改写。
+
+---
+
+## 27. V2-P3 第三批交付记录（N3 canonical read model · DARK LAUNCH，2026-11-25，`C-20261125-9`）
+
+本节是 **N3 读侧改造的交付记录**。**本批是 dark launch，不是 cutover**：读模型与 17 处 reader 包装全部完成并逐处对账，但单一开关 `news_read.SOURCE` 保持 `LEGACY`，因此运行期零行为变化、零持久 DB 写入。§26.2 的两项数据面前置条件（真实持久回填、运行期 N2 双写收敛确认）尚未满足，真正激活须操作者单独 go/no-go（§27.11）。§26 落地前契约以 doc-only commit `9fff99c` 先行，作为本批附录一并记入 `C-20261125-9`，不另开索引行。
+
+### 27.1 为什么是 dark launch
+
+| 事实 | 证据 |
+|---|---|
+| §25 六项对账是**事务内 dry-run** | `ROLLBACK` 后 live `news_articles / news_article_symbols / news_legacy_event_map` = `0 / 0 / 0`，`news_events` = `2529` |
+| §26.2 第 1 / 2 项未满足 | 未做持久 backfill；§26.4 禁止启动 engine，无法观察运行期 dual-write 收敛 |
+| 直接切 `CANONICAL` 的后果 | 17 处 reader 全部改读空 CTE ⇒ 新闻计数、头条、`NEWS_WASH`、regime 标签全部静默变空 |
+| 本批选择 | 交付并验证读模型与全部包装，**默认保持 `LEGACY`**；激活是 `SOURCE = CANONICAL` 一行 ＋ 持久 backfill ＋ 运行期收敛确认 |
+
+历史 verbatim 行（§24.6 / §25.8「21 处 reader 仍读 `news_events`」、§26.2）保留不改写，只在此追加状态推进。
+
+### 27.2 读模型：`news_read.py` 的 CTE 投影
+
+新增 `packages/store/src/athena_store/news_read.py`，**零迁移、零 `pyproject.toml` 变动**（hatch 自动收 Python 模块；wheel 实测含该模块）。核心是命名 CTE：
+
+```sql
+WITH news_events AS (
+    SELECT m.legacy_fingerprint AS fingerprint,
+           s.effective_ts       AS ts,
+           s.symbol             AS symbol,
+           s.source             AS source,
+           s.event_type         AS event_type,
+           s.sentiment          AS sentiment,
+           m.title              AS title,
+           s.url                AS url,
+           s.dismissed          AS dismissed
+    FROM news_legacy_event_map AS m
+    JOIN news_article_symbols AS s ON s.association_id = m.association_id
+)
+```
+
+- **九列与 legacy 完全同形**：`fingerprint, ts, symbol, source, event_type, sentiment, title, url, dismissed`；每处 reader 的 `WHERE` / `ORDER BY` / `LIMIT` / `date_trunc('week', ts)` / `(ts AT TIME ZONE 'America/New_York')::date` 主体**逐字节不变**。
+- **CTE 名 `news_events` shadow 物理表**：单条语句内把 `FROM news_events` 重定向到投影，不需要改任何 reader 的 SQL 字面量。
+- **列溯源**：不可变锚点字段（深链、dismiss、draft reason）来自 `news_legacy_event_map`；可变业务字段（DSH enrich、dismiss）来自 `news_article_symbols`。`published_day`（UTC identity）**故意不暴露**给 reader。
+- **基数**：一条 map 行 → 一行投影，与 legacy 表 1:1，故 `count` / `avg` / `max` / 分页列表可逐处对账。
+
+### 27.3 两处裁定的落地
+
+| 裁定 | 实现 | 验证 |
+|---|---|---|
+| **R1 保留 ET 分桶** | CTE 的 `ts = s.effective_ts` 是真实 `timestamptz`；`guardian_regime._NEWS_SQL` 字面量一字不改，仍 `(ts AT TIME ZONE 'America/New_York')::date = %s` | 真实库 **92 个 ET 日**逐日对照 `diffs = 0`；`effective_ts <> legacy ts` 行数 = 0；AST 精确提取 `_NEWS_SQL` 的只读断言（避免同文件 `market_bars` 的 ET 字符串掩盖 mutation） |
+| **R2 只给 canonical `news_score` 加 tie-break** | `score_sql()` 仅对 `ORDER BY ts`（非 `DESC`）替换为 `ORDER BY ts, sentiment`；`render()` 默认不启用 `stable_order`；legacy 路径 byte-identical；`indicators.py` 的 Decimal 循环未改 | `ORDER BY ts DESC` 不受影响；`stable_order` 默认 `False`；canonical 与 legacy 各自自比对一致 |
+
+### 27.4 17 处 reader 清单与 `21 → 17` 口径对齐
+
+§25.8 写「21 处非测试 SQL 仍读 `news_events`」，§26.3 收窄为 **17 处 reader**。差异是机械口径，不是遗漏：`apps/` ＋ `packages/strategy-nfr/` 中共有 **21 条**非测试 SQL 引用 `news_events`，其中 **17 条是 SELECT reader、4 条是 writer**（`news.py` 的 `UPDATE` ×1 ＋ `INSERT` ×2、`dsh.py` 的 sentiment `UPDATE` ×1）。writer 属 N3 范围外，继续写 legacy。`packages/store/` 内 `news_backfill.py` / `news_reconcile.py` / `news_canonical.py` 的 legacy 对照 SQL 亦保持不动，用于对账与回滚。
+
+| 文件 | 处数 | 包装方式 |
+|---|---|---|
+| `apps/orchestrator/src/athena_orchestrator/pages.py` | 7 | `news_read.render(...)` |
+| `apps/orchestrator/src/athena_orchestrator/iris_view.py` | 2 | `news_read.render(...)` |
+| `packages/strategy-nfr/src/athena_strategy/agents.py` | 2 | `news_read.render(...)` |
+| `apps/bots/src/athena_bots/telegram.py` | 1 | `news_read.render(...)` |
+| `apps/orchestrator/src/athena_orchestrator/console.py` | 1 | `news_read.render(...)` |
+| `apps/orchestrator/src/athena_orchestrator/guardian_regime.py` | 1 | call site `news_read.render(_NEWS_SQL)`（module-level 常量不变） |
+| `packages/strategy-nfr/src/athena_strategy/advisor.py` | 1 | `news_read.render(...)` |
+| `packages/strategy-nfr/src/athena_strategy/indicators.py` | 1 | `news_read.score_sql(...)`（R2） |
+| `packages/strategy-nfr/src/athena_strategy/news.py` | 1 | `news_read.render(...)`，仅 `tags_from_events()` |
+| **合计** | **17** | 16 处 inline literal ＋ 1 处 call site |
+
+**writers 未被包装**：`news.py` 三处与 `dsh.py` 一处保持原样。
+
+### 27.5 单一开关与回滚路径（§26.2 第 4 项）
+
+```python
+SOURCE = LEGACY   # dark launch；激活改 CANONICAL
+```
+
+- `render(sql, *, stable_order=False, source=None)`：`source=` 让每处 reader 可单独切回；省略则用全局 `SOURCE`。
+- `LEGACY` 分支**原样返回 sql**，不做任何字符串变换；`CANONICAL` 分支加 CTE（＋可选 tie-break）。
+- 未知 `source` 抛 `ValueError`，不静默降级。
+- **一次 `git revert <sha>`** 即移除 `news_read.py` 与全部包装、恢复 17 处 legacy 读取；`news_events` 与 `057` 三表零改动。单行开关或 `source=LEGACY` 亦可即时回退。
+
+### 27.6 测试
+
+| 套件 | 结果 |
+|---|---|
+| `apps/orchestrator/tests/test_news_p3_n3.py`（新增 47 项） | **47/47 OK** |
+| `apps/orchestrator/tests/test_iris_p1.py` | **63/63 OK** |
+| 全量 `unittest discover -s apps/orchestrator/tests -t . -p "test_*.py"` | **1006/1006 OK**（skipped=2；基线 959 ＋ 47） |
+
+`test_iris_p1.py` 的只读断言同步收紧：只允许 `news_read.CANONICAL_CTE` 这一个**精确** CTE 前缀（`_readonly_body()`），仍拒绝任意 `WITH` 与所有写动词；`_EXISTING_TABLES` 加入 `057` 三表。新增 `test_p1_readonly_contract_survives_a_canonical_flip()` 证明切到 `CANONICAL` 后只读契约仍成立，且 `WITH evil AS (DELETE ...)` 仍被拒。
+
+47 项 N3 专项覆盖：`SOURCE = LEGACY` dark launch、legacy byte-identical / canonical CTE、R2 tie-break 与 `DESC` 免疫、九列投影、`published_day` 不暴露、R1 ET 分桶（AST 精确提取 `_NEWS_SQL`）、17 处 wiring 计数、writers 未包装、无 `058` migration、回滚路径、P1 helper 仍拒绝任意 `WITH`。
+
+### 27.7 真实 PostgreSQL 逐处对账（事务内 dry-run，`ROLLBACK`）
+
+`athena-pg` 维持 **53** migrations，本批零迁移。在**一个事务**内依次执行 `backfill()` → `six_item_gate()` → 17 处 legacy-vs-canonical 逐处 parity → `ROLLBACK`：
+
+```
+before                       news_events 2529 | canonical 0 / 0 / 0
+backfill #1                  legacy_rows=2529 articles=1873 associations=2529 maps_inserted=2529
+backfill #2                  maps_inserted=0（幂等）
+six_item_gate as_of=2026-05-08   6 items PASS | registered=3 unexplained=0 blocks_n3=False
+17-site parity               PASS all 17 sites | parity diffs: 0
+before ROLLBACK              1873 / 2529 / 2529
+after ROLLBACK               news_events 2529 | canonical 0 / 0 / 0
+DRY_RUN_OK
+```
+
+补充证据：`effective_ts <> legacy ts` 行数 = **0**；**92** 个 ET 日逐日对照 `diffs = 0`；`telegram` / `agents_headlines` / `pages_news_rows` 三个 `LIMIT` 边界 chosen-set equality 全 `True`；`as_of=2026-11-25` 门禁 `unexplained=0 / blocks_n3=False`；16 组同日同标题异 URL 为转载／追踪尾巴（§25.6 已审）。
+
+**`registered` 计数在 2–4 间波动是合法的**：`indicators.news_score()` 按 `ORDER BY ts` 取行，同 `ts` 行的位置权重不确定（§25.4 已用 multiset equality、stable tie-break equality、legacy self-inconsistency 三项机械证明）。四次重复 dry-run 均得 `unexplained=0 / blocks_n3=False`；只有 `unexplained` 或 `ok=False` 才阻止 N3。
+
+### 27.8 变异测试
+
+`/tmp/n3_mutation.py` **19/19 TRAPPED**，每个 trap 逐字节还原（sha256 一致）。覆盖：dark launch 被翻转、CTE 丢 `url` / 用 `published_day` 当 `ts` / 暴露 `published_day`、`render` 不加 CTE、`score_sql` 不加 tie-break、tie-break 误伤 `DESC`、默认启用 stable order、未知 source 静默、legacy 路径被改写、可变字段取自 map、JOIN 丢 map、CTE 读物理表、reader 未包装、guardian ET→UTC、indicators 用 `render` 而非 `score_sql`、writer 被包装、P1 允许任意 `WITH`、多出 `058` 迁移。
+
+### 27.9 验证链汇总
+
+```
+compileall                                       OK
+源码 control / ESC bytes                          0
+test_iris_p1                                      63/63 OK
+test_news_p3_n3                                   47/47 OK
+unittest discover（全量）                         1006/1006 OK (skipped=2)
+uv lock --check                                   29 packages
+git diff --check                                  clean
+变更台账机检                                     131/131
+LOCAL_LINK_AND_SOURCE_ERRORS                      0（32 份文档）
+wheel                                             athena_store-0.0.0-py3-none-any.whl
+                                                  news_read.py / news_canonical.py /
+                                                  news_backfill.py / news_reconcile.py
+                                                  53 migrations, 057 present, 058 absent
+pyproject.toml force-include                      零改动（hatch 自动收 Python 模块）
+真实 PostgreSQL                                   news_events 2529 | canonical 0/0/0 | 53 migrations
+运行时监听                                        7799 / 7497 / 4001 / 4002 全无
+```
+
+### 27.10 边界与明确不做
+
+- **未做持久 backfill**：live canonical 三表仍为 `0 / 0 / 0`；所有真实 PG 验证均事务内 `ROLLBACK`，业务表零持久写入。
+- **未把 `SOURCE` 切到 `CANONICAL`**：17 处 reader 运行期仍读 `news_events`，行为与 §25 交付态一致。
+- **N4 不在本批**：`news_events` 不删、不冻结；删除须长期对账为零且另行裁定（Q6）。
+- **不新增迁移**：53 个不变，无 `058`；`packages/store/pyproject.toml` 零改动。
+- **不重启 7799、不重试被取消的 `dxnrJP`、不启动 engine**；IB Gateway `7497/4001/4002` 保持关闭。
+- **未改 `indicators.py` legacy 排序**（§6.3 第 7 条「不与 NFR 行为变更混批」）；零 P4–P7。
+- 两个启动阻塞（`run_loop()` 的 `load_active()` 早于 `apply_migrations()`；`var/backups` 996 快照 prune）仍属独立运维轮。
+
+### 27.11 激活 go/no-go（须操作者回答）
+
+本批把 N3 的**读侧能力**完整交付，但 §26.2 四项前置条件中第 3 / 4 项（逐处对账、回滚路径）已满足，第 1 / 2 项仍缺：
+
+1. **真实持久回填**：持久执行 `backfill()`，在 live 已持久状态上复跑 `six_item_gate()` 得 `blocks_n3=False`。
+2. **运行期 N2 双写收敛确认**：需启动 engine 观察新 writer 的 dual-write 持续收敛；§26.4 明确禁止在本批启动。
+3. `SOURCE = CANONICAL`（一行）＋ 全量回归。
+
+前两步是**数据面写入 / 运行期变更**，超出「零持久写入、零行为变化」的 dark launch 边界，因此**必须由操作者显式授权后另起一轮**，不由本批擅自执行。回滚随时可用（§27.5）。
+
+### 27.12 回滚
+
+- `git revert <sha>`：移除 `news_read.py`、17 处包装、两个测试文件的改动、§27、头部第九笔、00 册索引、`CHANGELOG.md` 与 `C-20261125-9`。
+- **无 migration 可回滚**；`057` 三表、`news_events` 与既有数据不受影响。
+- 单行 `SOURCE = LEGACY` 或逐处 `source=LEGACY` 即时回退；`git revert` 后系统行为与 §25 交付态一致。
+
+### 27.13 关联
+
+- 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`～`-8`（P1 / Round A / §20 / §21 / Round B / P2 / P3-1 / P3-2）、§26 落地前契约（`9fff99c`）。
+- 下游：**N3 激活 go/no-go**（§27.11）→ N4 legacy retirement（Q6 另行裁定）→ P4 → P5 → P6 → P7；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。

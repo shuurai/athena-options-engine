@@ -157,3 +157,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-25 | Implement V2-P2 strategy events, SSE and truthful Iris animation | [C-20261125-6](logs/2026-11-25.md#c-20261125-6) |
 | 2026-11-25 | Implement V2-P3 N1/N2 canonical news tables, UTC identity and dual-write | [C-20261125-7](logs/2026-11-25.md#c-20261125-7) |
 | 2026-11-25 | Implement V2-P3 news backfill and six-item reconciliation gate | [C-20261125-8](logs/2026-11-25.md#c-20261125-8) |
+| 2026-11-25 | Ship V2-P3 N3 canonical read model as a dark launch | [C-20261125-9](logs/2026-11-25.md#c-20261125-9) |
