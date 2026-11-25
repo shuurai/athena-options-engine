@@ -152,3 +152,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-25 | Implement V2-P1 static Iris and Orchestration columns | [C-20261125-1](logs/2026-11-25.md#c-20261125-1) |
 | 2026-11-25 | Ratify V2-Q Round A for P2 and P3 gating | [C-20261125-2](logs/2026-11-25.md#c-20261125-2) |
 | 2026-11-25 | Write V2-P2 and V2-P3 pre-implementation contract | [C-20261125-3](logs/2026-11-25.md#c-20261125-3) |
+| 2026-11-25 | Approve V2-P2/P3 contract and ratify five §20.8 items | [C-20261125-4](logs/2026-11-25.md#c-20261125-4) |

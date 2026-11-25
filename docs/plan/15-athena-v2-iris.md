@@ -5,6 +5,7 @@
 > **状态推进（2026-11-25）**：§17 授权的 **V2-P1 静态 Iris ＋ Orchestration 独立双列已交付并验证**，交付记录见 §18；V2-P2–P7 与 V2-Q1–Q15 仍待裁定。上行「不授权实现」原句保留为 `C-20261124-11` 规划批次的历史状态，不改写。
 > **状态推进（2026-11-25，第二笔）**：**V2-Q Round A 已裁定 8 条**（Q1/Q2/Q3/Q4/Q5/Q6/Q13/Q15），记录见 §19；Q7–Q12、Q14 共 7 条仍待裁定。上行「V2-Q1–Q15 仍待裁定」是第一笔当时的状态，保留不改写。
 > **状态推进（2026-11-25，第三笔）**：操作者确认 §19 后，**V2-P2 / V2-P3 落地前契约已写入 §20**（`C-20261125-3`）。§20 本身零代码、零迁移、不预占迁移号，仍需操作者批准后才进入实现批次；Q7–Q12 / Q14 仍未裁定。
+> **状态推进（2026-11-25，第四笔）**：操作者逐项确认 §20.8 五条实现口径后，**§20 获批**，记录见 §21（`C-20261125-4`）。其中第 1 条由 `America/New_York` **显式窄修订为 UTC 日界**（Q5 identity 公式本身不变）；§6.2 / §19 / §20 历史 verbatim 行一律保留，只追加状态推进。**§20 获批 ≠ 授权实现**：P2 / P3 仍须各自独立实现批次、独立 commit / rollback；Q7–Q12 / Q14 仍未裁定。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -369,6 +370,8 @@ effective_ts = provider-published timestamp when actually supplied;
 published_day = effective_ts converted to America/New_York calendar day
 article_key = sha256("v1|" + published_day + "|" + normalized_title)
 ```
+
+> **窄修订（2026-11-25，§21，C-20261125-4）**：上行 `published_day = effective_ts converted to America/New_York calendar day` 经操作者逐项裁定改为 **`published_day = effective_ts converted to UTC calendar day`**（实现时用 `ts AT TIME ZONE 'UTC'` 取日期，避免 DB session `TimeZone` 漂移）。原行保留为 `C-20261124-11` 规划批次的历史 verbatim，不改写；下方「跨 ET 日」相应读作「跨 UTC 日」。Q5 裁定的 identity 公式其余部分（published day + normalized title、`title.lower()`、URL 只作证据、symbol 移出 identity、不做语义合并、`identity_version`）全部不变。实现时**不新增** `provider_tz` / `published_local_day` 等时区或证据列，只在解析入口加一道「tz-aware → `.astimezone(UTC)`」校验。
 
 - 每条 association 保存 `effective_ts / day_precision = provider | ingest_fallback / original_ts`；legacy 没有真实发布时间的行不得伪装成 provider 发布时间。
 - 同一 article 的多个 association 时间不一致时，canonical 展示时间取确定性最小 `effective_ts` 并保留全部原值；跨 ET 日的同标题不自动合并，进入 collision report。
@@ -894,3 +897,55 @@ drafts / orders                 empty (smoke DB)
 - 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`（§17/§18 P1 交付）、`C-20261125-2`（§19 Round A 裁定）。
 - 本节是 **V2-P2 / V2-P3 实现批次的前置契约**；未获操作者批准前零代码。
 - 并行未决：Q7–Q12 / Q14（P4–P6）、两个启动阻塞运维轮、D111 的 7799 安全重启与 IB Gateway 可用性。
+
+---
+
+## 21. §20 批准记录与 §20.8 实现口径裁定（2026-11-25，`C-20261125-4`）
+
+### 21.1 状态与授权边界
+
+- 操作者要求「Run each item with me one by one」，§20.8 五条逐项确认，**5 / 5 全部有明确结论、零跳过**。§20 由「待操作者批准」推进为 **已批准**；§20.9「未获操作者批准前零代码」是本批之前的历史状态，保留不改写，状态推进见本节与头部第四笔。
+- **本批只有记录**：零代码、零迁移、零 DB 写入、零 engine 重启、不预占迁移号、不分配全局 D 号、不改 D1–D111 / 112 节点 / 54 条裁定、不改 §1。
+- **§20 获批 ≠ 授权实现**。P2 / P3 仍须各自独立实现批次、独立 commit / 独立 rollback（§20.7）。Q7–Q12 / Q14 共 7 条仍未裁定，P4–P7 未授权。
+- 本节的 `V2-*` 仍是册内标识；第 1 条的 UTC 修订是 §6.2 / Q5 的**窄修订**，不是新全局 D 号，也不是新 `V2-Q` 号。
+
+### 21.2 §20.8 逐项裁定（5 / 5）
+
+| # | 口径 | 裁定 | 落地含义 | 明确排除 |
+|---|---|---|---|---|
+| 1 | `published_day` 日界 | **UTC 日界**（操作者：「The date is stored in UTC right? Just stick to the date UTC」）。此为**显式窄修订**，见 §21.3 | `published_day` 取 `ts AT TIME ZONE 'UTC'`；解析入口保证来源时间按时区正确换算为 UTC 后再写入 | 不新增 `provider_tz` / `published_local_day` / 其它时区或证据列；不改 Q5 identity 公式主体 |
+| 2 | `payload jsonb` 自由文本 `reason` | **只允许结构化 `reason_code`** | 事件行 `status` / `from_status` / `to_status` / `reason_code` 显式；`payload` 只放与 `reason_code` 对应的结构化标量；人类可读句子留在 `drafts.reason` | `payload` 不设 `reason` 键；不存第二份会漂移的自由文本；不从自由文本推断状态（§8.5） |
+| 3 | P2 SSE 端点 | **新增 `/api/iris/events`** | 独立端点 + 独立订阅注册表，结构化 JSON 帧；复用 `_open_stream()` / 15s keepalive / `client_closed` 底层骨架 | 不复用 `/api/logs` 的 `trail_recent()` / `subscribe_trail()`；`/api/logs`、`/api/pulse/ticks` 不动；P2 仍无持久化 replay，重连一律显式 `observation_gap` |
+| 4 | `backup.py TABLES` | **只加 P3 三张新闻表** | `news_articles` / `news_associations` / `news_legacy_event_map` 加入 `TABLES`，为 N3 后的 restore 保住 canonical 数据；本批明确授权扩大备份契约 | `strategy_events` **不加入**（append-only 观察读模型，丢失由 reconciler + `observation_gap` 覆盖）；`052_order_events` / `055_regime_labels` 既有缺口仍归独立运维轮，不在本批补 |
+| 5 | 迁移号分配 | **实现时取当时空号**，本节不预占 | 先落地的批次取当时的下一空号；同批加入 `.sql` + `pyproject.toml` force-include + 同步 `len(migrations)` / 末位断言 | 不预分配 `056` / `057`；不保留连续号段；实现批次须**同步而非删除**至少 6 处断言（§20.4，D108 收窄先例） |
+
+### 21.3 第 1 条是显式修订，不是默认通过
+
+§20.8 规定「若操作者认为其中某条实为决策，需另行裁定而非默认通过」。第 1 条改变了 §6.2 / Q5 已裁定的日界，因此按**显式修订**登记，不按实现口径静默默认。历史 verbatim 行一律保留，下表是唯一权威覆盖表：
+
+| 位置 | 历史原文关键词 | §21 覆盖 |
+|---|---|---|
+| §6.2 identity 代码块 | `published_day = effective_ts converted to America/New_York calendar day` | 读作 **`UTC calendar day`**；实现用 `ts AT TIME ZONE 'UTC'` 取日期，避免 DB session `TimeZone` 漂移 |
+| §6.2 bullet「跨 ET 日」 | 跨 ET 日的同标题不自动合并，进入 collision report | 读作「跨 UTC 日」；机制不变，仍进 collision report |
+| §20.1 三处初始写入行 | `§6.2 的 effective_ts + day_precision 与 ET 日界必须逐 writer 落地` | 日界改为 UTC；`effective_ts + day_precision` 区分 provider / `ingest_fallback` 的口径不变，fallback 仍不得伪装成 provider 时间 |
+| §20.1 真实库快照结论 | `distinct (UTC day, lower)` 与 ET 日界「两者可能不同 —— 必须列为 fixture」 | **该跨时区 fixture 要求撤销**：identity 日界与快照日界现在同为 UTC，1,873 直接对齐。但该数字仍是**推算而非验收阈值**，事务内 dry-run 重算要求不变 |
+| §20.2 identity v1 第 2 条 | `published_day = America/New_York 日界` | 读作 UTC 日界；其余全部不变 |
+| §20.7 P3 fixture 清单 | `ET 日界 / provider 缺失 / 跨日同标题 / 手工 URL fixture` | ET 日界 fixture 改为 UTC；其余三项不变 |
+| §20.8 第 1 条 | 确认沿用 §6.2 的 `America/New_York` | 裁定为 UTC；§20.8 原文保留，本节是批准记录 |
+
+**Q5 裁定主体不变**：identity = published day + normalized title；`normalized_title = title.lower()`；不引入 NFKC / 空白折叠；symbol 移出 article identity；URL 只作证据、不做语义强合并；不做「AI 主题相似所以合并」；所有规则带 `identity_version`；§6.3 N1–N4 分阶段迁移与六项对账不变。
+
+**解析入口额外检查（唯一新增要求）**：`006_news_events.sql` 的 `ts` 是 `timestamptz`，PG 存的已是 UTC instant，不保留来源时区。因此不新增任何时区列；只在解析入口保证每个 `when` 是 tz-aware 并以 `.astimezone(UTC)` 正确换算后写入，naive datetime 不得静默 `replace(tzinfo=UTC)`（当前 `parse_yahoo_rss()` 的 `parsed.replace(tzinfo=UTC)` 分支即需显式审视）。三处写入全部覆盖：`news.py:515 _insert_event()`（`datetime.now(UTC)`）、`:547 _save_headlines()`（provider `when`：Yahoo RFC-822 offset 或 `_finviz_stamp()` 的 `tzinfo=ET`，`ET = ZoneInfo("America/New_York")`）、`:124 store_manual()`（`datetime.now(UTC)`）。来源 offset / ET 由 Python datetime 换算成 UTC instant，**不需要存来源时区**。
+
+### 21.4 未决与门禁
+
+- Q7–Q12 / Q14 共 7 条仍待裁定（P4–P6、Strategy 3、评估协议）；Q14 须在看 holdout 结果**之前**冻结。
+- 两个启动阻塞（`run_loop()` 的 `load_active()` 早于 `apply_migrations()`；`var/backups` 996 快照 prune）属独立运维轮。
+- 7799 console 仍关闭、IB Gateway `7497 / 4001 / 4002` 仍关闭；D111 / P1 代码需未来安全重启窗口，本批不重启、不重试被取消的 `dxnrJP`。
+- P2 / P3 实现批次仍须各自：事务内 dry-run、mutation trap、真实 PostgreSQL 只读验证、`git diff --check`、台账机检、独立 commit / rollback。§21 不替代任何一项。
+
+### 21.5 验证、回滚与关联
+
+- 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`（§17/§18 P1 交付）、`C-20261125-2`（§19 Round A）、`C-20261125-3`（§20 契约）。
+- 本批验证：`unittest discover` 全量、`git diff --check`、台账机检、缺失索引 mutation trap、本地链接与来源路径检查；零代码改动故无真实库写入。实测结果见 `logs/2026-11-25.md` `C-20261125-4` 验证块。
+- 回滚：`git revert <sha>`；只回滚 §21、头部第四笔状态推进、§6.2 窄修订注记、00 册索引、`CHANGELOG.md` 与台账条目。历史 verbatim 行不受影响。
