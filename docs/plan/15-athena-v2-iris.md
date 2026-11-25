@@ -1317,3 +1317,46 @@ wheel athena_store-0.0.0-py3-none-any.whl       53 migrations (057 present)
 
 - 上游：`C-20261124-11`（§16 规划）、`C-20261125-1`～`-7`（P1 / Round A / §20 / §21 / Round B / P2 / P3-1）。
 - 下游：**V2-P3 第三批 = 持久 backfill ＋ 21 处 reader 逐处 cutover（N3）**，随后 N4 另需裁定；P4 / P5 / P6 / P7 按固定顺序继续；P5 数据不足则 `no-go` 且不自动进入 P6（§22.5）。
+
+---
+
+## 26. V2-P3 第三批（N3）落地前契约（2026-11-25，两项裁定已确认）
+
+本节是 **N3 canonical read cutover 的实现前契约**，只记录口径与边界，不含实现。§6.3 已把 N3 定义为「NFR / News / Iris 读 canonical；legacy 停止新增前保留只读对照」；§25 已证明六项对账门禁 `blocks_n3 = False`（unexplained = 0）。N3 仍需独立实现、独立验证、独立 commit / rollback。
+
+### 26.1 两项裁定（操作者已确认）
+
+| # | 问题 | 裁定 | 理由 |
+|---|---|---|---|
+| R1 | `guardian_regime.py _NEWS_SQL` 现按 ET 日 `(ts AT TIME ZONE 'America/New_York')::date` 分桶，而 canonical `published_day` 是 **UTC 日** | **保留 ET 分桶**：canonical reader 用 `association.effective_ts AT TIME ZONE 'America/New_York'` 决定 regime 日界；`published_day`（UTC）**只用于 identity，不用于 regime 分桶** | 切 reader 是存储替换，不得顺手改变 183 行跨 ET/UTC 日界的归属，从而改变 regime 标签；§6.3 第 7 条「不与 NFR 行为变更混批」 |
+| R2 | `news_score` 只按 `ts` 排序，同 ts 行的位置权重不可复现（§25.4 NVDA） | **只给 canonical reader 加确定性 tie-break**：`ORDER BY effective_ts, sentiment`；`indicators.py` 的 legacy 路径**不改** | canonical 今后可复现；不触碰 NFR 代码；`news_score` 当前无确定性 wheel / phase 消费者，差异仅影响已登记的 epsilon 级数值；回滚仍回到 legacy 原行为 |
+
+### 26.2 N3 前置条件（缺一不可）
+
+1. **真实持久回填**：§25 的对账是事务内 dry-run，live 库 canonical 三表仍为空。N3 前必须持久执行 `backfill()` 并复跑 `six_item_gate()` 得 `blocks_n3=False`。
+2. **N2 双写收敛确认**：确认运行期新 writer 的 dual-write 持续收敛，否则 reader 切换后会读到陈旧 canonical 行。
+3. **逐处对账**：17 处非测试 reader 的 canonical 等价路径必须逐处给出 SQL 与对照结果；未登记的逐处差异阻止 N3。
+4. **回滚路径**：每个 reader 保留一行可切回 `news_events` 的开关；一次 `git revert` 即恢复全部 legacy 读取，`news_events` 本身不动。
+
+### 26.3 17 处 reader 清单（本批只读枚举，逐处对账用）
+
+| 文件 | 处数 | 语义 |
+|---|---|---|
+| `apps/orchestrator/src/athena_orchestrator/pages.py` | 7 | 新闻计数 / `avg(sentiment)` / 列表 / `source, count(*)` 分布 / 明细 |
+| `packages/strategy-nfr/src/athena_strategy/news.py` | 1 | `tags_from_events()` 的 `NEWS_WASH` 计数（`sentiment < x AND ts >= x AND dismissed=false`） |
+| `packages/strategy-nfr/src/athena_strategy/indicators.py` | 1 | `news_score()`（R2：canonical 侧加 tie-break） |
+| `packages/strategy-nfr/src/athena_strategy/agents.py` | 2 | 头条标题列表（`ORDER BY ts DESC LIMIT 8`） |
+| `packages/strategy-nfr/src/athena_strategy/advisor.py` | 1 | `_yahoo_notes()` 新闻条目 |
+| `apps/orchestrator/src/athena_orchestrator/guardian_regime.py` | 1 | `_NEWS_SQL`（R1：保留 ET 日界） |
+| `apps/orchestrator/src/athena_orchestrator/iris_view.py` | 2 | 新闻计数、`max(ts)` 新鲜度 |
+| `apps/orchestrator/src/athena_orchestrator/console.py` | 1 | 新闻计数 |
+| `apps/bots/src/athena_bots/telegram.py` | 1 | 新闻条目 |
+
+**不属于 N3**：`news.py` 三处 writer（`INSERT` ×2 / `dismiss UPDATE`）、`dsh.py` sentiment `UPDATE`、`backup.py TABLES`、`news_canonical.py` / `news_backfill.py` / `news_reconcile.py` 中的 legacy 对照与对账 SQL —— 这些保持读写 `news_events`，用于对照与回滚。
+
+### 26.4 边界
+
+- **N4 不在本批**：`news_events` 不删、不冻结；删除须长期对账为零且另行裁定（Q6）。
+- **不新增迁移**：N3 优先以 canonical 读模块 / SQL 投影落地，避免再动 schema；如确需兼容视图，另开裁定与迁移号。
+- **不重启 7799、不重试被取消的 `dxnrJP`、不启动 engine**；IB Gateway 保持关闭。
+- 两项裁定由操作者于 `C-20261125-8` 交付后确认，历史 verbatim 行（含 §24.6 / §25.8）保留不改写。
