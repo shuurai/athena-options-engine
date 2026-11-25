@@ -150,3 +150,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-24 | Add D111 VIX history and English Guardian UI | [C-20261124-10](logs/2026-11-24.md#c-20261124-10) |
 | 2026-11-24 | Document Athena v2 Iris architecture and strategy plan | [C-20261124-11](logs/2026-11-24.md#c-20261124-11) |
 | 2026-11-25 | Implement V2-P1 static Iris and Orchestration columns | [C-20261125-1](logs/2026-11-25.md#c-20261125-1) |
+| 2026-11-25 | Ratify V2-Q Round A for P2 and P3 gating | [C-20261125-2](logs/2026-11-25.md#c-20261125-2) |

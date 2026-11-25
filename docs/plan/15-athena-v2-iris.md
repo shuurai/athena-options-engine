@@ -3,6 +3,7 @@
 **状态**：Planning / 待裁定；本册只合并现状证据、目标契约与实施顺序，不授权实现。
 **证据截点**：2026-11-24，代码基线 `56739ce`；数据库只读快照见 §2.3。
 > **状态推进（2026-11-25）**：§17 授权的 **V2-P1 静态 Iris ＋ Orchestration 独立双列已交付并验证**，交付记录见 §18；V2-P2–P7 与 V2-Q1–Q15 仍待裁定。上行「不授权实现」原句保留为 `C-20261124-11` 规划批次的历史状态，不改写。
+> **状态推进（2026-11-25，第二笔）**：**V2-Q Round A 已裁定 8 条**（Q1/Q2/Q3/Q4/Q5/Q6/Q13/Q15），记录见 §19；Q7–Q12、Q14 共 7 条仍待裁定。上行「V2-Q1–Q15 仍待裁定」是第一笔当时的状态，保留不改写。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -702,3 +703,66 @@ git diff --check     0
 - 上游契约 §17；上游规划批次 `C-20261124-11`（§16）。
 - 页面契约 `docs/athena/13-portfolio-advisor.md`；导航与 CSS `console.py`；页面 `pages.py`。
 - 下一阶段仍为 **用户裁定 V2-Q1–Q15**，不是自动进入 P2。
+
+---
+
+## 19. V2-Q Round A 裁定记录（2026-11-25, `C-20261125-2`）
+
+### 19.1 本批性质
+
+操作者在 P1 交付后选择「Start V2-Q Round A」。本批**只裁定、不实现**：把近端 8 条 `V2-Q` 从「待裁定」推进到「已裁定」，为 V2-P2 / V2-P3 各自撰写落地前契约提供前置依据。按本册编号纪律，`V2-Q*` 是**册内规划标识，不是全局 D 决策**；D1–D111 / 112 节点 / 54 条裁定一字不动，不预占迁移号，不改写 §1 / §6 边界。
+
+裁定方式：4 条由 P1 已交付代码反证确认（ratified-by-delivery），4 条经一次英文 `AskUserQuestion` 逐条裁定并附实测案例。**8 条全取推荐，0 偏离**。
+
+### 19.2 八条裁定
+
+| V2-Q | 问题 | 裁定 | 来源 |
+|---|---|---|---|
+| **Q1** | Iris 是否直接取代 Portfolio Analysis 页面 | ✅ **是**：`/iris` canonical，`/portfolio-analysis` 保留 alias | P1 交付 `7bbbf40` 反证 |
+| **Q2** | Strategy 1 / 2 是否按 Opening / Management 划分 | ✅ **是**：V2-S1 NFR Wheel · Opening、V2-S2 Advisor · Management；不把 NFR 与 agents 拆成两条假策略 | 同上 |
+| **Q3** | 是否接受 V2-I1–V2-I10 目标不变量 | ✅ **接受**，尤其统一 drafts 账本与 truthful animation | 同上（P1 零新行动表、零装饰动画） |
+| **Q13** | Orchestration 独立双列及移动端阅读顺序 | ✅ **采用**：两列独立 stack，`--agent-order` 恢复单列顺序，展开卡片只推动本列 | 同上 |
+| **Q4** | 结构化 observation 的存储形态 | ✅ **append-only `strategy_events` 窄 read model**：一行一个真实 domain transition，`event_id` 由 subject + transition + version 确定性生成。否决通用 event bus / outbox，否决「不建表、纯推导」 | AskUserQuestion 推荐项 |
+| **Q15** | observation event 故障与 domain commit 的隔离 | ✅ **domain commit 唯一真源，event 故障绝不回滚**：commit 之后幂等 observation emit；周期性 reconciler 从持久化 domain rows 补齐可推导事件；补不出的区间明示 `observation_gap`。否决「同事务原子写」与「fire-and-forget 无 reconciler」 | AskUserQuestion 推荐项 |
+| **Q5** | 新闻 identity v1 | ✅ **published day + normalized title**：URL 只作证据，不做语义强合并；沿用 `title.lower()` 口径，不引入 NFKC / 空白归一化。否决「仅 URL」与「语义相似度」 | AskUserQuestion 推荐项 |
+| **Q6** | legacy `news_events` 保留多久 | ✅ **至少跨 N1–N3 对账期**；任何删除另开裁定。否决「验证后即删」与「无限期不裁定」（后者等价于把删除决策永久悬空） | AskUserQuestion 推荐项 |
+
+统计：8 条 / 4 条交付反证 + 4 条实质裁定 / 8 全取推荐、0 偏离。全局 D 号零新增。
+
+### 19.3 四条实质裁定的落地含义
+
+- **Q4 → P2 形态冻结**：`strategy_events` 是窄 read model，不是万能 event bus。`draft_created / draft_rejected / draft_expired / draft_blocked / draft_amended / order_queued / order_submitted / order_filled / partial_fill / cancel` 与 `filtered / quiet / invalid` 各自需要真实 fixture；replay → live 交接、乱序、重复、错误 account / symbol / edge、graph version mismatch 都要故障注入。§8.5 的「推荐，需 Q15 裁定」自本批起升为已裁定。
+- **Q15 → 交易安全边界**：event 写失败不得阻断或回滚 draft / approval / order 的 domain commit（V2-I2）。`observation_gap` 是诚实状态，不得用装饰性 connector 动画填补无证据区间；reconciler 只能补可从 domain rows **推导**的事件，不得臆造。
+- **Q5 → P3 identity 冻结**：canonical article + per-symbol association + 独立 `news_legacy_event_map` 三件套不变；identity v1 不做语义强合并；canonical 写入不依赖 legacy conflict；dismiss 必须解析明确 `association_id`，禁止一对多 fingerprint 全部 dismiss。跨 symbol 同文只存一份。
+- **Q6 → P3 验收门槛**：`news_legacy_event_map` 条数 == legacy 行数；initial insert、DSH sentiment enrich、dismiss 三处可变 writer 的 dual-write 对账全绿之前，不删任何 legacy 行，保留完整回滚路径。
+
+案例锚点（裁定当场给出，作为后续 fixture 的验收样例）：
+
+1. NVDA CSP 10:31 drafted → 10:34 rejected ⇒ replay 显示两次独立 connector pulse，不是一次。
+2. `'NVDA beats Q3 estimates'` 同日落在 NVDA / SMH / QQQ ⇒ 1 篇 canonical article + 3 条 association，不是 3 行。
+3. CC draft 落库后 `strategy_events` INSERT 超时 200ms ⇒ draft 仍 pending 且可批准，Iris 该区间显示 `observation_gap`。
+4. 活库实测 2,529 行 news、269 个跨 symbol 标题组 ⇒ map count 必须等于 legacy 行数才算对账通过。
+
+### 19.4 明确不做 / 仍未裁定
+
+- **裁定 ≠ 实现授权**。P2 / P3 仍需各自撰写落地前契约（建议 §20）并经操作者确认后才可动代码；本批零代码、零迁移（仍 51）、零 Settings 字段、零 `uv.lock` 变动、零运行库写入、零引擎重启、零 §1 / §6 修订。
+- **仍未裁定 7 条**：Q7（52W 是否引入正式交易日历）、Q8（周线 corporate action / 复权口径）、Q9（§8.3 Strategy 3 十四项语义）、Q10（首选工具与 DTE / strikes / width）、Q11（exit 是否每次独立 Approve）、Q12（manual trade / liquidate 是否纳入 pre-trade drafts）、Q14（历史 / live shadow 评估协议、最低证据量与 go / no-go 阈值）。对应 P4–P6；本轮不问的理由：Q9 / Q10 / Q14 需要先有数据与 fixture 才有意义，且 §8.5 明确 Q14 必须在看 holdout 结果**之前**冻结，现在裁定等于凭空猜阈值。
+- 两个已知启动阻塞（`run_loop()` 的 `load_active()` 早于 `apply_migrations()`；`var/backups` 996 快照触发 prune 批量删除）属独立运维轮，不在本批。
+- §14 的「不在本批实现 Iris」、`C-20261124-11` 的历史句、§17 与 §18 的交付状态一律保留原文，不因本批改写。
+
+### 19.5 验收与回滚
+
+| 项 | 结果 |
+|---|---|
+| 编号纪律 | V2-Q 册内标识；D1–D111 / 112 节点 / 54 裁定不变；零新 D 号；不预占迁移号 |
+| 文档一致性 | 15 册 §19 + 头部状态推进；00 册 15 号索引；`docs/athena/13` 不动；历史 verbatim 不改写 |
+| 台账 | `CHANGELOG.md` 索引行 + `logs/2026-11-25.md` `C-20261125-2`；机检 124/124 |
+| 静态门禁 | `unittest discover` 810/810（2 env skips）、`git diff --check` 0、台账机检、缺失索引 mutation trapped |
+| 运行时 | 零代码改动 ⇒ 无需重启 7799；本批未启动任何 engine 进程，未写任何业务表 |
+| 回滚 | `git revert <sha>`；只回滚裁定文档与台账，不动任何运行时文件、prompt settings 或交易数据 |
+
+### 19.6 关联
+
+- 上游：`C-20261124-11`（§16 规划批次）、`C-20261125-1`（§17/§18 P1 交付）。
+- 下游：§20 建议作为 V2-P2 / V2-P3 落地前契约（**待操作者确认后才写、之后才实现**）。
+- 并行未决：Q7–Q12、Q14（P4–P6）；两个启动阻塞运维轮。
