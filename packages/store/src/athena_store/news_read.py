@@ -1,13 +1,17 @@
 """V2-P3 N3: the single canonical news read model (§6.3 / §26).
 
-**DARK LAUNCH.** ``SOURCE`` ships as ``LEGACY``. A *persisted* backfill (§26.2
-item 1) and observed runtime N2 dual-write convergence (item 2) are hard
-preconditions for the cutover; §25's six-item gate was a transaction-internal
-dry-run that left the live canonical tables empty, and §26.4 forbids starting
-the engine. Cutting over against empty tables would silently blank every news
-reader. The read model and all 17 wrappers are complete and verified here;
-activation is one line (``SOURCE = CANONICAL``) plus a persisted backfill and
-requires an explicit operator go/no-go.
+**ACTIVE (CANONICAL).** ``SOURCE`` ships as ``CANONICAL`` since the §27.11
+activation (operator go, `C-20261126-1`). Batch 3 originally shipped as a
+**dark launch** (``SOURCE = LEGACY``) because §26.2's data-plane preconditions
+were unmet: the six-item gate had only run as a transaction-internal dry-run,
+leaving the live canonical tables empty, and cutting over then would have
+blanked every news reader. The activation batch closed both preconditions on
+the live database — a persisted, idempotent backfill (2,529 legacy rows ->
+1,873 articles / 2,529 associations / 2,529 map rows), the six-item gate re-run
+on the persisted state with ``blocks_n3=False`` / ``unexplained=0``, and a
+17-site legacy-vs-canonical parity sweep with zero diffs. The read model and
+all 17 wrappers are complete and verified here; cutback is one line
+(``SOURCE = LEGACY``) or a git revert.
 
 One switch (``SOURCE``) controls all 17 readers. ``render()`` prefixes a CTE
 named ``news_events`` that projects the three canonical tables into the **exact
@@ -52,16 +56,16 @@ LEGACY = "legacy"
 
 # §26.2 makes a *persisted* backfill + runtime N2 convergence hard
 # preconditions for the N3 cutover. Both were still unmet at delivery time:
-# §25's six-item gate was a transaction-internal dry-run (ROLLBACK), so the
-# live canonical tables were empty, and §26.4 forbids starting the engine to
-# observe dual-write convergence. Flipping this switch against empty tables
-# would silently blank every news reader. Therefore V2-P3 batch 3 ships as a
-# DARK LAUNCH: the read model and all 17 wrappers are complete and verified,
-# but the process-wide default stays LEGACY (zero behavior change, zero
-# persistent DB writes). Activation is one line (SOURCE = CANONICAL) plus the
-# persisted backfill, and must be preceded by six_item_gate() == blocks_n3
-# False on the live, persisted state. One-line cutback / git revert both work.
-SOURCE = LEGACY
+# V2-P3 batch 3 shipped as a DARK LAUNCH (SOURCE = LEGACY) because the live
+# canonical tables were empty and flipping the switch would have blanked every
+# news reader. §27.11 activation (operator go, C-20261126-1) then satisfied
+# §26.2 on the live database: a persisted, idempotent backfill (2,529 legacy
+# rows -> 1,873 articles / 2,529 associations / 2,529 map rows), the six-item
+# gate re-run on the persisted state with blocks_n3=False (unexplained=0), and
+# a 17-site legacy-vs-canonical parity sweep with zero diffs. The process-wide
+# default is therefore CANONICAL. Cutback is one line (SOURCE = LEGACY) or a
+# git revert; news_events itself is never written by this module.
+SOURCE = CANONICAL
 
 # A CTE named news_events shadows the legacy table for the duration of one
 # statement. Readers keep writing "FROM news_events" literally.

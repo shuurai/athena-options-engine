@@ -727,10 +727,13 @@ class TestIrisP4Wiring(unittest.TestCase):
         iris_view.snapshot(conn, "U1", SimpleNamespace(watchlist=["TST"]))
         self.assertEqual(conn.commits, 0)
         self.assertEqual(conn.rollbacks, 0)
+        flat_cte = " ".join(news_read.CANONICAL_CTE.split())
         tables = set()
         for sql, _params in conn.calls:
-            body = sql.upper()
-            self.assertTrue(body.lstrip().startswith("SELECT"), sql[:80])
+            body = sql.strip()
+            if body.startswith(flat_cte):
+                body = body[len(flat_cte):]
+            self.assertTrue(body.lstrip().upper().startswith("SELECT"), sql[:80])
             tables.update(re.findall(r"(?i)\bFROM\s+([a-z_][a-z0-9_]*)", sql))
         self.assertTrue(tables <= _EXISTING_TABLES, tables - _EXISTING_TABLES)
 

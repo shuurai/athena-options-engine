@@ -14,6 +14,7 @@
 > **状态推进（2026-11-25，第十笔）**：操作者裁定 **N3 激活 defer**（Task #123 open），固定顺序进入 **Step 4 / V2-P4**。落地前契约 §28（`C-20261125-10`，R1–R7）与交付记录 §29（`C-20261125-11`）先后入库：四个 pure 模块（ET 会话日历、六类日线缺口审计、ISO 周聚合、Strategy 3 shadow 信号子集）＋ Iris 只读接线，§22.3 第 1–6/14 项全部落地、第 7–13 项按 R6 留给 P5/P6。**零迁移、零持久写入、零 drafts / orders**；live `market_bars` 为空 ⇒ 数据面诚实 `unknown / no_data`，数据到位即自动产出真实值。全量 `1056/1056`、`27/27` mutation traps、真实 PG 事务内只读 + `ROLLBACK`、wheel 含四新模块。**P4 shadow 不等于 Strategy 3 可交易**：工具 / 入场窗口 / TP / NAV / 连止均未实现，`instrument_availability=deferred_p5`；P5（`eval-v1` 执行）以真实历史数据可用性为硬门禁。上行第九笔「N3 激活须操作者单独 go/no-go」依然成立。
 > **状态推进（2026-11-25，第十一笔）**：固定顺序 **Step 5 / V2-P5（`eval-v1` 执行）已按 §22.5 硬门禁实测并裁定**，记录见 §30（`C-20261125-12`）。只读实测：live 库 `market_bars=0`、`sim_bars=0`、`calendar_marks` 54 条仅 FED（无 EARNINGS）、`iv_marks/chain_marks=0`、`drafts/orders=0` ⇒ §22.4 最低证据量四项**全部不达标**（52W 数据覆盖率 0%、holdout 完成周 0、有效 candidate 0、覆盖 symbol 0），bootstrap 区间不可计算。**裁定：`insufficient_evidence / no-go / 继续 shadow`**——这正是 §22.5 预言的默认路径；`eval-v1` 阈值零回改，holdout 未被触碰（无从触碰）。**P6 不自动启动**（仅 P5=go 才进入）；P7 不受 P5 no-go 阻塞，按固定顺序继续。本批 doc-only：零代码、零迁移、零持久写入。再运行前置条件见 §30.5。上行第十笔「P4 shadow 不等于 Strategy 3 可交易」依然成立。
 > **状态推进（2026-11-25，第十二笔）**：固定顺序 **Step 6 跳过（P6 不启动，仅 P5=go 进入）→ Step 7 / V2-P7 已实现、验证并独立交付**，记录见 §32（`C-20261125-14`）。函数级死代码清理（6 个函数 + 1 处冗余调用，共 150 行：`_contract_line` / `pages._secret` / `cockpit._money` / `note_step` / `note_cycle` / `_audit_result_tag` / `_advisor_actions_table` ＋ `_decimal_or_none` ＋ 不可达包装 `_portfolio_analysis_page`）＋ 文档收口；实现期纠正一处契约口径（`.advisor-reason` CSS 为 live 代码，保留）。**固定顺序 `Q7–Q12/Q14 → P2 → P3 → P4 → P5 → (P6 跳过) → P7` 全部走完**。全量 1055/1055（−1 个仅钉住已删包装的测试）、零迁移（仍 53）、零 news SQL 变更、零 `SOURCE` 变更。**仍 open 的独立裁定：N3 激活 go/no-go（Task #123）、N4、§30.5 五项数据批次**。上行第十一笔「P6 不自动启动」已由本批执行为「跳过」。
+> **状态推进（2026-11-26，第十三笔）**：操作者裁定 go，**N3 已激活**，记录见 §33（`C-20261126-1`）。§27.11 三步骤全部落地：持久回填（2,529 → 1,873 / 2,529 / 2,529，幂等）、持久状态六项门禁 `blocks_n3=False / unexplained=0`、17 站 parity `diffs=0`（两处 tie 选择非确定性经确定性 tie-break 证伪为数据分歧，registered 记录）；`SOURCE = CANONICAL` 单行切换；全量 1055/1055、零迁移（仍 53）、`news_events` 零写入、备份留存 `var/backups/news-n3-pre-activation-20261126T170430Z.sql`。实现期一次真实缺陷（切换赋值行被机械替换误删 → 52 errors）被全量测试当场逮住并修复，如实记录于 §33.3。**切回随时可用：单行 `SOURCE = LEGACY` 或 git revert**。运行期 N2 收敛的观察动作登记于 §33.6（engine 下次启动后复跑六项门禁）。**仍 open：N4 legacy retirement、§30.5 五项数据批次**。
 **编号纪律**：本册的 `V2-I*`、`V2-S*`、`V2-P*`、`V2-Q*` 都是册内规划标识，**不是全局 D 决策，不占用迁移号，不改变 D1–D111 / 112 节点的裁定状态**。
 
 > **一句话目标**：让 Athena 的每条策略行动都能被看懂——什么输入形成了什么因子，哪个策略据此产生了哪张 draft，谁在何时批准，订单最后到了哪里。
@@ -1811,3 +1812,60 @@ wheel                                             不受影响（packages/ 零�
 
 - 上游：§31 契约（`C-20261125-13`）、§30（P5 no-go）、§29（P4）、§18（P1 别名设计，其「alias 经由该包装」句由 §32.2 W5 行 supersede，原句 verbatim 保留）。
 - 下游：Task #123（N3 激活，操作者裁定）；§30.5 数据批次；N4。
+
+## 33. N3 激活交付记录（operator go · 持久回填 · `SOURCE = CANONICAL`，2026-11-26，`C-20261126-1`）
+
+### 33.1 状态与范围
+
+**N3 已激活**。操作者裁定 go（「I don't care about the past. It's about moving to the latest design and ways of working」），按 §27.11 冻结步骤执行：持久回填 → live 持久状态复跑六项门禁 → 17 处逐站 parity → 单行切换 `SOURCE = CANONICAL` → 全量回归。零迁移（仍 53、无 `058`）；`news_events` 本身零写入。
+
+### 33.2 执行步骤与实测（live DB `athena-pg`）
+
+1. **预检**：`news_events=2529`、canonical 三表 `0/0/0`、`schema_migrations=53`。
+2. **备份**：`pg_dump` 四张 news 表 → `var/backups/news-n3-pre-activation-20261126T170430Z.sql`（4 个 COPY 块，dump exit 0）。
+3. **持久回填**（真实 commit，非 dry-run）：`legacy_rows=2529 → articles=1873 / associations=2529 / maps_inserted=2529`；二次回填 `maps_inserted=0`（幂等证实）；回填后 canonical 三表 `1873/2529/2529`。
+4. **六项门禁（持久状态复跑）**：`blocks_n3=False`、`unexplained=0`、`registered=3`（tie_order_nondeterminism 机械归因，§25.4 同类）。
+5. **17 处逐站 parity（持久数据）**：首次原始跑 17 站 11 清洁 + 2 处值差异 + 4 处脚本填参错误。值差异两处（pages 近期新闻列表 `ORDER BY ts DESC LIMIT`、advisor `DISTINCT ON … ORDER BY symbol, ts DESC`）经诊断确证为 **tie 选择非确定性**——底层行集一致（门禁第 1–4 项 PASS 佐证），同为等 `ts` 平局时 Postgres 任意取行，legacy 侧自身亦如此。给两侧追加上确定性 tie-break 后 **17/17 站 `diffs=0`**（`ACTIVATION_PARITY_OK`）。R2 口径未动（tie-break 仍仅 news_score），tie 非确定性作为 registered epsilon 级记录。
+6. **切换**：`news_read.SOURCE = LEGACY` → `SOURCE = CANONICAL`（单行），docstring 与注释同步改写为 ACTIVE 语义。
+7. **切回路径**：单行 `SOURCE = LEGACY` 或 `git revert`；legacy 表未动。
+
+### 33.3 实现中的一次真实缺陷（全量测试逮住，即时修复）
+
+切换首次实现时，替换注释块误把 `SOURCE = LEGACY` 赋值行一并删除而未写入 `SOURCE = CANONICAL`，全量回归 **52 errors（`NameError: SOURCE`）**当场逮住；补上赋值行后复跑转绿。教训如实记录：切换行本身就是被替换文本的一部分，机械替换必须带上目标赋值。
+
+### 33.4 测试诚实更新（语义跟随激活，不降级覆盖）
+
+| 测试 | 更新 |
+|---|---|
+| `test_source_ships_as_legacy` → `test_source_ships_as_canonical_after_activation` | 断言 `SOURCE == CANONICAL`，docstring 记录激活前置链 |
+| `test_is_canonical_default_false` → `…_true_after_activation` | 默认即 canonical |
+| `test_module_docstring_records_the_gate` | 断言 ACTIVE 语义（CANONICAL / persisted / dark launch 历史仍在） |
+| `test_flipping_back_to_legacy_restores_all_17_bodies` | 切回路径改为显式 `source=LEGACY` 覆盖（default 已是 canonical），17 站逐站断言保留 |
+| `test_legacy_path_is_byte_identical` / `test_patching_global_switch_changes_every_reader` / `test_legacy_path_is_untouched` | 默认源语义跟随（legacy 路径仍逐字节，只是改为显式 `source=LEGACY`） |
+| `test_strategy3_p4.test_snapshot_readonly_and_known_tables_only` | 只读守卫接受 canonical CTE 前缀（fake conn 空白扁平化对齐），表白名单检查不变（三张 canonical 表已在 `_EXISTING_TABLES`） |
+
+### 33.5 验证链汇总
+
+```
+六项门禁（持久状态）                             blocks_n3=False, unexplained=0, registered=3
+17-site parity（确定性 tie-break, legacy vs 切换后 default）
+                                                 17/17, diffs=0, POST_FLIP_PARITY_OK
+compileall                                       OK
+unittest discover（全量）                        1055/1055 OK (skipped=2)
+uv lock --check                                  29 packages
+git diff --check                                 clean
+wheel                                            athena_store 含 news_read.py / news_backfill.py
+迁移数                                            53 (无 058)
+news_events                                      2529 rows（切换前后不变，零写入）
+运行时进程                                        none（7799 closed, Gateway closed, no engine launched）
+```
+
+### 33.6 §26.2 第 2 项（运行期 N2 双写收敛）的诚实记录
+
+engine 未运行（IB Gateway 关闭、7799 关闭），无法做「运行期观察」。本批的收敛论证是**结构性的**：三个 writer + DSH + dismiss 的 dual-write 自 `C-20261125-7` 起已在代码路径中并有测试覆盖；回填后至下次 engine 启动之间无任何新写入，故不存在「canonical 落后于 legacy」的窗口；engine 下次启动时所有新写入同时进两表。**后续确认动作已登记**：下次 engine 运行后复跑 `six_item_gate()`，若 canonical 出现 unexplained 差异则单行切回 `SOURCE = LEGACY` 并另开裁定。
+
+### 33.7 边界与关联
+
+- 零迁移、`news_events` 零写入、零 engine 启动、不重试 `dxnrJP`；两个启动阻塞仍属独立运维轮。
+- 上游：§26（契约）、§27 / §27.11（dark launch + go/no-go 清单，`C-20261125-9`）。
+- 下游：**N4 legacy retirement**（仍须另开裁定：长期对账为零 + Q6）；engine 重启后的 convergence 复跑（§33.6）；两个启动阻塞运维轮。

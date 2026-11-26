@@ -93,16 +93,22 @@ def _all_literals() -> list[tuple[str, ast.Constant]]:
 
 
 class TestDarkLaunchSwitch(unittest.TestCase):
-    def test_source_ships_as_legacy(self):
-        """The critical safety contract: do not cut over to empty tables."""
-        self.assertEqual(news_read.SOURCE, news_read.LEGACY)
+    def test_source_ships_as_canonical_after_activation(self):
+        """§27.11 activation (operator go, C-20261126-1): the switch is CANONICAL.
+
+        The batch-3 safety contract ("do not cut over to empty tables") was
+        honoured by the dark launch; the activation batch then persisted the
+        backfill, re-ran the six-item gate (blocks_n3=False) and proved 17-site
+        parity on the live data before this flip.
+        """
+        self.assertEqual(news_read.SOURCE, news_read.CANONICAL)
 
     def test_constants_are_stable(self):
         self.assertEqual(news_read.CANONICAL, "canonical")
         self.assertEqual(news_read.LEGACY, "legacy")
 
-    def test_is_canonical_default_false(self):
-        self.assertFalse(news_read.is_canonical())
+    def test_is_canonical_default_true_after_activation(self):
+        self.assertTrue(news_read.is_canonical())
 
     def test_is_canonical_honours_override(self):
         self.assertTrue(news_read.is_canonical(news_read.CANONICAL))
@@ -111,13 +117,16 @@ class TestDarkLaunchSwitch(unittest.TestCase):
     def test_module_docstring_records_the_gate(self):
         doc = news_read.__doc__ or ""
         self.assertIn("persisted", doc)
-        self.assertIn("DARK LAUNCH", doc)
+        self.assertIn("CANONICAL", doc)
+        self.assertIn("dark launch", doc)
 
 
 class TestRenderContract(unittest.TestCase):
     def test_legacy_path_is_byte_identical(self):
+        # Post-activation the default is CANONICAL; the byte-identical legacy
+        # path is the explicit override (and the one-line cutback).
         sql = "SELECT count(*) FROM news_events WHERE NOT dismissed"
-        self.assertEqual(news_read.render(sql), sql)
+        self.assertEqual(news_read.render(sql, source=news_read.LEGACY), sql)
 
     def test_canonical_path_is_cte_plus_unchanged_body(self):
         sql = "SELECT count(*) FROM news_events WHERE NOT dismissed"
@@ -143,10 +152,12 @@ class TestRenderContract(unittest.TestCase):
             news_read.render("SELECT 1 FROM news_events", source="bogus")
 
     def test_patching_global_switch_changes_every_reader(self):
+        # Post-activation default is CANONICAL; patching the switch to LEGACY
+        # returns every reader to the bare legacy body.
         sql = "SELECT 1 FROM news_events"
-        with patch.object(news_read, "SOURCE", news_read.CANONICAL):
-            self.assertTrue(news_read.render(sql).startswith("WITH news_events AS ("))
-        self.assertEqual(news_read.render(sql), sql)
+        self.assertTrue(news_read.render(sql).startswith("WITH news_events AS ("))
+        with patch.object(news_read, "SOURCE", news_read.LEGACY):
+            self.assertEqual(news_read.render(sql), sql)
 
     def test_render_does_not_apply_stable_order(self):
         rendered = news_read.render(_SQL_WITH_ORDER_BY_TS, source=news_read.CANONICAL)
@@ -169,7 +180,10 @@ class TestScoreSqlR2(unittest.TestCase):
         self.assertNotIn("ORDER BY ts\n", rendered)
 
     def test_legacy_path_is_untouched(self):
-        self.assertEqual(news_read.score_sql(_SQL_WITH_ORDER_BY_TS), _SQL_WITH_ORDER_BY_TS)
+        self.assertEqual(
+            news_read.score_sql(_SQL_WITH_ORDER_BY_TS, source=news_read.LEGACY),
+            _SQL_WITH_ORDER_BY_TS,
+        )
 
     def test_legacy_override_is_untouched_even_when_global_is_canonical(self):
         with patch.object(news_read, "SOURCE", news_read.CANONICAL):
@@ -357,15 +371,17 @@ class TestNoSchemaChange(unittest.TestCase):
 
 class TestCutbackPath(unittest.TestCase):
     def test_flipping_back_to_legacy_restores_all_17_bodies(self):
-        with patch.object(news_read, "SOURCE", news_read.CANONICAL):
-            canonical = [
-                news_read.render(lit.value) for _rel, lit in _all_literals()
-            ]
-            self.assertTrue(all(c.startswith("WITH news_events AS (") for c in canonical))
-        for (_rel, lit), before in zip(_all_literals(), canonical):
+        # Since the §27.11 activation the default is CANONICAL; the cutback is
+        # the explicit source=LEGACY override (one line: SOURCE = LEGACY).
+        with patch.object(news_read, "SOURCE", news_read.LEGACY):
+            legacy = [news_read.render(lit.value) for _rel, lit in _all_literals()]
+            self.assertTrue(all(l == lit.value for (_rel, lit), l in zip(_all_literals(), legacy)))
+        for (_rel, lit), before in zip(_all_literals(), legacy):
             with self.subTest(site=_rel):
-                self.assertEqual(news_read.render(lit.value), lit.value)
-                self.assertNotEqual(news_read.render(lit.value), before)
+                self.assertEqual(news_read.render(lit.value, source=news_read.LEGACY), lit.value)
+                canonical = news_read.render(lit.value, source=news_read.CANONICAL)
+                self.assertTrue(canonical.startswith("WITH news_events AS ("))
+                self.assertNotEqual(canonical, lit.value)
 
     def test_reverting_the_module_would_leave_pure_sql_at_call_sites(self):
         # Each wrapped call is a single expression: news_read.render(<literal>).
