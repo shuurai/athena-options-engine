@@ -880,7 +880,7 @@ def _news(conn, account: str, query: dict, note: str = "") -> dict:
     chip = ("warn", f"{name} NEWS_WASH") if densest[1] else ("", "NO WASH")
     return _html(
         "News intake",
-        "Headline density. Manual ingest pulls a page and DSH writes the event. A false alarm stays stored and drops out of the wash count.",
+        "Headline density. Manual ingest pulls a page and stores its headline for a watched ticker. A false alarm stays stored and drops out of the wash count.",
         body,
         [chip],
         _REFRESH,
@@ -3001,7 +3001,6 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
     current = load_active(conn, account)
     news = current.news
     mode = trading_mode().upper()
-    dsh_ready = bool(os.environ.get("DSH_BIN", "").strip())
     token_ready = bool(bot_token(current))
     note_html = f'<p class="note">{escape(note)}</p>' if note else ""
     body = (
@@ -3022,10 +3021,9 @@ def _settings(conn, account: str, query: dict, note: str = "") -> dict:
         f"{_limit('Concurrent subscriptions', 'concurrent_subscriptions', current.ib.concurrent_subscriptions, 'How many IB quotes may be open at once. Further quotes wait.')}"
         '<p class="slot-note">Host, port, and client id stay on the logged-in Gateway. Slot windows are on the cockpit.</p></div></div>'
         '<div class="card"><h2>AI</h2><div class="scroll-y">'
-        f"{_field('Provider', 'DSH runs the local binary. The others call that provider.', f'<select class=\"input\" name=\"ai_provider\">{_ai_provider_options(current.ai.provider)}</select>')}"
+        f"{_field('Provider', 'Provider for AI calls. The model list follows the selected provider.', f'<select class=\"input\" name=\"ai_provider\">{_ai_provider_options(current.ai.provider)}</select>')}"
         f"{_field('Model', 'The model sent with each AI call. The list follows the provider.', f'<select class=\"input\" name=\"model\">{_model_options(current)}</select>')}"
         f'<script type="application/json" id="ai-models">{json.dumps({key: list(names) for key, names in MODELS.items()})}</script>'
-        f"{_row('DSH binary', _tag('SET', 'green') if dsh_ready else _tag('EMPTY'), 'Whether DSH_BIN is set on this machine.')}"
         f'<div id="credential-block"{"" if current.ai.provider != "DSH" else " hidden"}>'
         f"{_field('Credential token', 'The middle stays hidden. Clear the field to remove the token.', _credential_input(current))}"
         f'<p class="slot-note" id="credential-help">{escape(_credential_help(current.ai.provider))}</p>'
@@ -3151,16 +3149,8 @@ def _post_news(conn, account: str, form: dict) -> dict:
     if action == "ingest_url":
         settings = load_active(conn, account) if account else None
         symbols = list(settings.watchlist) if settings else []
-        model = scoring_model(settings) if settings else "deepseek-flash"
         try:
-            note = ingest_url(
-                conn,
-                (form.get("url") or [""])[0],
-                symbols,
-                model,
-                settings.ai.provider if settings else "DSH",
-                deepseek_token(settings) if settings else "",
-            )
+            note = ingest_url(conn, (form.get("url") or [""])[0], symbols)
         except ValueError as exc:
             return _news(conn, account, {}, str(exc)) | {"status": 400}
         return _news(conn, account, {}, note)

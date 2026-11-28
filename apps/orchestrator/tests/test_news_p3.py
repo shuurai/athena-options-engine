@@ -22,7 +22,6 @@ from athena_strategy import news
 ROOT = Path(__file__).resolve().parents[3]
 STORE = ROOT / "packages/store/src/athena_store"
 NEWS_SRC = ROOT / "packages/strategy-nfr/src/athena_strategy/news.py"
-DSH_SRC = ROOT / "packages/strategy-nfr/src/athena_strategy/dsh.py"
 MIG = STORE / "migrations/057_news_canonical.sql"
 BACKUP_SRC = STORE / "backup.py"
 PYPROJECT = ROOT / "packages/store/pyproject.toml"
@@ -316,10 +315,6 @@ class TestMigrationAndWiring(unittest.TestCase):
                "</item></channel></rss>")
         rows = news.parse_yahoo_rss(xml, _ts(2026, 11, 25, 13))
         self.assertEqual(rows[0][0].isoformat(), "2026-11-26T04:30:00+00:00")
-
-    def test_dsh_dual_writes_sentiment(self):
-        self.assertIn("nc.mark_sentiment(conn, fingerprint, sentiment)",
-                      DSH_SRC.read_text(encoding="utf-8"))
 
     def test_dismiss_signature_accepts_explicit_association_id(self):
         text = NEWS_SRC.read_text(encoding="utf-8")

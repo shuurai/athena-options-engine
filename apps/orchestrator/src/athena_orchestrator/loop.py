@@ -36,13 +36,11 @@ from athena_orchestrator.runtime import (
     begin_running,
     begin_waiting,
     bind_database,
-    mark,
     note_loop,
     note_telegram,
     restore,
     wait_remaining,
 )
-from athena_strategy.dsh import set_score_listener
 from athena_orchestrator.tunnel import start_tunnel, stop_tunnel
 from athena_settings import load_active, seed_standard_if_empty
 from athena_store import apply_migrations, connect
@@ -90,7 +88,6 @@ async def run_loop() -> None:
     fallback = _env_int("ATHENA_LOOP_SECONDS", 300)
     cycles = _env_int("ATHENA_LOOP_CYCLES", 0)
     sleep_seconds = _cycle_sleep(database_url, fallback)
-    set_score_listener(lambda status, detail="": mark(3, status, detail))
 
     log.info("state=INIT")
     with connect(database_url) as conn:

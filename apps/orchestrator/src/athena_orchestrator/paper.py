@@ -169,7 +169,8 @@ def _shared_market(conn, watchlist: list[str], base_url: str, settings) -> None:
     except Exception as exc:
         log.error("news intake failed: %s", exc)
         finish(2, "news failed")
-        mark(3, "skipped", "dsh skipped")
+    # S0b: no AI sentiment scoring runs in the cycle any more.
+    mark(3, "skipped", "ai scoring disabled")
 
 
 def _expire(conn, account: str, settings) -> None:

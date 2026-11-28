@@ -3528,7 +3528,7 @@ _CLIENT_JS = r"""
       wrap.action = "/news";
       wrap.innerHTML = '<input class="input mono" name="url" type="url" placeholder="https://…" required autocomplete="off">' +
         '<input type="hidden" name="action" value="ingest_url">' +
-        '<p class="slot-note" style="margin:10px 0 0">Athena pulls the page. DSH writes the symbol, headline, type, and sentiment.</p>';
+        '<p class="slot-note" style="margin:10px 0 0">Athena pulls the page and stores its headline for the watched ticker it mentions.</p>';
       const cancel = document.createElement("button");
       cancel.className = "btn ghost";
       cancel.type = "button";
@@ -3571,7 +3571,7 @@ _CLIENT_JS = r"""
         '<select class="input" name="market" aria-label="Market" style="margin-top:8px">' +
         '<option value="us">US</option><option value="hk">HK</option><option value="ca">CA</option></select>' +
         '<input type="hidden" name="action" value="add">' +
-        '<p class="slot-note" style="margin:10px 0 0">Athena looks up the name and size, syncs a price once, and DSH picks the classifier badges.</p>';
+        '<p class="slot-note" style="margin:10px 0 0">Athena looks up the name and size and syncs a price once.</p>';
       const marketPick = wrap.querySelector("[name=market]");
       let marketTouched = false;
       marketPick.addEventListener("change", () => { marketTouched = true; });

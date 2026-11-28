@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 import psycopg
 
 from athena_strategy.agents import record_call
-from athena_strategy.dsh import classify_symbol
+from athena_strategy.ai_client import classify_symbol
 from athena_strategy.news import yahoo_symbol
 
 log = logging.getLogger("athena.pool")
@@ -91,7 +91,7 @@ def store_profile(
     provider: str = "DSH",
     token: str = "",
 ) -> str:
-    """Store the name, size, and DSH classifier badges. A blank field leaves the stored value."""
+    """Store the name, size, and AI classifier badges. A blank field leaves the stored value."""
     picked, result = classify_symbol(symbol, facts, model, provider, token)
     payload = picked if picked is not None else {"error": result["error"]}
     record_call(conn, account, "Universe", symbol, model or "deepseek-flash", provider, "off", result, payload)
@@ -140,7 +140,7 @@ def store_profile(
 
 
 def fill_symbol(conn: psycopg.Connection, account: str, symbol: str, model: str) -> str:
-    """Store the public name and size, one price pair, and DSH classifier badges."""
+    """Store the public name and size, one price pair, and AI classifier badges."""
     return store_profile(conn, account, symbol, lookup_company(symbol), model)
 
 

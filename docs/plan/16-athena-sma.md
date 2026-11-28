@@ -414,6 +414,60 @@ Aliases to normalize in the symbol master: `SQ` → `XYZ` (Block); `SNDK/STX/WDC
 - No new SMA code, no new tables, no new Iris nodes, no IBKR changes — those are S1+.
 - No `eval-v1` re-run, no N3 changes, no N4.
 
+### 16.5 S0b interpretation rulings (2026-11-28, pre-implementation)
+
+The §16.2 batch table above stays frozen. Read-only survey of the real dependency
+graph found three places where its terse wording is ambiguous or conflicts with its
+own verification gate; these rulings are recorded **before** any S0b edit and are
+enforced by §18.
+
+- **R1 — `dsh.py` delete vs. live imports.** `dsh.py` is not only the DSH news
+  scorer: it also holds the generic multi-provider chat client used by
+  `agents.py` (`chat`), `pool.py` (`classify_symbol`) and `test_rules.py`
+  (`request_body`). `agents.py` is deleted in **S0c**, not S0b. Ruling: delete
+  `dsh.py` as a module, relocate **only** the provider-neutral chat primitives
+  into a new `ai_client.py` (a rename+trim, no new capability), and **drop, not
+  relocate**, every news-analysis function: `enrich_sentiment`, `parse_scores`,
+  `read_article`, `parse_article`, `_prompt`, `_article_prompt`,
+  `set_score_listener` / `_hear` / `_score_listener`. `ai_client.py` is a
+  temporary bridge; S0c removes its last consumer.
+- **R2 — "keep `ingest_url`" vs. "AI news-analysis code path removed".**
+  `ingest_url` is listed as CRUD to keep, but its only implementation is an AI
+  `read_article` call. Ruling: keep `ingest_url` as an operator-triggered CRUD
+  function but make it deterministic and AI-free — fetch the public page, match a
+  watched ticker in the title/body, classify with the existing `score_title`, and
+  store via `_insert_event`. `_post_news` no longer passes model/provider/token.
+  The modal copy in `console.py` is corrected to stop claiming DSH writes the event.
+- **R3 — wash settings vs. "News page unchanged" / "AST suite green".**
+  `pages._news` (verification gate: news page unchanged) reads
+  `wash_sentiment_below` / `wash_window_days`, and `tags_from_events` supplies
+  `news.py`'s single `news_read.render()` site (verification gate: 17-site AST
+  suite green) and reads all three wash knobs. Removing `NewsSettings` wash knobs
+  in S0b would force a news-page rewrite and a 17→16 AST change. Ruling: S0b
+  removes the **ingest-side strategy inputs** — the `enrich_sentiment` call and
+  the `tags_from_events` loop inside `ingest_news` — but leaves the settings
+  fields, `tags_from_events` and the `/news` render unchanged (the sole edit is
+  correcting one now-false DSH sentence in the page description). Full knob
+  removal is already assigned to **S0d** ("`NewsSettings` remaining strategy
+  knobs"); `NEWS_WASH` strategy consumption dies with `phases.py` / `wheel.py` /
+  `agents.py` / `advisor.py` in **S0c**. Hard-coding a private wash threshold is
+  rejected — operator requirement: "Everything else that is togglable we should
+  keep because they are good configurations".
+- **R4 — "no DSH refs" definition.** Verified as: zero `athena_strategy.dsh`
+  imports, zero `dsh.py` file, zero `enrich_sentiment` / `read_article` /
+  `parse_scores` / `set_score_listener` / `DSH_BIN` reads in the console and
+  settings UI, and zero DSH news-analysis functions anywhere. The literal
+  provider label `"DSH"` remains in `AISettings` / `MODELS` /
+  `normalize_provider` / `_ai_provider_options` because §16.2 S0d preserves the
+  AI settings surface for §5.3; it is a configuration value, not the removed
+  news-analysis path. `runtime.STEPS` (`"DSH"` progress step) and
+  `prompts.py` NEWS_WASH copy are left to S0c, which rewrites the cycle and
+  deletes the prompt consumers.
+- **R5 — honest test delta.** Removing `dsh.py` retires exactly two static
+  assertions that read the file (`test_news_p3.test_dsh_dual_writes_sentiment`,
+  `test_news_p3_n3.test_dsh_sentiment_writer_is_not_wrapped`). No other reader
+  test changes; `EXPECTED_SITES` stays 17.
+
 ---
 
 ## 17. S0a delivery record (2026-11-28, `C-20261128-5`)
@@ -428,3 +482,25 @@ Aliases to normalize in the symbol master: `SQ` → `XYZ` (Block); `SNDK/STX/WDC
 | Verification | Full suite **1026/1026 OK (skipped=2)** — honest delta −29 (= removed strategy behavior, no hidden failures); compileall OK; `uv lock --check` 29 packages; `git diff --check` clean; wheel (`athena_strategy_nfr`) contains no `strategy3` and still includes the 3 kept plumbing modules; zero `strategy3` / `s3-shadow` / `strategy3_*` references in `apps/` + `packages/` |
 | Rollback | `git revert <sha>` restores module + Iris wiring + tests; no migration involved |
 | Next | **S0b** — DSH / news strategy analysis / AI news coupling removal per §16.2 |
+
+---
+
+## 18. S0b delivery record (2026-11-28, `C-20261128-6`)
+
+**Status**: ✅ S0b shipped on `strategy/sma20-sma50-crossover`. DSH news scoring,
+AI article reading and the ingest-side wash-tag loop are gone; the news page,
+canonical read model and 17-site reader suite are unchanged.
+
+| Item | Result |
+|---|---|
+| Contract first | §16.5 R1–R5 written **before** any edit, resolving three conflicts between the frozen §16.2 row and its own verification gates |
+| Deleted | `packages/strategy-nfr/src/athena_strategy/dsh.py` (528 lines); the `enrich_sentiment` call and `tags_from_events` loop in `ingest_news`; `loop.py` `set_score_listener` import + call + now-orphaned `mark` import; `pages._settings` `DSH_BIN` read + `DSH binary` row; `pages._post_news` model/provider/token arguments; 2 static assertions that read `dsh.py` |
+| Dropped, not relocated | `enrich_sentiment`, `parse_scores`, `read_article`, `parse_article`, `_prompt`, `_article_prompt`, `set_score_listener` / `_hear` / `_score_listener`, `_complete` / `_missing` |
+| Added | `ai_client.py` — provider-neutral chat primitives only (rename + trim of the generic half of `dsh.py`, no new capability); `test_s0b_news.py` — 6 tests including a static mutation trap |
+| Kept | `ingest_url` / `store_manual` / `dismiss_event`; `ingest_news` as pure headline intake + canonical dual-write; `tags_from_events` and all `NewsSettings` wash knobs (S0c / S0d own their removal); `/news` render structure (one stale DSH sentence corrected); `news_read.SOURCE = CANONICAL`; `EXPECTED_SITES = 17`; SSE / Iris, drafts / approvals / orders, account isolation |
+| `ingest_url` new semantics | Deterministic, AI-free CRUD: fetch public page → match a watched ticker in title/body → `score_title` for sentiment / event type → `_insert_event`. Signature reduced to `(conn, url, symbols)`. |
+| Explicitly deferred | No migration, no table drop, no canonical read-model change, no cycle rewrite (`runtime.STEPS` "DSH" step and `prompts.py` NEWS_WASH copy → S0c), no `NewsSettings` change (→ S0d), no 7799 / engine restart. The local DSH chat backend inside `ai_client.py` is temporary AI infrastructure; S0c removes its last consumer (`agents.py`). |
+| Verification | Full suite **1030/1030 OK (skipped=2)** — honest delta from 1026 = −2 retired static assertions + 6 new S0b tests; `news_read` AST suite 46/46 with `EXPECTED_SITES = 17`; 2/2 mutation traps failed when broken and restored byte-identically; compileall OK; `uv lock --check` 29 packages; `git diff --check` clean; wheel has no `dsh.py`, contains `ai_client.py` + the 3 P4 plumbing modules (28 modules); ledger machine check 143/143 |
+| R4 residual grep | Zero `athena_strategy.dsh` imports, zero `dsh.py`, zero `enrich_sentiment` / `read_article` / `parse_scores` / `set_score_listener` / `DSH_SRC` in production code. Remaining hits are the S0b guard's own symbol list and the literal `"DSH"` provider label in `AISettings` / `MODELS` / `normalize_provider` (kept for §5.3) plus `ai_client.py`'s local chat backend. |
+| Rollback | `git revert <sha>` restores `dsh.py`, the ingest calls, the listener wiring, the two static assertions and deletes `ai_client.py` / `test_s0b_news.py`; no migration involved |
+| Next | **S0c** — wheel / options strategy engine + cycle rewrite + route cuts (§16.2) |

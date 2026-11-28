@@ -1,4 +1,10 @@
-"""Headline intake. Tags come from stored events, not from a single post."""
+"""Headline intake, canonical dual-write, dismiss and manual paste.
+
+S0b (booklet 16 §16.2): the automatic AI sentiment scoring and the ingest-side
+wash-tag loop are gone. News stays as an information lens; no AI call is made
+from this module. ``tags_from_events`` remains until S0c removes its strategy
+consumers, so the canonical read-model reader suite is unchanged.
+"""
 
 from __future__ import annotations
 
@@ -20,10 +26,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 
 from athena_settings.model import SettingsPayload
-from athena_settings.resolve import deepseek_token, scoring_model
-from athena_strategy.dsh import enrich_sentiment, read_article
 from athena_strategy.tags import EARNINGS_NEAR, FED_EVENT, NEWS_WASH
-from athena_strategy.types import NEWS_TYPE_CODES
 from athena_store import news_canonical as nc
 from athena_store import news_read
 
@@ -70,39 +73,30 @@ _POSITIVE = ("upgrade", "beat", "beats", "rally", "record", "surge", "surges", "
 
 
 def ingest_news(conn: psycopg.Connection, symbols: list[str], settings: SettingsPayload) -> int:
-    """Fetch enabled sources and store new headlines plus calendar marks."""
+    """Fetch enabled sources and store new headlines plus calendar marks.
+
+    S0b: pure information-lens intake. No AI sentiment enrichment and no
+    ingest-side wash-tag loop (booklet 16 §16.5 R2/R3).
+    """
     today = datetime.now(ET).date()
     stored = 0
-    fresh: list[tuple[str, str, str]] = []
     news = settings.news
     if news.yahoo:
         for symbol in symbols:
             log.info("news yahoo %s", symbol)
-            count, rows = _save_headlines(conn, symbol, "yahoo", _yahoo(symbol))
+            count, _rows = _save_headlines(conn, symbol, "yahoo", _yahoo(symbol))
             stored += count
-            fresh.extend(rows)
     if news.finviz:
         for symbol in symbols:
             log.info("news finviz %s", symbol)
-            count, rows = _save_headlines(conn, symbol, "finviz", _finviz(symbol))
+            count, _rows = _save_headlines(conn, symbol, "finviz", _finviz(symbol))
             stored += count
-            fresh.extend(rows)
     if news.fed_calendar:
         log.info("news fed")
         _save_marks(conn, "FED", "", _fed_meetings())
     for symbol, event_day, title in _earnings(symbols, today, news.earnings_near_days):
         _save_marks(conn, "EARNINGS", symbol, [(event_day, title)])
     conn.commit()
-    log.info("news score")
-    updated = enrich_sentiment(
-        conn, fresh, scoring_model(settings), settings.ai.provider, deepseek_token(settings)
-    )
-    if updated:
-        log.info("dsh sentiment updated=%s", updated)
-    for symbol in symbols:
-        tags = tags_from_events(conn, symbol, settings, today)
-        if tags:
-            log.info("news_tags symbol=%s tags=%s", symbol, ",".join(sorted(tags)))
     return stored
 
 
@@ -142,15 +136,13 @@ def store_manual(conn: psycopg.Connection, symbol: str, title: str) -> int:
     return count
 
 
-def ingest_url(
-    conn: psycopg.Connection,
-    url: str,
-    symbols: list[str],
-    model: str,
-    provider: str = "DSH",
-    token: str = "",
-) -> str:
-    """Pull a public page and store the event DSH reads from it."""
+def ingest_url(conn: psycopg.Connection, url: str, symbols: list[str]) -> str:
+    """Pull a public page and store its headline for a watched symbol.
+
+    S0b (booklet 16 §16.5 R2): deterministic CRUD, no AI call. The page must
+    mention one of the watched tickers; sentiment and event type come from the
+    existing keyword ``score_title``. Model/provider/token arguments are gone.
+    """
     watched = [item.strip().upper() for item in symbols if item.strip()]
     if not watched:
         raise ValueError("Add a watched symbol before ingesting a page.")
@@ -159,15 +151,22 @@ def ingest_url(
     title, text = page_text(html)
     if len(text) < 40:
         raise ValueError("That page had no article text.")
-    article = read_article(title, text, target, watched, model, provider, token)
-    symbol = article["symbol"]
-    if symbol not in set(watched):
-        raise ValueError("That page is not about a watched symbol.")
-    event_type = article["event_type"] if article["event_type"] in NEWS_TYPE_CODES else "GENERIC"
-    headline = article["title"] or title
+    haystack = f"{title} {text}".upper()
+    symbol = next(
+        (
+            item
+            for item in watched
+            if re.search(rf"(?<![A-Z0-9.]){re.escape(item)}(?![A-Z0-9.])", haystack)
+        ),
+        "",
+    )
+    if not symbol:
+        raise ValueError("That page does not mention a watched symbol.")
+    headline = title or text[:120]
     if not headline:
-        raise ValueError("The model did not return a headline.")
-    count = _insert_event(conn, symbol, "manual", event_type, article["sentiment"], headline[:240], target)
+        raise ValueError("The page had no headline.")
+    sentiment, event_type = score_title(headline)
+    count = _insert_event(conn, symbol, "manual", event_type, sentiment, headline[:240], target)
     conn.commit()
     if not count:
         return f"{symbol} already has that headline."

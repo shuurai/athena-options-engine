@@ -46,7 +46,7 @@ from athena_settings.resolve import (
     prediction_token,
     scoring_model,
 )
-from athena_strategy.dsh import request_body
+from athena_strategy.ai_client import request_body
 from athena_strategy.schemas import parse_response
 from athena_strategy.screener import _listed
 from athena_strategy.agents import (

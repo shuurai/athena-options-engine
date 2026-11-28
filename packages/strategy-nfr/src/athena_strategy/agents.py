@@ -18,7 +18,7 @@ from athena_settings.model import SettingsPayload, StrategySettings, TacticFlags
 from athena_settings.prompts import PREDICTION_NAME, RUN_ORDER, TRADE_NAME, range_names, resolved_agents
 from athena_settings.resolve import deepseek_token, scoring_model
 from athena_strategy.drafts import apply_ticket_block, has_open_draft, open_quantity, stage_draft
-from athena_strategy.dsh import chat
+from athena_strategy.ai_client import chat
 from athena_strategy.indicators import Indicators, indicators_enabled, read_indicators, store_reading
 from athena_strategy.iv import tags_from_iv
 from athena_strategy.phases import _load

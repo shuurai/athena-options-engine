@@ -20,8 +20,8 @@ Pinned here:
   (UTC, identity-only) is NOT exposed to readers;
 * R2: only ``news_score`` gets the deterministic ``ORDER BY ts, sentiment``
   tie-break, and only on the canonical path; ``ORDER BY ts DESC`` is untouched;
-* all 17 non-test readers are wrapped; the three writers / DSH UPDATE /
-  dismiss UPDATE are not;
+* all 17 non-test readers are wrapped; the three writers / dismiss UPDATE
+  are not (the DSH sentiment UPDATE was removed with S0b);
 * no new migration (53), and ``news_read.py`` is auto-included in the wheel.
 """
 
@@ -341,10 +341,6 @@ class TestReaderWiring(unittest.TestCase):
         # Only one render() in news.py — tags_from_events(), a reader.
         self.assertEqual(text.count("news_read.render("), 1)
 
-    def test_dsh_sentiment_writer_is_not_wrapped(self):
-        text = (ROOT / "packages/strategy-nfr/src/athena_strategy/dsh.py").read_text()
-        self.assertIn("UPDATE news_events SET sentiment", text)
-        self.assertNotIn("news_read.render(", text)
 
 
 class TestNoSchemaChange(unittest.TestCase):
