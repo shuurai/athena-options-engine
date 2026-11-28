@@ -166,3 +166,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-26 | Activate N3 canonical news read model on operator go | [C-20261126-1](logs/2026-11-26.md#c-20261126-1) |
 | 2026-11-28 | Propose Athena SMA single-strategy simplification (booklet 16) | [C-20261128-1](logs/2026-11-28.md#c-20261128-1) |
 | 2026-11-28 | Approve booklet 16 rulings D1-D8 and universe-expansion amendment | [C-20261128-2](logs/2026-11-28.md#c-20261128-2) |
+| 2026-11-28 | Add operator ticker universe tiers and loading rules to booklet 16 | [C-20261128-3](logs/2026-11-28.md#c-20261128-3) |

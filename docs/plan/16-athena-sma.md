@@ -84,11 +84,13 @@ A symbol is `suitable` only when all hard gates pass; each verdict carries reaso
 | Gate | Rule (proposed default) | Reason surfaced when failing |
 |---|---|---|
 | History | ≥ 60 completed weekly bars (2y target, 1.2y minimum) | `history_short` |
-| Liquidity | 20-session average dollar volume ≥ $500M | `thin_liquidity` |
+| Liquidity | **20-session average dollar volume ≥ $40M** (operator-superseded 2026-11-28, was $500M; §15) | `thin_liquidity` |
 | Price | ≥ $5 | `penny` |
 | Data health | Gap audit clean on the SMA window (reuse P4 `gap_audit`) | `internal_gap` / `halt` / … |
-| Shortability (only if short-stock instrument chosen, D1) | IBKR borrow available; fee recorded | `no_borrow` / `borrow_expensive` |
+| Shortability (D1 = short stock) | **IBKR short locate available AND borrow fee < 3% annualized** (operator-specified, §15) | `no_borrow` / `borrow_expensive` |
 | Strategy evidence | ≥ 1 historical hill in the pulled window | `no_prior_hill` |
+| Earnings proximity (live gate) | **No earnings within 5 trading days** before entering the live Case engine (operator-specified, §15) | `earnings_near` |
+| Strategy state (live gate) | Weekly SMA20 > SMA50 AND SMA20 slope(3w) > 0 before a case may open (= §2.2 WATCH precondition; a symbol below its weekly SMA50 is **watch-only**, not active) | `below_sma50` / `slope_down` |
 
 Suitability is a **displayed property**, not a hidden filter: unsuitable symbols remain visible with their reason codes.
 
@@ -339,3 +341,37 @@ Operator: **"Use recommendations and we will just find more stocks suitable to b
 - No migration numbers pre-allocated; new tables only with their own S-phase contracts.
 - No orders without approval; no engine/7799 restarts as a side effect of documentation batches.
 - No deletion of `news_events` (N4 remains a separate, unmade ruling).
+
+---
+
+## 15. Ticker universe (operator-supplied, 2026-11-28, `C-20261128-3`)
+
+This is the working universe for the weekly SMA20 > SMA50 mean-reversion short scanner. It operationalizes amendment A1 (§14.1): the cold-start remedy is a concrete, tiered symbol pool. Tier membership is configuration; the §2.4 hard gates still decide daily `suitable` verdicts per symbol.
+
+### 15.1 The pool
+
+| Group | Symbols |
+|---|---|
+| **Core book** (already in live/paper rotation) | OKTA, U, MSFT, MU, TSLA, TWLO, SNOW |
+| **Tier 1 — High-beta software / AI software** (best fit for hill + SMA20 retest) | CRWD, PANW, ZS, NET, DDOG, MDB, TEAM, WDAY, HUBS, NOW, CRM, ADBE, INTU, SHOP, SQ/XYZ, PLTR, APP, RBLX, TTWO, ROKU, SPOT, DOCU, VEEV, FSLY, ESTC (+ core-book SNOW, OKTA, TWLO, U) |
+| **Tier 2 — Semis / AI hardware** (higher beta, wider stops, earnings-sensitive) | NVDA, AMD, AVGO, MRVL, MPWR, TSM, INTC, SNDK, STX, WDC, LITE, COHR, MXL, SMTC, SITM, SWKS, QCOM, TXN, ADI, ON, MCHP, NXPI, ARM (+ core-book MU) |
+| **Tier 3 — Mega-cap tech / Mag7-style** (slower, cleaner hills, ballast shorts) | AAPL, GOOGL, AMZN, META, NFLX, ORCL, IBM, CSCO, ANET, DELL, SMCI, STX (+ core-book MSFT, Tier-1 CRM) |
+| **Tier 4 — High-beta narrative / EV / space / crypto-adjacent** (watch-only until §15.2 gate) | RIVN, LCID, NIO, XPEV, LI, RKLB, ASTS, LUNR, CBRS, COIN, MSTR, BMNR, HOOD, SOFI, NU, IONQ, CRWV, NBIS (+ core-book TSLA) |
+| **Tier 5 — Non-tech ballast** (optional cross-sector diversification) | UNP, GE, CAT, BA, VLO, MPC, PSX, DINO, ANF, ELF, CROX, SN, ABNB, DAL, RCL, LLY, MRNA |
+
+Aliases to normalize in the symbol master: `SQ` → `XYZ` (Block); `SNDK/STX/WDC` storage trio kept as separate symbols; duplicates across groups resolve to one symbol with multiple tier tags (tier tags feed the narrative/label system in §2.3).
+
+### 15.2 Loading rules (operator-specified)
+
+1. **Scanner universe at start = Tier 1 + Tier 2 + Tier 3** (~70 tickers after dedup). Sufficient for ~3–4 clean setups/year without overfitting.
+2. **Tier 4 = `watch-only`** until the Case library has **≥ 100 completed cases** (separate, stricter gate than D5's 50-case similarity gate). Rationale: their beta is too fat for 1R sizing before the MAE distribution is known. Watch-only means: data pulled, frames computed, **no TradeRequests**.
+3. **Tier 5 optional**; when enabled, weight them **0.5× in the scoring function** (they rarely produce the 20–30% moves this strategy models; their role is stopping Total Heat from being ~90% tech).
+4. **Hard filters before any ticker enters the live Case engine** (§2.4, operator values): ADV ≥ $40M; IBKR short locate available + borrow fee < 3% annualized; no earnings within 5 trading days; weekly SMA20 > SMA50 and SMA20 slope(3w) > 0.
+5. **Operator caution (recorded as a standing rule)**: names already below their weekly SMA50 or in freefall — called out: **SMTC, SITM, MSTR, CRWV, NBIS, BMNR** — belong in Tier 4 watch, not Tier 1/2 active, regardless of their listed tier. The strategy needs the hill above SMA50 first. Enforcement is mechanical via the `below_sma50` live gate (§2.4), not via hand-maintained list edits.
+
+### 15.3 Consequences for the plan
+
+- §2.4 liquidity and shortability gates superseded as marked in the table; earnings-proximity and strategy-state live gates added there.
+- S1 (data layer) sizes its IBKR pull for **~70 active + ~18 watch-only symbols** (weekly 2y + daily 1y each), pacing budget accordingly (~90 symbols × 2 timeframes at ≥3 s/request ≈ 9–10 min minimum per full cycle; incremental daily tails are far cheaper).
+- D5 unchanged (50 completed cases before similarity drives signals); the Tier-4 100-case gate is additive.
+- Universe expansion under A1 is now concrete: if the library still falls short, add symbols from Tier 5 first (0.5× scoring), then reassess D7's 5-year backfill.
