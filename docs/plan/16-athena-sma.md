@@ -413,3 +413,18 @@ Aliases to normalize in the symbol master: `SQ` → `XYZ` (Block); `SNDK/STX/WDC
 
 - No new SMA code, no new tables, no new Iris nodes, no IBKR changes — those are S1+.
 - No `eval-v1` re-run, no N3 changes, no N4.
+
+---
+
+## 17. S0a delivery record (2026-11-28, `C-20261128-5`)
+
+**Status**: ✅ S0a shipped on `strategy/sma20-sma50-crossover`. Strategy 3 shadow fully removed; zero strategy3 / s3-shadow references remain in production or test code.
+
+| Item | Result |
+|---|---|
+| Removed | `packages/strategy-nfr/src/athena_strategy/strategy3.py` (658 lines, `s3-shadow-v1`); Iris nodes `weekly_sma` / `strategy_3`, edges `daily-weekly` / `weekly-strategy3` / `strategy3-drafts`, snapshot keys `strategy3_week/candidates/scanned`, the shadow half of `_p4_recompute`, and its two node-state lines |
+| Kept | P4 plumbing `trading_calendar.py` / `gap_audit.py` / `weekly.py`; `_p4_recompute` reduced to a **read-only daily gap audit** (market_bars only); `daily_gap_*` keys + header note; `GRAPH_VERSION` unchanged (`iris-p2-events-v1`); SSE/Iris fabric, drafts/approvals/orders, canonical news untouched |
+| Tests | `test_strategy3_p4.py` split → `test_sma_plumbing_p4.py` keeps 21 plumbing tests verbatim (calendar/gap/weekly classes), drops shadow truth-table + Iris-wiring classes; `test_iris_p1.py` drops 2 node-state assertions |
+| Verification | Full suite **1026/1026 OK (skipped=2)** — honest delta −29 (= removed strategy behavior, no hidden failures); compileall OK; `uv lock --check` 29 packages; `git diff --check` clean; wheel (`athena_strategy_nfr`) contains no `strategy3` and still includes the 3 kept plumbing modules; zero `strategy3` / `s3-shadow` / `strategy3_*` references in `apps/` + `packages/` |
+| Rollback | `git revert <sha>` restores module + Iris wiring + tests; no migration involved |
+| Next | **S0b** — DSH / news strategy analysis / AI news coupling removal per §16.2 |

@@ -293,8 +293,6 @@ class TestIrisStaticGraph(unittest.TestCase):
         self.assertEqual(states["price_location"][0], "unknown")
         self.assertEqual(states["realized_vol"][0], "unknown")
         self.assertEqual(states["premium_ratio"][0], "unknown")
-        self.assertEqual(states["weekly_sma"][0], "shadow")
-        self.assertEqual(states["strategy_3"][0], "shadow")
         self.assertEqual(states["strategy_1"][0], "configured")
         self.assertEqual(states["strategy_2"][0], "configured")
         self.assertEqual(states["drafts"][0], "idle")

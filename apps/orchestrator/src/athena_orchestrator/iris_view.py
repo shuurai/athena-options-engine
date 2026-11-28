@@ -24,7 +24,6 @@ from html import escape
 from zoneinfo import ZoneInfo
 
 from athena_strategy.gap_audit import STATE_COMPLETE, STATE_PARTIAL, STATE_UNKNOWN, audit_daily
-from athena_strategy.strategy3 import shadow_history
 from athena_store import news_read
 
 GRAPH_VERSION = "iris-p2-events-v1"
@@ -33,7 +32,6 @@ _ET = ZoneInfo("America/New_York")
 
 # SPX is read under its own symbol; SPY is an ETF and is deliberately not
 # accepted as an SPX proxy without a ruling (§28.3 R4).
-_SPX_SYMBOLS = ("SPX", "^SPX", "I:SPX")
 
 
 @dataclass(frozen=True)
@@ -70,10 +68,8 @@ NODES: tuple[Node, ...] = (
     Node("regime_context", "Regime context", 320, 390, column="factor"),
     Node("premium_ratio", "Premium ratio rank", 320, 470, column="factor"),
     Node("advisor_score", "Advisor score", 320, 550, column="factor"),
-    Node("weekly_sma", "Weekly SMA20 / SMA50", 320, 630, column="factor"),
     Node("strategy_1", "V2-S1 · NFR Wheel", 610, 190, column="strategy"),
     Node("strategy_2", "V2-S2 · Advisor / Manage", 610, 370, column="strategy"),
-    Node("strategy_3", "V2-S3 · SMA Hill Retest", 610, 550, column="strategy"),
     Node("drafts", "Existing drafts", 900, 190, column="action"),
     Node("approval", "Human approval", 900, 330, column="action"),
     Node("orders", "Orders / fills", 900, 470, column="action"),
@@ -96,11 +92,8 @@ EDGES: tuple[Edge, ...] = (
     Edge("premium-advisor", "premium_ratio", "strategy_2", "factor"),
     Edge("positions-score", "positions", "advisor_score", "data"),
     Edge("score-advisor", "advisor_score", "strategy_2", "factor"),
-    Edge("daily-weekly", "daily_bars", "weekly_sma", "data"),
-    Edge("weekly-strategy3", "weekly_sma", "strategy_3", "shadow"),
     Edge("strategy1-drafts", "strategy_1", "drafts", "action"),
     Edge("strategy2-drafts", "strategy_2", "drafts", "action"),
-    Edge("strategy3-drafts", "strategy_3", "drafts", "shadow"),
     Edge("drafts-approval", "drafts", "approval", "approval"),
     Edge("approval-orders", "approval", "orders", "execution"),
     Edge("direct-orders", "operator_direct", "orders", "direct"),
@@ -125,20 +118,15 @@ def _et_today():
 
 
 def _p4_recompute(conn, settings) -> dict:
-    """V2-P4 read-only recompute: daily gap audit + Strategy 3 shadow summary.
+    """Read-only daily gap audit (S0a: Strategy 3 shadow removed).
 
-    Reads ``market_bars`` / ``calendar_marks`` only, writes nothing, and runs
-    with ``adjustment_basis=None`` because no adjusted-close producer exists
-    (§28.3 R3) — every shadow week therefore honestly reports ``no_data``.
-    The pure modules stay fully exercised by their own fixtures.
+    Reads ``market_bars`` only, writes nothing. S0b+ will rebuild this into
+    the SMA case engine; the P4 gap-audit plumbing is deliberately kept.
     """
     empty = {
         "daily_gap_state": STATE_UNKNOWN,
         "daily_gap_count": 0,
         "daily_gap_symbols": 0,
-        "strategy3_week": "unknown",
-        "strategy3_candidates": 0,
-        "strategy3_scanned": 0,
     }
     rows = conn.execute(
         "SELECT symbol, ts::date, open, high, low, close, volume "
@@ -155,58 +143,12 @@ def _p4_recompute(conn, settings) -> dict:
     symbols = sorted(
         set(watchlist) & set(by_symbol) if watchlist else sorted(by_symbol)
     )
-    spx_closes = conn.execute(
-        "SELECT ts::date, close FROM market_bars "
-        "WHERE symbol = ANY(%s) AND source = 'ib-daily' ORDER BY ts",
-        (list(_SPX_SYMBOLS),),
-    ).fetchall()
-    vix_closes = conn.execute(
-        "SELECT ts::date, close FROM market_bars "
-        "WHERE symbol = 'VIX' AND source IN ('ib-daily', 'ib-vix') ORDER BY ts"
-    ).fetchall()
-    earnings_count = int(
-        _scalar(conn, "SELECT count(*) FROM calendar_marks WHERE kind = 'EARNINGS'")
-    )
-    earnings_rows = (
-        conn.execute(
-            "SELECT symbol, event_date FROM calendar_marks WHERE kind = 'EARNINGS'"
-        ).fetchall()
-        if earnings_count
-        else []
-    )
-    earnings_by_symbol: dict[str, set] = {}
-    for symbol, event_day in earnings_rows:
-        earnings_by_symbol.setdefault(str(symbol).upper(), set()).add(event_day)
-
     today = _et_today()
     audits = []
-    candidates = 0
-    weeks = []
-    scanned = 0
     for symbol in symbols:
         daily = by_symbol[symbol]
         audit = audit_daily(symbol, [(d, v) for d, *_rest, v in daily], as_of=today)
         audits.append(audit)
-        if audit.state == STATE_UNKNOWN:
-            continue
-        scanned += 1
-        records = shadow_history(
-            symbol,
-            daily,
-            as_of=today,
-            adjustment_basis=None,
-            spx_closes=spx_closes,
-            vix_closes=vix_closes,
-            spx_available=bool(spx_closes),
-            vix_available=bool(vix_closes),
-            earnings_days=frozenset(earnings_by_symbol.get(symbol, ())),
-            earnings_available=earnings_count > 0,
-        )
-        if records:
-            last = records[-1]
-            weeks.append(last.as_of_week)
-            if last.outcome == "candidate":
-                candidates += 1
     states = {a.state for a in audits} - {STATE_UNKNOWN}
     if not states:
         return empty
@@ -214,9 +156,6 @@ def _p4_recompute(conn, settings) -> dict:
         "daily_gap_state": STATE_PARTIAL if STATE_PARTIAL in states else STATE_COMPLETE,
         "daily_gap_count": sum(len(a.gaps) for a in audits),
         "daily_gap_symbols": len(audits),
-        "strategy3_week": max(weeks) if weeks else "unknown",
-        "strategy3_candidates": candidates,
-        "strategy3_scanned": scanned,
     }
 
 
@@ -408,18 +347,8 @@ def _node_states(snap: dict) -> dict[str, tuple[str, str]]:
             "ready" if snap["advisor_rows"] else "unknown",
             f"{snap['advisor_rows']} today signals",
         ),
-        "weekly_sma": (
-            "shadow",
-            "sma20/sma50 on completed weeks (V2-P4, shadow only)",
-        ),
         "strategy_1": ("configured", "current opening path"),
         "strategy_2": ("configured", "current management path"),
-        "strategy_3": (
-            "shadow",
-            f"last complete week {snap['strategy3_week']}: "
-            f"{snap['strategy3_candidates']} candidate(s) across "
-            f"{snap['strategy3_scanned']} symbol(s); zero drafts (P5/P6 pending)",
-        ),
         "drafts": (
             "ready" if snap["pending"] else "idle",
             f"{snap['pending']} pending",

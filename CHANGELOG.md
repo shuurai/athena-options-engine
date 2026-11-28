@@ -168,3 +168,4 @@ Machine check: `node scripts/check-changelog.mjs` (index ↔ log must close both
 | 2026-11-28 | Approve booklet 16 rulings D1-D8 and universe-expansion amendment | [C-20261128-2](logs/2026-11-28.md#c-20261128-2) |
 | 2026-11-28 | Add operator ticker universe tiers and loading rules to booklet 16 | [C-20261128-3](logs/2026-11-28.md#c-20261128-3) |
 | 2026-11-28 | Freeze S0 removal contract (booklet 16 §16, batches S0a-S0e) | [C-20261128-4](logs/2026-11-28.md#c-20261128-4) |
+| 2026-11-28 | Implement S0a: remove Strategy 3 shadow, keep P4 plumbing | [C-20261128-5](logs/2026-11-28.md#c-20261128-5) |
