@@ -1,6 +1,6 @@
 # 16 — Athena SMA: Single-Strategy Simplification Proposal
 
-**Status**: PROPOSAL / awaiting operator ruling. This booklet plans only; it authorizes **zero implementation, zero migrations, zero deletions** until the operator approves §11 decision points and the phased order in §12.
+**Status**: **APPROVED (2026-11-28, operator ruling)** — D1–D8 all at recommended defaults + operator amendment A1 (§14). Approval authorizes the phased order in §12, each phase still with its own contract → implementation → verification → independent commit/rollback. Nothing in this record is itself an implementation batch. This booklet plans only; it authorizes **zero implementation, zero migrations, zero deletions** until the operator approves §11 decision points and the phased order in §12.
 **Evidence cut**: 2026-11-28, code baseline `21fb6de` (branch `strategy/sma20-sma50-crossover`), booklets 00–15 as current truth.
 **Operator directive (2026-11-28)**: Athena has become too complicated — too many strategies, too many distractions. Keep the foundation (Iris, event stream, drafts/approvals, IBKR plumbing, news lens, togglable configs, account controls), remove everything strategy-related that is not the weekly SMA strategy, and rebuild around one machine: **case library → frame comparison → forecast → trade request → approval**.
 **Supersedes (upon approval)**: booklet 15's Strategy 3 frozen subset (§22.3 / `s3-shadow-v1`) and its `eval-v1` go/no-go gate. They remain as historical verbatim records; the strategy defined here is a **new contract**, not an amendment smuggled into the old one. N3 canonical news read model (activated `C-20261126-1`) is **kept** — news stays as an information lens only.
@@ -316,3 +316,26 @@ Hard rules carried forward: no look-ahead (entry = next open / futures never lea
 ---
 
 *Product design reference; confirm implementation details against compliance and operational requirements before execution.*
+
+---
+
+## 14. Approval record (2026-11-28, `C-20261128-2`)
+
+### 14.1 Ruling
+
+Operator: **"Use recommendations and we will just find more stocks suitable to build cases library."**
+
+- **D1–D8: all approved at recommended defaults** (§11): short stock instrument with borrow gates; TRIGGERED frame anchor (SETUP fallback); GTC limit at pullback level with per-request market fallback; 1% NAV per-signal heat with MAE-derived stop; similarity silent below 50 completed cases (`insufficient_library`); Guardian kept as pure monitor; 2-year history first; old `eval-v1` / `s3-shadow-v1` retired by this approval.
+- **Amendment A1 (universe expansion for cold start)**: when the completed-case count falls short of D5's 50-case gate, the remedy is **expanding the universe with more suitable symbols** (per §2.4 gates), not lowering the gate and not silently loosening suitability. D7's 5-year backfill remains available as a secondary remedy, but universe expansion is tried first. Universe additions are data-layer work inside S1/S2, each recorded with its suitability verdicts.
+
+### 14.2 What this approval authorizes
+
+1. **S0 simplification** may begin: removal contracts (§4) then implementation batches, on branch `strategy/sma20-sma50-crossover`.
+2. Booklet 15's Strategy 3 frozen subset (`§22.3`, `s3-shadow-v1`) and `eval-v1` are **retired as forward contracts**; their records stay verbatim as history. `strategy3.py` and its Iris nodes are removed in S0, not amended.
+3. Kept foundations are not negotiable: canonical news read model, SSE/Iris fabric, drafts/approvals/orders, account controls, settings toggles, P4 strategy-agnostic plumbing (calendar / gap audit / weekly aggregation).
+
+### 14.3 What it does not authorize
+
+- No migration numbers pre-allocated; new tables only with their own S-phase contracts.
+- No orders without approval; no engine/7799 restarts as a side effect of documentation batches.
+- No deletion of `news_events` (N4 remains a separate, unmade ruling).
