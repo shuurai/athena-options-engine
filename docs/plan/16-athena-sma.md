@@ -375,3 +375,41 @@ Aliases to normalize in the symbol master: `SQ` → `XYZ` (Block); `SNDK/STX/WDC
 - S1 (data layer) sizes its IBKR pull for **~70 active + ~18 watch-only symbols** (weekly 2y + daily 1y each), pacing budget accordingly (~90 symbols × 2 timeframes at ≥3 s/request ≈ 9–10 min minimum per full cycle; incremental daily tails are far cheaper).
 - D5 unchanged (50 completed cases before similarity drives signals); the Tier-4 100-case gate is additive.
 - Universe expansion under A1 is now concrete: if the library still falls short, add symbols from Tier 5 first (0.5× scoring), then reassess D7's 5-year backfill.
+
+---
+
+## 16. S0 removal contract (2026-11-28, `C-20261128-4`)
+
+**Status**: frozen for execution. Every batch below is **contract → implementation → verification → independent commit/rollback**. No batch deletes data/tables; no batch restarts 7799/engine; no batch changes the canonical news read model.
+
+### 16.1 Evidence (read-only survey, 2026-11-28)
+
+- `packages/strategy-nfr/src/athena_strategy/`: 30 modules, ~10,956 lines. Strategy core = `agents.py`(1255) / `drafts.py`(2150) / `wheel.py`(1007) / `news.py`(620) / `dsh.py`(528) / `indicators.py`(515) / `manage.py`(508) / `advisor.py`(452) / `strategy3.py`(658) / `forecast.py` / `phases.py` / `budget.py` / `screener.py` / `iv.py` / `mock.py` / `simbars.py` / `pool.py` / `regime.py` / `screener.py` / `tags.py` / `types.py` / `classifiers.py` / `legacy_tactics.py` / `draft_facts.py` / `price.py` / `schemas.py` / `simbars.py`.
+- **Keep (strategy-agnostic)**: `trading_calendar.py`(134), `gap_audit.py`(149), `weekly.py`(99) — explicitly kept in §1.4. `weekly.py` imports only `trading_calendar`.
+- **Keep (approval base)**: `drafts.py` — `decide()` / `amend_view()` / `apply_amend()` / `expire_pending()` / `issue_link()` / `use_link()` are the approval/order gate reused by §7.3. Its wheel-tactic / option-plan / IV-rank internals are removed **inside S0d** as a surgical edit, not by deleting the module.
+- **Main couplings**: `paper.py:run_paper_cycle()` imports `evaluate_watchlist`, `run_observe`, `run_signaled`, `slot_split_enabled`, `record_iv_marks`, `prepare_mock_orders`, `apply_cycle_budget`, `manage_book`, `ingest_news`; `loop.py` installs `dsh.set_score_listener`; `pages.py` has ~30 strategy imports and 22 GET routes; `console.py`/`guardian_view.py` import `advisor.today_signals`; `cockpit.py` imports `iv_rank`; `pulse.py`/`pages.py` import `simbars`; `telegram.py` imports `decide`, `draft_facts`, `news.store_manual`.
+- **Strategy 3 shadow is fully isolated** to `strategy3.py`, `iris_view.py` (import + 2 nodes + 3 edges + 3 snapshot keys + `_p4_recompute` half + node state lines), and `test_strategy3_p4.py` (its last 2 of 5 test classes). ⇒ chosen as S0a (safest first).
+
+### 16.2 Batch order (leaf → core → UI → acceptance)
+
+| Batch | Scope | Key files | Verification gate |
+|---|---|---|---|
+| **S0a** | Remove Strategy 3 shadow | `strategy3.py` delete; `iris_view.py` surgical (remove `shadow_history` import, nodes `weekly_sma`/`strategy_3`, edges, `strategy3_*` keys, `_p4_recompute` shadow half, node-state lines); **split** `test_strategy3_p4.py` → `test_sma_plumbing_p4.py` keeps the 3 plumbing classes verbatim (calendar/gap/weekly), drops shadow + Iris-wiring classes; update `test_iris_p1.py` node/edge assertions | Full suite green with honest count delta; zero `strategy3` refs; zero `s3-shadow` refs |
+| **S0b** | News strategy analysis / DSH / AI news coupling | `dsh.py` delete; `news.py` keep CRUD/dismiss (`ingest_url`, `store_manual`, `dismiss_event`) + drop wash/ingest strategy inputs; `loop.py` drop `set_score_listener`; settings `NewsSettings` strategy knobs (wash/earnings/sentiment) removed; AI news-analysis code path removed (AI kept only for §5.3 later) | News page + canonical read model unchanged; `news_read` AST suite green; no DSH refs |
+| **S0c** | Wheel / options strategy engine + cycle simplification | delete `agents.py`, `wheel.py`, `phases.py`, `screener.py`, `indicators.py`, `iv.py`, `budget.py`, `manage.py`, `mock.py`, `simbars.py`, `forecast.py`, `advisor.py`, `legacy_tactics.py`, `screener.py`; **rewrite** `paper.py` into a data/monitor cycle (accounts → bars → drafts expiry → backup; no strategy emits), `loop.py` to match; strip `pulse.py`, `sim.py`, `cockpit.py`, `guardian_view.py`, `telegram.py` strategy calls; remove pages routes `/simulation /phase /volatility /audit /prediction /orchestration /strategy` (+ their POSTs) and their render functions; **keep** `/drafts /news /universe /history /history.csv /positions /orders /book /guard /iris /portfolio-analysis /accounts /risk /settings /skill`, `strategy_events` SSE, drafts rail | Zero strategy imports in loop/paper/pulse; route smoke on kept pages; drafts approve/amend/reject + account isolation regression; no orders without approval |
+| **S0d** | Settings + risk surface | remove `StrategySettings`, `AdvisorSettings`, option/IV/DTE/tactic flags, `NewsSettings` remaining strategy knobs; **keep** account controls, watchlist, ib, notify, retain_local_days and any toggle framework; add per-account SMA strategy toggle + SMA risk fields only in S5 (not now); surgical trim of `drafts.py` internals | Settings load/seed/persist round-trip; `test_settings_layout` aligned; payload migration with its own contract |
+| **S0e** | Zero-strategy acceptance | debt register of orphan tables (`iv_marks`, `chain_marks`, `option_plans`, `option_choices`, `mock_signals`, `advisor_signals`, …) — **no table drops**; final audit | Full suite green; `grep` proves no strategy modules imported from live cycle; Iris has no strategy nodes; ledger + memory |
+
+### 16.3 Invariants for every batch
+
+1. Canonical news (`news_read.SOURCE = CANONICAL`) untouched; `news_events` never deleted (N4 still unmade).
+2. `strategy_events` + SSE + Iris event animation untouched (the live-update fabric for §5/§6).
+3. Unified drafts / approvals / orders, `decide()` gate, account isolation untouched.
+4. No migration / no table drops in S0; orphaned tables listed, not deleted.
+5. Honest test-count deltas (removed tests = removed behavior, not hidden failures); every batch records `git diff --check`, ledger machine check, wheel.
+6. Booklet 15 §29–§33 history verbatim; S0 supersedes the *forward* contracts only.
+
+### 16.4 What S0 explicitly does NOT do
+
+- No new SMA code, no new tables, no new Iris nodes, no IBKR changes — those are S1+.
+- No `eval-v1` re-run, no N3 changes, no N4.
